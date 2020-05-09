@@ -97,7 +97,7 @@ impl<'a, F: Fn() -> C, T: DeserializeOwned, C: SyncStreamCipher> CborZstdArrayRe
     }
 }
 
-/// A builder that can be used to incrementally add items that are immediately incrementally
+/// A builder that can be used to add items that are immediately incrementally
 /// encoded, compressed and encrypted using a stream cipher.
 ///
 /// The encoded data can be persisted at any time, even before sealing.
@@ -273,6 +273,41 @@ mod tests {
     }
 
     #[test]
+    fn incremental_decode_test() {
+        let mut target = Vec::<u8>::new();
+        for x in 0..100 {
+            serde_cbor::to_writer(&mut target, &x.to_string()).unwrap();
+        }
+        let r = Reader::new(&target);
+        loop {
+            let mut deserializer = serde_cbor::Deserializer::from_reader(r.clone());
+            let res: std::result::Result<String, _> = serde::de::Deserialize::deserialize(&mut deserializer);
+            if res.is_err() {
+                break;
+            }
+            println!("{}", res.unwrap());
+        }
+    }
+
+    use std::sync::Mutex;
+    use std::sync::Arc;
+
+    #[derive(Debug, Clone)]
+    struct Reader<'a>(Arc<Mutex<Cursor<&'a [u8]>>>);
+
+    impl<'a> Reader<'a> {
+        fn new(data: &'a [u8]) -> Self {
+            Self(Arc::new(Mutex::new(Cursor::new(data))))
+        }
+    }
+
+    impl<'a> std::io::Read for Reader<'a> {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().read(buf)
+        }
+    }
+
+    #[test]
     fn roundtrip() -> Result<(), Box<dyn std::error::Error>> {
         let cipher = test_cipher();
         let mut buffer: CborZstdArrayBuilder<Salsa20, u64> = CborZstdArrayBuilder::new(cipher, 10)?;
@@ -395,7 +430,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         serde_cbor::to_writer(writer, &value).unwrap();
     }
     tgt.push(CBOR_BREAK);
-
+    
     let res: Vec<Test> = serde_cbor::from_slice(&tgt)?;
     println!("CBOR {:?}", res);
 
