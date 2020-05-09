@@ -28,6 +28,7 @@ checksum = "4785bdd1c96b2a846b2bd7cc02e86b6b3dbf14e7e53446c4f54c92a361040822"
 name = "czaa"
 version = "0.1.0"
 dependencies = [
+ "derive_more",
  "hex",
  "quickcheck",
  "salsa20",
@@ -35,6 +36,17 @@ dependencies = [
  "serde_cbor",
  "stream-cipher",
  "zstd",
+]
+
+[[package]]
+name = "derive_more"
+version = "0.99.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e2323f3f47db9a0e77ce7a300605d8d2098597fc451ed1a97bb1f6411bb550a7"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]

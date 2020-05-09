@@ -1,26 +1,122 @@
-use zstd::stream::raw::{Encoder as ZEncoder, Decoder as ZDecoder, InBuffer, OutBuffer, Operation};
-use serde::{Serialize, Deserialize, de::DeserializeOwned};
-use std::io::{SeekFrom, Cursor, Write};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::io::prelude::*;
-use stream_cipher::SyncStreamCipher;
+use std::io::{Cursor, SeekFrom, Write};
 use std::marker::PhantomData;
+use stream_cipher::SyncStreamCipher;
+use zstd::stream::raw::{Decoder as ZDecoder, Encoder as ZEncoder, InBuffer, Operation, OutBuffer};
 
 #[derive(Serialize, Deserialize, Debug)]
 struct Test {
     inner: u32,
 }
 
-pub struct CborZstdArrayBuilder<C, T> {    
+pub struct CborZstdArray<F, T> {
+    data: Vec<u8>,
+    sealed: bool,
+    mk_cipher: F,
+    _t: PhantomData<T>,
+}
+
+impl<F: Fn() -> C + Clone, T: DeserializeOwned, C: SyncStreamCipher> CborZstdArray<F, T> {
+    pub fn new(mk_cipher: F, data: Vec<u8>, sealed: bool) -> Self {
+        Self {
+            data,
+            mk_cipher,
+            sealed,
+            _t: PhantomData,
+        }
+    }
+
+    pub fn as_ref<'a>(&'a self) -> CborZstdArrayRef<'a, F, T> {
+        CborZstdArrayRef {
+            data: &self.data,
+            mk_cipher: self.mk_cipher.clone(),
+            sealed: self.sealed,
+            _t: PhantomData,
+        }
+    }
+}
+
+pub struct CborZstdArrayRef<'a, F, T> {
+    data: &'a [u8],
+    sealed: bool,
+    mk_cipher: F,
+    _t: PhantomData<T>,
+}
+
+impl<'a, F: Fn() -> C, T: DeserializeOwned, C: SyncStreamCipher> CborZstdArrayRef<'a, F, T> {
+    pub fn new(mk_cipher: F, data: &'a [u8], sealed: bool) -> Self {
+        Self {
+            data,
+            mk_cipher,
+            sealed,
+            _t: PhantomData,
+        }
+    }
+
+    pub fn data(&self) -> &[u8] {
+        self.data
+    }
+
+    pub fn sealed(&self) -> bool {
+        self.sealed
+    }
+
+    pub fn items(&self) -> std::io::Result<Vec<T>> {
+        let mut cipher = (self.mk_cipher)();
+        // todo: avoid cloning the whole thing, but have a buffer for stream apply and decompression source
+        let mut data = self.data.to_vec();
+        cipher.apply_keystream(&mut data);
+        let mut src = InBuffer::around(&data);
+        let mut tmp = [0u8; 4096];
+        let mut decompressor = ZDecoder::new()?;
+        let mut uncompressed = Vec::<u8>::new();
+        // decompress until input is consumed
+        loop {
+            let mut out: OutBuffer = OutBuffer::around(&mut tmp);
+            let _ = decompressor.run(&mut src, &mut out)?;
+            let n = out.pos;
+            uncompressed.extend_from_slice(&tmp[..n]);
+            if src.pos == src.src.len() {
+                break;
+            }
+        }
+        loop {
+            let mut out: OutBuffer = OutBuffer::around(&mut tmp);
+            let remaining = decompressor.flush(&mut out)?;
+            let n = out.pos;
+            uncompressed.extend_from_slice(&tmp[..n]);
+            if remaining == 0 {
+                break;
+            }
+        }
+        if !self.sealed {
+            uncompressed.push(CBOR_BREAK);
+        }
+        Ok(serde_cbor::from_slice(&uncompressed).unwrap())
+    }
+}
+
+/// A builder that can be used to incrementally add items that are immediately incrementally
+/// encoded, compressed and encrypted using a stream cipher.
+///
+/// The encoded data can be persisted at any time, even before sealing.
+///
+/// This is a relatively heavy data structure, since it contains a zstd compression context
+/// as well as a stream cipher.
+pub struct CborZstdArrayBuilder<C, T> {
     cbor_buffer: Vec<u8>,
-    cipher_buffer: [u8;4096],
+    cipher_buffer: [u8; 4096],
     data: Vec<u8>,
     encoder: ZEncoder,
     cipher: C,
     _t: PhantomData<T>,
 }
 
-enum WriteMode {
-    Flush, Finish    
+pub enum WriteMode {
+    None,
+    Flush,
+    Finish,
 }
 
 impl<C: SyncStreamCipher, T: Serialize> CborZstdArrayBuilder<C, T> {
@@ -35,6 +131,12 @@ impl<C: SyncStreamCipher, T: Serialize> CborZstdArrayBuilder<C, T> {
         })
     }
 
+    pub fn data<'a, F: Fn() -> C>(&'a self, f: F) -> CborZstdArrayRef<'a, F, T>
+        where T: DeserializeOwned
+    {
+        CborZstdArrayRef::new(f, self.data.as_ref(), false)
+    }
+
     pub fn is_empty(&self) -> bool {
         self.data.is_empty()
     }
@@ -43,7 +145,18 @@ impl<C: SyncStreamCipher, T: Serialize> CborZstdArrayBuilder<C, T> {
         let writer = self.get_cbor_cursor()?;
         // write CBOR
         serde_cbor::to_writer(writer, &value).expect("CBOR encoding should not fail!");
-        self.compress_and_encrypt(WriteMode::Flush)?;
+        self.write_cbor_buffer()?;
+        self.flush()?;
+        Ok(self)
+    }
+
+    pub fn push_items<I: IntoIterator<Item=T>>(mut self, elems: I) -> std::io::Result<Self> {
+        for item in elems.into_iter() {
+            let writer = self.get_cbor_cursor()?;
+            serde_cbor::to_writer(writer,&item).expect("CBOR encoding should not fail!");
+            self.write_cbor_buffer()?;
+        }
+        self.flush()?;
         Ok(self)
     }
 
@@ -66,16 +179,15 @@ impl<C: SyncStreamCipher, T: Serialize> CborZstdArrayBuilder<C, T> {
         Ok(writer)
     }
 
-    /// Compress and encrypt the content of the cbor buffer
-    fn compress_and_encrypt(&mut self, mode: WriteMode) -> std::io::Result<()> {
+    fn write_cbor_buffer(&mut self) -> std::io::Result<()> {
         let mut src = InBuffer::around(&self.cbor_buffer);
         // encode until input is consumed
         loop {
             let mut out: OutBuffer = OutBuffer::around(&mut self.cipher_buffer);
             // run encoder and move it forward
-            let _= self.encoder.run(&mut src, &mut out)?;
+            let _ = self.encoder.run(&mut src, &mut out)?;
             let n = out.pos;
-            // apply the cipher and move it forward            
+            // apply the cipher and move it forward
             self.cipher.apply_keystream(&mut self.cipher_buffer[..n]);
             // append to data
             self.data.extend_from_slice(&self.cipher_buffer[..n]);
@@ -84,16 +196,16 @@ impl<C: SyncStreamCipher, T: Serialize> CborZstdArrayBuilder<C, T> {
                 break;
             }
         }
-        // flush or finish
+        Ok(())
+    }
+
+    fn finish(&mut self, finished_frame: bool) -> std::io::Result<()> {
         loop {
             let mut out: OutBuffer = OutBuffer::around(&mut self.cipher_buffer);
-            // run encoder and move it forward
-            let remaining = match mode {
-                WriteMode::Flush => self.encoder.flush(&mut out)?,
-                WriteMode::Finish => self.encoder.finish(&mut out, true)?,
-            };
+            // flush the encoder
+            let remaining = self.encoder.finish(&mut out, finished_frame)?;
             let n = out.pos;
-            // apply the cipher and move it forward            
+            // apply the cipher and move it forward
             self.cipher.apply_keystream(&mut self.cipher_buffer[..n]);
             // append to data
             self.data.extend_from_slice(&self.cipher_buffer[..n]);
@@ -104,24 +216,53 @@ impl<C: SyncStreamCipher, T: Serialize> CborZstdArrayBuilder<C, T> {
         }
         Ok(())
     }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        loop {
+            let mut out: OutBuffer = OutBuffer::around(&mut self.cipher_buffer);
+            // flush the encoder
+            let remaining = self.encoder.flush(&mut out)?;
+            let n = out.pos;
+            // apply the cipher and move it forward
+            self.cipher.apply_keystream(&mut self.cipher_buffer[..n]);
+            // append to data
+            self.data.extend_from_slice(&self.cipher_buffer[..n]);
+            // break once everything is flushed
+            if remaining == 0 {
+                break;
+            }
+        }
+        Ok(())
+    }
+
+    /// Compress and encrypt the content of the cbor buffer
+    fn compress_and_encrypt(&mut self, mode: WriteMode) -> std::io::Result<()> {
+        self.write_cbor_buffer()?;
+        // flush or finish
+        match mode {
+            WriteMode::Flush => self.flush(),
+            WriteMode::Finish => self.finish(true),
+            WriteMode::None => Ok(()),
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use salsa20::Salsa20;
-    use stream_cipher::NewStreamCipher;    
     use serde::de::DeserializeOwned;
+    use stream_cipher::NewStreamCipher;
 
     /// create a test cipher
     fn test_cipher() -> Salsa20 {
-        let key = [0u8;32];
-        let nonce = [0u8;8];
+        let key = [0u8; 32];
+        let nonce = [0u8; 8];
         Salsa20::new(&key.into(), &nonce.into())
     }
-    
+
     /// decode a completed cbor/zstd/cipher block
-    fn test_decode<T:DeserializeOwned>(mut data: Vec<u8>) -> std::io::Result<Vec<T>> {
+    fn test_decode<T: DeserializeOwned>(mut data: Vec<u8>) -> std::io::Result<Vec<T>> {
         let mut cipher = test_cipher();
         // undo the cipher
         cipher.apply_keystream(&mut data);
@@ -136,12 +277,13 @@ mod tests {
         let cipher = test_cipher();
         let mut buffer: CborZstdArrayBuilder<Salsa20, u64> = CborZstdArrayBuilder::new(cipher, 10)?;
         let mut expected = Vec::<u64>::new();
-        for i in 0 .. 1000 {
+        for i in 0..1000 {
             println!("push {}", i);
             buffer = buffer.push(&i)?;
             expected.push(i);
-            let mut persisted = buffer.data.clone();
-            let actual = decode::<Salsa20, u64>(test_cipher(), &mut persisted, false)?;
+            let actual = buffer.data(|| test_cipher()).items()?;
+            // let mut persisted = buffer.data.clone();
+            // let actual = decode::<Salsa20, u64>(test_cipher(), &mut persisted, false)?;
             assert_eq!(actual, expected);
         }
         println!("seal");
@@ -159,12 +301,16 @@ mod tests {
 const CBOR_ARRAY_START: u8 = (4 << 5) | 31;
 const CBOR_BREAK: u8 = 255;
 
-fn decode<C: SyncStreamCipher, T: DeserializeOwned>(mut cipher: C, data: &mut [u8], sealed: bool) -> std::io::Result<Vec<T>> {
+fn decode<C: SyncStreamCipher, T: DeserializeOwned>(
+    mut cipher: C,
+    data: &mut [u8],
+    sealed: bool,
+) -> std::io::Result<Vec<T>> {
     cipher.apply_keystream(data);
     let mut src = InBuffer::around(&data);
-    let mut tmp = [0u8;4096];
+    let mut tmp = [0u8; 4096];
     let mut decompressor = ZDecoder::new()?;
-    let mut uncompressed= Vec::<u8>::new();
+    let mut uncompressed = Vec::<u8>::new();
     // decompress until input is consumed
     loop {
         let mut out: OutBuffer = OutBuffer::around(&mut tmp);
@@ -192,7 +338,7 @@ fn decode<C: SyncStreamCipher, T: DeserializeOwned>(mut cipher: C, data: &mut [u
 
 fn transform<O: Operation, W: Write>(encoder: &mut O, data: &[u8], mut w: W) -> std::io::Result<W> {
     let mut src = InBuffer::around(data);
-    let mut tmp = [0u8;1024];
+    let mut tmp = [0u8; 1024];
     // encode until input is consumed
     loop {
         let mut out: OutBuffer = OutBuffer::around(&mut tmp);
@@ -208,7 +354,7 @@ fn transform<O: Operation, W: Write>(encoder: &mut O, data: &[u8], mut w: W) -> 
 }
 
 fn flush<W: Write>(encoder: &mut ZEncoder, mut w: W) -> std::io::Result<W> {
-    let mut tmp = [0u8;1024];
+    let mut tmp = [0u8; 1024];
     // finish it
     loop {
         let mut out: OutBuffer = OutBuffer::around(&mut tmp);
@@ -224,7 +370,7 @@ fn flush<W: Write>(encoder: &mut ZEncoder, mut w: W) -> std::io::Result<W> {
 }
 
 fn finish<W: Write>(encoder: &mut ZEncoder, finished_frame: bool, mut w: W) -> std::io::Result<W> {
-    let mut tmp = [0u8;1024];
+    let mut tmp = [0u8; 1024];
     // finish it
     loop {
         let mut out: OutBuffer = OutBuffer::around(&mut tmp);
@@ -241,7 +387,7 @@ fn finish<W: Write>(encoder: &mut ZEncoder, finished_frame: bool, mut w: W) -> s
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut tgt: Vec<u8> = Vec::new();
-    tgt.push(CBOR_ARRAY_START);    
+    tgt.push(CBOR_ARRAY_START);
     for x in 0..10 {
         let value = Test { inner: x };
         let mut writer = Cursor::new(&mut tgt);
@@ -260,14 +406,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let tgt = transform(&mut encoder, b"ABCDEFGHABCDEFGHABCDEFGHABCDEFGH", tgt)?;
     let tgt = flush(&mut encoder, tgt)?;
     // let tgt = finish(&mut encoder, true, tgt)?;
-    println!("CBOR-ZSTD {:?}", tgt);   
+    println!("CBOR-ZSTD {:?}", tgt);
 
     let dec = zstd::decode_all(Cursor::new(tgt.clone()));
     println!("{:?}", dec);
 
     let mut decoder = ZDecoder::new()?;
     let decompressed: Vec<u8> = Vec::new();
-    let decompressed = transform(&mut decoder, &tgt, decompressed)?; 
+    let decompressed = transform(&mut decoder, &tgt, decompressed)?;
     println!("{:?}", decompressed);
 
     Ok(())
