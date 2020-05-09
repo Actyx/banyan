@@ -10,12 +10,10 @@ mod tree;
 const CBOR_ARRAY_START: u8 = (4 << 5) | 31;
 const CBOR_BREAK: u8 = 255;
 
-fn decode<C: SyncStreamCipher, T: DeserializeOwned>(
-    mut cipher: C,
+fn decode<T: DeserializeOwned>(
     data: &mut [u8],
-    sealed: bool,
 ) -> std::io::Result<Vec<T>> {
-    cipher.apply_keystream(data);
+    // cipher.apply_keystream(data);
     let mut src = InBuffer::around(&data);
     let mut tmp = [0u8; 4096];
     let mut decompressor = ZDecoder::new()?;
@@ -38,9 +36,6 @@ fn decode<C: SyncStreamCipher, T: DeserializeOwned>(
         if remaining == 0 {
             break;
         }
-    }
-    if !sealed {
-        uncompressed.push(CBOR_BREAK);
     }
     Ok(serde_cbor::from_slice(&uncompressed).unwrap())
 }

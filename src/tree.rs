@@ -4,7 +4,6 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::marker::PhantomData;
 use crate::czaa::CborZstdArray;
 use std::collections::HashMap;
-use stream_cipher::SyncStreamCipher;
 use salsa20::Salsa20;
 
 /// index for a block of n events
@@ -14,6 +13,8 @@ pub struct BlockIndex {
     offset: u64,
     // number of events
     count: u64,
+    // block is sealed
+    sealed: bool,
     // link to the block
     link: Cid,
 }
@@ -25,8 +26,10 @@ pub struct BranchIndex {
     offset: u64,
     // number of events
     count: u64,
+    // block is sealed
+    sealed: bool,
     // link to the branch node
-    link: Cid,
+    link: Cid,    
 }
 
 trait Store {
@@ -36,9 +39,9 @@ trait Store {
 
 pub struct Tree<T> {
     store: Box<dyn Store>,
-    level_x: HashMap<Cid, CborZstdArray<Salsa20, BranchIndex>>,
-    level_0: HashMap<Cid, CborZstdArray<Salsa20, BlockIndex>>,
-    leaf: HashMap<Cid, CborZstdArray<Salsa20, T>>,
+    level_x: HashMap<Cid, CborZstdArray<BranchIndex>>,
+    level_0: HashMap<Cid, CborZstdArray<BlockIndex>>,
+    leaf: HashMap<Cid, CborZstdArray<T>>,
     _t: PhantomData<T>,
 }
 
