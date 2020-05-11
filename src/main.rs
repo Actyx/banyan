@@ -5,15 +5,13 @@ use stream_cipher::SyncStreamCipher;
 use zstd::stream::raw::{Decoder as ZDecoder, Encoder as ZEncoder, InBuffer, Operation, OutBuffer};
 
 mod czaa;
-mod tree;
 mod test_tree;
+mod tree;
 
 const CBOR_ARRAY_START: u8 = (4 << 5) | 31;
 const CBOR_BREAK: u8 = 255;
 
-fn decode<T: DeserializeOwned>(
-    data: &mut [u8],
-) -> std::io::Result<Vec<T>> {
+fn decode<T: DeserializeOwned>(data: &mut [u8]) -> std::io::Result<Vec<T>> {
     // cipher.apply_keystream(data);
     let mut src = InBuffer::around(&data);
     let mut tmp = [0u8; 4096];

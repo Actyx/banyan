@@ -45,7 +45,6 @@ impl<'a, T> CborZstdArrayRef<'a, T> {
 }
 
 impl<'a, T: DeserializeOwned> CborZstdArrayRef<'a, T> {
-
     pub fn data(&self) -> &[u8] {
         self.data
     }
@@ -107,7 +106,6 @@ pub enum WriteMode {
 }
 
 impl<T: Serialize + DeserializeOwned> CborZstdArrayBuilder<T> {
-
     pub fn init(data: &[u8], level: i32) -> std::io::Result<Self> {
         let items = CborZstdArrayRef::<T>::new(data).items()?;
         let mut res = CborZstdArrayBuilder::new(level)?;
@@ -119,7 +117,6 @@ impl<T: Serialize + DeserializeOwned> CborZstdArrayBuilder<T> {
 }
 
 impl<T: Serialize> CborZstdArrayBuilder<T> {
-
     pub fn new(level: i32) -> std::io::Result<Self> {
         Ok(Self {
             cbor_buffer: Vec::new(),
@@ -319,10 +316,7 @@ mod tests {
 const CBOR_ARRAY_START: u8 = (4 << 5) | 31;
 const CBOR_BREAK: u8 = 255;
 
-fn decode<T: DeserializeOwned>(
-    data: &mut [u8],
-    sealed: bool,
-) -> std::io::Result<Vec<T>> {
+fn decode<T: DeserializeOwned>(data: &mut [u8], sealed: bool) -> std::io::Result<Vec<T>> {
     // cipher.apply_keystream(data);
     let mut src = InBuffer::around(&data);
     let mut tmp = [0u8; 4096];

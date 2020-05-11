@@ -1,12 +1,13 @@
-
-use futures::{future::BoxFuture};
-use serde::{de::DeserializeOwned, Serialize, Deserialize};
-use std::marker::PhantomData;
 use crate::czaa::*;
-use std::collections::HashMap;
+use futures::future::BoxFuture;
+use serde::{
+    de::{DeserializeOwned, IgnoredAny},
+    Deserialize, Serialize,
+};
+use std::marker::PhantomData;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Cid {}
+#[derive(Debug, Clone, Serialize, Deserialize, Hash)]
+pub struct Cid([u8; 32]);
 
 /// index for a block of n events
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -19,15 +20,41 @@ pub struct BlockIndex {
     cid: Cid,
 }
 
+const MAX_LEAF_SIZE: usize = 1 << 16;
+
+impl BlockIndex {
+    fn new(cid: Cid, data: &[u8]) -> Result<Self> {
+        let count = CborZstdArrayRef::<IgnoredAny>::new(data).items()?.len() as u64;
+        let sealed = data.len() > MAX_LEAF_SIZE;
+        Ok(Self { cid, count, sealed })
+    }
+}
+
 /// index for a branch node
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BranchIndex {
     // number of events
     count: u64,
+    // level of the tree node
+    level: u32,
     // block is sealed
     sealed: bool,
     // link to the branch node
     cid: Cid,
+}
+
+impl BranchIndex {
+    fn new(cid: Cid, data: &[u8], children: &[Index]) -> Self {
+        let count = children.iter().map(|c| c.count()).sum();
+        let level = children.iter().fold(1, |l, c| l.max(c.level() + 1));
+        let sealed = children.iter().all(|c| c.sealed()) && children.len() >= 16;
+        Self {
+            cid,
+            count,
+            level,
+            sealed,
+        }
+    }
 }
 
 /// index
@@ -56,6 +83,12 @@ impl Index {
             Index::Branch(x) => x.sealed,
         }
     }
+    fn level(&self) -> u32 {
+        match self {
+            Index::Block(x) => 0,
+            Index::Branch(x) => x.level,
+        }
+    }
 }
 
 pub trait Store {
@@ -64,13 +97,6 @@ pub trait Store {
 }
 
 type BoxStore = Box<dyn Store>;
-
-pub struct Tree<T> {
-    root: Cid,
-    store: Box<dyn Store>,
-    _t: PhantomData<T>,
-}
-
 type Error = Box<dyn std::error::Error + Send + Sync>;
 type Result<T> = std::result::Result<T, Error>;
 
@@ -82,10 +108,19 @@ struct Branch {
     children: Vec<Index>,
 }
 
-/// basic random access append only async tree
-impl<T: Serialize + DeserializeOwned> Tree<T> {        
+pub struct Tree<T> {
+    root: Option<Index>,
+    store: Box<dyn Store>,
+    _t: PhantomData<T>,
+}
 
-    async fn extend<X: Serialize + DeserializeOwned>(&self, cid: &Cid, item: &X) -> Result<Option<Cid>> {
+/// basic random access append only async tree
+impl<T: Serialize + DeserializeOwned> Tree<T> {
+    async fn extend<X: Serialize + DeserializeOwned>(
+        &self,
+        cid: &Cid,
+        item: &X,
+    ) -> Result<Option<Cid>> {
         let data = self.store.get(&cid).await?;
         let builder = CborZstdArrayBuilder::<X>::init(data, 10)?;
         let builder = builder.push(item)?;
@@ -115,6 +150,7 @@ impl<T: Serialize + DeserializeOwned> Tree<T> {
         let builder = builder.push(&value)?;
         let cid = self.store.put(builder.buffer()).await?;
         let index = Index::Branch(BranchIndex {
+            level: 1,
             count: value.count(),
             sealed: false,
             cid,
@@ -125,26 +161,33 @@ impl<T: Serialize + DeserializeOwned> Tree<T> {
     async fn load_branch(&self, index: BranchIndex) -> Result<Branch> {
         let bytes = self.store.get(&index.cid).await?;
         let children = CborZstdArrayRef::new(bytes).items()?;
-        Ok(Branch {
-            index,
-            children,
-        })
+        Ok(Branch { index, children })
     }
-    
-    async fn push_impl(&self, index: &mut Index, value: &T) -> Result<bool> {        
+
+    async fn push_impl(&self, index: &mut Index, value: &T) -> Result<bool> {
         unimplemented!()
+    }
+
+    async fn single(&self, value: &T) -> Result<Index> {
+        let bytes = CborZstdArrayBuilder::new(10)?.push(value)?;
+        let cid = self.store.put(bytes.buffer()).await?;
+        Ok(Index::Block(BlockIndex {
+            cid,
+            count: 1,
+            sealed: false,
+        }))
+    }
+
+    fn is_empty(&self) -> bool {
+        self.root.is_none()
     }
 
     /// append an element
     pub async fn push(&mut self, value: &T) -> Result<()> {
-        let mut this = Branch::new(self.store.get(&self.root).await?)?;        
-        let index = if root.children.is_empty() {
-            self.single_leaf(&value).await?
+        if self.is_empty() {
+            self.root = Some(self.single(value).await?);
         } else {
-            unimplemented!()
-        };
-        root.children.push(index);
-        // root.push(value, self.store)?;
+        }
         Ok(())
     }
 
@@ -153,23 +196,18 @@ impl<T: Serialize + DeserializeOwned> Tree<T> {
         Ok(None)
     }
 
-    /// creates a new, empty tree
-    pub async fn new(store: Box<dyn Store>) -> Result<Self> {
-        let empty_hash = store.put(&[]).await?;
-        Ok(Self {
-            store,
-            root: empty_hash,
-            _t: PhantomData
-        })
+    /// creates a new tree
+    pub fn new(store: Box<dyn Store>) -> Self {
+        Self::load(store, None)
     }
 
     /// loads the tree from the store, given a secret and a root cid
-    pub async fn load(store: Box<dyn Store>, root: Cid) -> Result<Self> {
-        Ok(Self {
+    pub fn load(store: Box<dyn Store>, root: Option<Index>) -> Self {
+        Self {
             store,
             root,
-            _t: PhantomData
-        })
+            _t: PhantomData,
+        }
     }
 
     /// saves the tree in the store
