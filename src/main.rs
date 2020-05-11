@@ -6,6 +6,7 @@ use zstd::stream::raw::{Decoder as ZDecoder, Encoder as ZEncoder, InBuffer, Oper
 
 mod czaa;
 mod tree;
+mod test_tree;
 
 const CBOR_ARRAY_START: u8 = (4 << 5) | 31;
 const CBOR_BREAK: u8 = 255;

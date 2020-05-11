@@ -35,13 +35,16 @@ pub struct CborZstdArrayRef<'a, T> {
     _t: PhantomData<T>,
 }
 
-impl<'a, T: DeserializeOwned> CborZstdArrayRef<'a, T> {
+impl<'a, T> CborZstdArrayRef<'a, T> {
     pub fn new(data: &'a [u8]) -> Self {
         Self {
             data,
             _t: PhantomData,
         }
     }
+}
+
+impl<'a, T: DeserializeOwned> CborZstdArrayRef<'a, T> {
 
     pub fn data(&self) -> &[u8] {
         self.data
@@ -93,6 +96,7 @@ pub struct CborZstdArrayBuilder<T> {
     cipher_buffer: [u8; 4096],
     data: Vec<u8>,
     encoder: ZEncoder,
+    len: u64,
     _t: PhantomData<T>,
 }
 
@@ -102,15 +106,37 @@ pub enum WriteMode {
     Finish,
 }
 
+impl<T: Serialize + DeserializeOwned> CborZstdArrayBuilder<T> {
+
+    pub fn init(data: &[u8], level: i32) -> std::io::Result<Self> {
+        let items = CborZstdArrayRef::<T>::new(data).items()?;
+        let mut res = CborZstdArrayBuilder::new(level)?;
+        for item in items.iter() {
+            res = res.push(item)?;
+        }
+        Ok(res)
+    }
+}
+
 impl<T: Serialize> CborZstdArrayBuilder<T> {
+
     pub fn new(level: i32) -> std::io::Result<Self> {
         Ok(Self {
             cbor_buffer: Vec::new(),
             cipher_buffer: [0; 4096],
             data: Vec::new(),
             encoder: ZEncoder::new(level)?,
+            len: 0,
             _t: PhantomData,
         })
+    }
+
+    pub fn len(&self) -> u64 {
+        self.len
+    }
+
+    pub fn buffer(&self) -> &[u8] {
+        &self.data
     }
 
     pub fn data<'a>(&'a self) -> CborZstdArrayRef<'a, T>
@@ -121,7 +147,7 @@ impl<T: Serialize> CborZstdArrayBuilder<T> {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.data.is_empty()
+        self.len == 0
     }
 
     pub fn push(mut self, value: &T) -> std::io::Result<Self> {
@@ -130,6 +156,7 @@ impl<T: Serialize> CborZstdArrayBuilder<T> {
         serde_cbor::to_writer(writer, &value).expect("CBOR encoding should not fail!");
         self.write_cbor_buffer()?;
         self.flush()?;
+        self.len += 1;
         Ok(self)
     }
 
@@ -138,6 +165,7 @@ impl<T: Serialize> CborZstdArrayBuilder<T> {
             let writer = self.get_cbor_cursor()?;
             serde_cbor::to_writer(writer, &item).expect("CBOR encoding should not fail!");
             self.write_cbor_buffer()?;
+            self.len += 1;
         }
         self.flush()?;
         Ok(self)
