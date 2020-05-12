@@ -1,5 +1,6 @@
 use crate::czaa::*;
-use futures::{future::BoxFuture, stream::BoxStream, prelude::*};
+use derive_more::From;
+use futures::{future::BoxFuture, prelude::*, stream::BoxStream};
 use multihash::{Code, Multihash, Sha2_256};
 use serde::{
     de::{DeserializeOwned, IgnoredAny},
@@ -12,7 +13,6 @@ use std::{
     sync::{Arc, RwLock},
 };
 use tracing::{debug, info, trace};
-use derive_more::From;
 
 struct Config {
     max_leaf_size: u64,
@@ -140,7 +140,7 @@ impl Store for TestStore {
     }
 }
 
-type BoxStore = Box<dyn Store>;
+type BoxStore = Box<dyn Store + Send + Sync + 'static>;
 type Error = Box<dyn std::error::Error + Send + Sync>;
 type Result<T> = std::result::Result<T, Error>;
 fn err(text: &str) -> std::io::Error {
@@ -179,6 +179,17 @@ struct Leaf<T> {
     items: CborZstdArrayBuilder<T>,
 }
 
+impl<T> Leaf<T> {
+    fn new(index: LeafIndex, items: CborZstdArrayBuilder<T>) -> Self {
+        Self { index, items }
+    }
+}
+
+enum Node<T> {
+    Branch(Branch),
+    Leaf(Leaf<T>),
+}
+
 impl<T: Serialize + DeserializeOwned + Clone> Leaf<T> {
     fn child_at(&self, offset: u64) -> Result<T> {
         self.items
@@ -193,7 +204,7 @@ impl<T: Serialize + DeserializeOwned + Clone> Leaf<T> {
 /// A handle for a tree, consisting of the root and some data to access the store
 pub struct Tree<T> {
     root: Option<Index>,
-    store: Box<dyn Store + Send + Sync + 'static>,
+    store: BoxStore,
     config: Config,
     _t: PhantomData<T>,
 }
@@ -219,7 +230,7 @@ impl<T: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> Tree<T> {
     async fn load_leaf(&self, index: LeafIndex) -> Result<Leaf<T>> {
         let bytes = self.store.get(&index.cid).await?;
         let items = CborZstdArrayBuilder::<T>::init(bytes.as_ref(), self.config.zstd_level)?;
-        Ok(Leaf { index, items })
+        Ok(Leaf::new(index, items))
     }
 
     /// Creates a tree containing a single item, and returns the index of that tree
@@ -231,7 +242,7 @@ impl<T: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> Tree<T> {
             count: 1,
             sealed: self.leaf_sealed(items.buffer().len() as u64, 1),
         };
-        Ok(Leaf { items, index })
+        Ok(Leaf::new(index, items))
     }
 
     /// predicate to determine if a leaf is sealed
@@ -264,7 +275,7 @@ impl<T: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> Tree<T> {
     async fn load_branch(&self, index: BranchIndex) -> Result<Branch> {
         let bytes = self.store.get(&index.cid).await?;
         let children = CborZstdArrayRef::new(bytes.as_ref()).items()?;
-        Ok(Branch { index, children })
+        Ok(Branch::new(index, children))
     }
 
     async fn single_branch(&self, value: Index) -> Result<Branch> {
@@ -278,9 +289,13 @@ impl<T: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> Tree<T> {
             sealed: false,
             cid,
         };
-        Ok(Branch {
-            children: vec![value],
-            index,
+        Ok(Branch::new(index, vec![value]))
+    }
+
+    async fn load_node(&self, index: Index) -> Result<Node<T>> {
+        Ok(match index {
+            Index::Branch(index) => Node::Branch(self.load_branch(index).await?),
+            Index::Leaf(index) => Node::Leaf(self.load_leaf(index).await?),
         })
     }
 
@@ -292,12 +307,11 @@ impl<T: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> Tree<T> {
         Box::pin(self.push0(node, value))
     }
 
-    async fn push0(&self, node: Index, value: &T) -> Result<Index> {
-        // calling push for a sealed node makes no sense and should not happen!
-        assert!(!node.sealed());
-        match node {
-            Index::Leaf(data) => {
-                let mut leaf = self.load_leaf(data).await?;
+    async fn push0(&self, index: Index, value: &T) -> Result<Index> {
+        // calling push0 for a sealed node makes no sense and should not happen!
+        assert!(!index.sealed());
+        match self.load_node(index).await? {
+            Node::Leaf(mut leaf) => {
                 leaf.items = leaf.items.push(&value)?;
                 // update the index data
                 leaf.index.count += 1;
@@ -306,8 +320,7 @@ impl<T: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> Tree<T> {
                 leaf.index.cid = self.store.put(leaf.items.buffer()).await?;
                 Ok(leaf.index.into())
             }
-            Index::Branch(data) => {
-                let mut branch = self.load_branch(data).await?;
+            Node::Branch(mut branch) => {
                 let child_index = branch.last_child();
                 if !child_index.sealed() {
                     // there is room in the child. Just push it down and update us
@@ -315,8 +328,7 @@ impl<T: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> Tree<T> {
                 } else if child_index.level() < branch.index.level - 1 {
                     // there is room for another tree node. Create a new one and push down to it
                     let child = self.single_branch(child_index).await?;
-                    *branch.last_child_mut() =
-                        self.pushr(child.index.into(), value).await?;
+                    *branch.last_child_mut() = self.pushr(child.index.into(), value).await?;
                 } else {
                     // all our children are full, we need to append
                     let child = self.single_leaf(&value).await?;
@@ -344,9 +356,8 @@ impl<T: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> Tree<T> {
 
     async fn get0(&self, index: &Index, mut offset: u64) -> Result<T> {
         assert!(offset < index.count());
-        match index {
-            Index::Branch(bi) => {
-                let node: Branch = self.load_branch(bi.clone()).await?;
+        match self.load_node(index.clone()).await? {
+            Node::Branch(node) => {
                 for child in node.children.iter() {
                     if offset < child.count() {
                         return self.getr(child, offset).await;
@@ -356,10 +367,7 @@ impl<T: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> Tree<T> {
                 }
                 Err(err("index out of bounds").into())
             }
-            Index::Leaf(li) => {
-                let node: Leaf<T> = self.load_leaf(li.clone()).await?;
-                node.child_at(offset)
-            }
+            Node::Leaf(node) => node.child_at(offset),
         }
     }
 
@@ -388,26 +396,23 @@ impl<T: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> Tree<T> {
     }
 
     fn stream0<'a>(&'a self, index: Index) -> BoxStream<'a, Result<T>> {
-        let f: BoxFuture<'a, Result<BoxStream<'a, Result<T>>>> = async move {
-            let x: Result<BoxStream<'a, Result<T>>> = Ok(match index {
-                Index::Leaf(li) => {
-                    let node = self.load_leaf(li.clone()).await?;
+        async move {
+            Ok(match self.load_node(index).await? {
+                Node::Leaf(node) => {
                     let elems: Vec<T> = node.items.data().items()?;
-                    stream::iter(elems).map(|x| Ok(x)).boxed()
-                },
-                Index::Branch(bi) => {
-                    let node = self.load_branch(bi.clone()).await?;
-                    stream::iter(node.children).map(move |child|
-                        self.stream0(child)
-                    ).flatten().boxed()
+                    stream::iter(elems).map(|x| Ok(x)).left_stream()
                 }
-            });
-            x
-        }.boxed();
-        f.try_flatten_stream().boxed()
+                Node::Branch(node) => stream::iter(node.children)
+                    .map(move |child| self.stream0(child))
+                    .flatten()
+                    .right_stream(),
+            })
+        }
+        .try_flatten_stream()
+        .boxed()
     }
 
-    pub fn stream<'a>(&'a self) -> impl Stream<Item=Result<T>> + 'a {
+    pub fn stream<'a>(&'a self) -> impl Stream<Item = Result<T>> + 'a {
         match &self.root {
             Some(index) => self.stream0(index.clone()).left_stream(),
             None => stream::empty().right_stream(),
@@ -426,7 +431,7 @@ impl<T: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> Tree<T> {
         match index {
             Index::Leaf(li) => {
                 println!("{}Leaf({}, {})", prefix, li.count, li.sealed);
-            },
+            }
             Index::Branch(bi) => {
                 println!("{}Branch({}, {})", prefix, bi.count, bi.sealed);
                 let node = self.load_branch(bi.clone()).await?;
@@ -446,16 +451,16 @@ impl<T: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> Tree<T> {
                 println!("empty");
                 Ok(())
             }
-        }        
+        }
     }
 
     /// creates a new tree
-    pub fn new(store: Box<dyn Store + Send + Sync + 'static>) -> Self {
+    pub fn new(store: BoxStore) -> Self {
         Self::load(store, None)
     }
 
     /// loads the tree from the store, given a secret and a root cid
-    pub fn load(store: Box<dyn Store + Send + Sync + 'static>, root: Option<Index>) -> Self {
+    pub fn load(store: BoxStore, root: Option<Index>) -> Self {
         Self {
             store,
             root,
