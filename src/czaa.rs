@@ -55,7 +55,8 @@ impl<'a, T: DeserializeOwned> CborZstdArrayRef<'a, T> {
         let data = self.data.to_vec();
         // cipher.apply_keystream(&mut data);
         let mut src = InBuffer::around(&data);
-        let mut tmp = [0u8; 4096];
+        // todo: thread local buffers that grow dynamically
+        let mut tmp = [0u8; 4096 * 10];
         let mut decompressor = ZDecoder::new()?;
         let mut uncompressed = Vec::<u8>::new();
         uncompressed.push(CBOR_ARRAY_START);

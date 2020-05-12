@@ -127,13 +127,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let decompressed = transform(&mut decoder, &tgt, decompressed)?;
     println!("{:?}", decompressed);
 
-
     println!("building a tree");
     let store = TestStore::new();
     let mut tree = Tree::<u64>::new(Box::new(store));
     for i in 0..1000000 {
         println!("{}", i);
-        let res = tree.push(&i).await?;        
+        let res = tree.push(&i).await?;
     }
 
     Ok(())
