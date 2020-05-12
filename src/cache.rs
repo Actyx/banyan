@@ -81,7 +81,7 @@ where
     /// value (and stores it back into the cache).
     pub fn fetch_or_resolve<F>(&self, key: &K, resolve: impl Fn(&K) -> F) -> impl Future<Output = T>
     where
-        F: Future<Output = T> + Send + Unpin + 'static,
+        F: Future<Output = T> + Send + 'static,
     {
         let cache = &self.cache;
         // The call to `lock()` returns a guard that holds the lock until the guard goes out of scope,
