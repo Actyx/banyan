@@ -52,7 +52,7 @@ impl<'a, T: DeserializeOwned> CborZstdArrayRef<'a, T> {
     pub fn items(&self) -> std::io::Result<Vec<T>> {
         // let mut cipher = (self.mk_cipher)();
         // todo: avoid cloning the whole thing, but have a buffer for stream apply and decompression source
-        let mut data = self.data.to_vec();
+        let data = self.data.to_vec();
         // cipher.apply_keystream(&mut data);
         let mut src = InBuffer::around(&data);
         let mut tmp = [0u8; 4096];

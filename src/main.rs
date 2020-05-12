@@ -8,6 +8,8 @@ mod czaa;
 mod test_tree;
 mod tree;
 
+use tree::*;
+
 const CBOR_ARRAY_START: u8 = (4 << 5) | 31;
 const CBOR_BREAK: u8 = 255;
 
@@ -93,7 +95,8 @@ struct Test {
     inner: u64,
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut tgt: Vec<u8> = Vec::new();
     tgt.push(CBOR_ARRAY_START);
     for x in 0..10 {
@@ -123,6 +126,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let decompressed: Vec<u8> = Vec::new();
     let decompressed = transform(&mut decoder, &tgt, decompressed)?;
     println!("{:?}", decompressed);
+
+
+    println!("building a tree");
+    let store = TestStore::new();
+    let mut tree = Tree::<u64>::new(Box::new(store));
+    for i in 0..1000000 {
+        println!("{}", i);
+        let res = tree.push(&i).await?;        
+    }
 
     Ok(())
 }
