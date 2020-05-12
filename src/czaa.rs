@@ -117,7 +117,7 @@ impl<T: Serialize + DeserializeOwned> CborZstdArrayBuilder<T> {
     }
 }
 
-impl<T: Serialize> CborZstdArrayBuilder<T> {
+impl<T> CborZstdArrayBuilder<T> {
     pub fn new(level: i32) -> std::io::Result<Self> {
         Ok(Self {
             cbor_buffer: Vec::new(),
@@ -136,6 +136,9 @@ impl<T: Serialize> CborZstdArrayBuilder<T> {
     pub fn buffer(&self) -> &[u8] {
         &self.data
     }
+}
+
+impl<T: Serialize> CborZstdArrayBuilder<T> {
 
     pub fn data<'a>(&'a self) -> CborZstdArrayRef<'a, T>
     where
