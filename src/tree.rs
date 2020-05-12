@@ -1,5 +1,5 @@
 use crate::czaa::*;
-use futures::{future::BoxFuture, prelude::*};
+use futures::{future::BoxFuture, stream::BoxStream, prelude::*};
 use multihash::{Code, Multihash, Sha2_256};
 use serde::{
     de::{DeserializeOwned, IgnoredAny},
@@ -12,6 +12,7 @@ use std::{
     sync::{Arc, RwLock},
 };
 use tracing::{debug, info, trace};
+use derive_more::From;
 
 struct Config {
     max_leaf_size: u64,
@@ -25,9 +26,9 @@ impl Config {
     pub fn debug() -> Self {
         Self {
             max_leaf_size: 10000,
-            max_leaf_count: 10000,
+            max_leaf_count: 10,
             max_branch_size: 1000,
-            max_branch_count: 10,
+            max_branch_count: 4,
             zstd_level: 10,
         }
     }
@@ -73,7 +74,7 @@ pub struct BranchIndex {
 }
 
 /// index
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, From)]
 pub enum Index {
     Leaf(LeafIndex),
     Branch(BranchIndex),
@@ -178,20 +179,27 @@ struct Leaf<T> {
     items: CborZstdArrayBuilder<T>,
 }
 
+impl<T: Serialize + DeserializeOwned + Clone> Leaf<T> {
+    fn child_at(&self, offset: u64) -> Result<T> {
+        self.items
+            .data()
+            .items()?
+            .get(offset as usize)
+            .map(|x| x.clone())
+            .ok_or_else(|| err("nope").into())
+    }
+}
+
 /// A handle for a tree, consisting of the root and some data to access the store
 pub struct Tree<T> {
     root: Option<Index>,
-    store: Box<dyn Store>,
+    store: Box<dyn Store + Send + Sync + 'static>,
     config: Config,
     _t: PhantomData<T>,
 }
 
 /// basic random access append only async tree
-impl<T: Serialize + DeserializeOwned> Tree<T> {
-    fn is_empty(&self) -> bool {
-        self.root.is_none()
-    }
-
+impl<T: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> Tree<T> {
     /// predicate to determine if a leaf is sealed
     fn leaf_sealed(&self, bytes: u64, count: u64) -> bool {
         bytes >= self.config.max_leaf_size || count >= self.config.max_leaf_count
@@ -289,7 +297,6 @@ impl<T: Serialize + DeserializeOwned> Tree<T> {
         assert!(!node.sealed());
         match node {
             Index::Leaf(data) => {
-                println!("extending leaf node {:?}", data.count);
                 let mut leaf = self.load_leaf(data).await?;
                 leaf.items = leaf.items.push(&value)?;
                 // update the index data
@@ -297,28 +304,23 @@ impl<T: Serialize + DeserializeOwned> Tree<T> {
                 leaf.index.sealed =
                     self.leaf_sealed(leaf.items.buffer().len() as u64, leaf.index.count);
                 leaf.index.cid = self.store.put(leaf.items.buffer()).await?;
-                println!(
-                    "extending leaf node {} {}",
-                    leaf.index.count, leaf.index.sealed
-                );
-                Ok(Index::Leaf(leaf.index))
+                Ok(leaf.index.into())
             }
             Index::Branch(data) => {
                 let mut branch = self.load_branch(data).await?;
                 let child_index = branch.last_child();
                 if !child_index.sealed() {
-                    println!("extend child");
                     // there is room in the child. Just push it down and update us
                     *branch.last_child_mut() = self.pushr(child_index, value).await?;
                 } else if child_index.level() < branch.index.level - 1 {
                     // there is room for another tree node. Create a new one and push down to it
                     let child = self.single_branch(child_index).await?;
                     *branch.last_child_mut() =
-                        self.pushr(Index::Branch(child.index), value).await?;
+                        self.pushr(child.index.into(), value).await?;
                 } else {
                     // all our children are full, we need to append
                     let child = self.single_leaf(&value).await?;
-                    branch.children.push(Index::Leaf(child.index));
+                    branch.children.push(child.index.into());
                 }
                 let data = CborZstdArrayBuilder::<Index>::new(self.config.zstd_level)?;
                 let data = data.push_items(branch.children.iter().cloned())?;
@@ -327,12 +329,41 @@ impl<T: Serialize + DeserializeOwned> Tree<T> {
                 branch.index.sealed =
                     self.branch_sealed(data.buffer().len() as u64, &branch.children);
                 branch.index.cid = cid;
-                Ok(Index::Branch(branch.index))
+                Ok(branch.index.into())
             }
         }
     }
 
-    /// append an element
+    fn getr<'a>(
+        &'a self,
+        node: &'a Index,
+        offset: u64,
+    ) -> std::pin::Pin<Box<dyn Future<Output = Result<T>> + 'a>> {
+        Box::pin(self.get0(node, offset))
+    }
+
+    async fn get0(&self, index: &Index, mut offset: u64) -> Result<T> {
+        assert!(offset < index.count());
+        match index {
+            Index::Branch(bi) => {
+                let node: Branch = self.load_branch(bi.clone()).await?;
+                for child in node.children.iter() {
+                    if offset < child.count() {
+                        return self.getr(child, offset).await;
+                    } else {
+                        offset -= child.count();
+                    }
+                }
+                Err(err("index out of bounds").into())
+            }
+            Index::Leaf(li) => {
+                let node: Leaf<T> = self.load_leaf(li.clone()).await?;
+                node.child_at(offset)
+            }
+        }
+    }
+
+    /// append a single element
     pub async fn push(&mut self, value: &T) -> Result<()> {
         self.root = Some(match &self.root {
             Some(index) => {
@@ -343,23 +374,88 @@ impl<T: Serialize + DeserializeOwned> Tree<T> {
                     self.push0(index.clone(), value).await?
                 }
             }
-            None => Index::Leaf(self.single_leaf(value).await?.index),
+            None => self.single_leaf(value).await?.index.into(),
         });
         Ok(())
     }
 
     /// element at index
-    pub async fn at(index: u64) -> Result<Option<T>> {
-        Ok(None)
+    pub async fn get(&self, offset: u64) -> Result<Option<T>> {
+        Ok(match &self.root {
+            Some(index) => Some(self.get0(index, offset).await?),
+            None => None,
+        })
+    }
+
+    fn stream0<'a>(&'a self, index: Index) -> BoxStream<'a, Result<T>> {
+        let f: BoxFuture<'a, Result<BoxStream<'a, Result<T>>>> = async move {
+            let x: Result<BoxStream<'a, Result<T>>> = Ok(match index {
+                Index::Leaf(li) => {
+                    let node = self.load_leaf(li.clone()).await?;
+                    let elems: Vec<T> = node.items.data().items()?;
+                    stream::iter(elems).map(|x| Ok(x)).boxed()
+                },
+                Index::Branch(bi) => {
+                    let node = self.load_branch(bi.clone()).await?;
+                    stream::iter(node.children).map(move |child|
+                        self.stream0(child)
+                    ).flatten().boxed()
+                }
+            });
+            x
+        }.boxed();
+        f.try_flatten_stream().boxed()
+    }
+
+    pub fn stream<'a>(&'a self) -> impl Stream<Item=Result<T>> + 'a {
+        match &self.root {
+            Some(index) => self.stream0(index.clone()).left_stream(),
+            None => stream::empty().right_stream(),
+        }
+    }
+
+    fn dumpr<'a>(
+        &'a self,
+        index: &'a Index,
+        prefix: &'a str,
+    ) -> std::pin::Pin<Box<dyn Future<Output = Result<()>> + 'a>> {
+        Box::pin(self.dump0(index, prefix))
+    }
+
+    async fn dump0(&self, index: &Index, prefix: &str) -> Result<()> {
+        match index {
+            Index::Leaf(li) => {
+                println!("{}Leaf({}, {})", prefix, li.count, li.sealed);
+            },
+            Index::Branch(bi) => {
+                println!("{}Branch({}, {})", prefix, bi.count, bi.sealed);
+                let node = self.load_branch(bi.clone()).await?;
+                let prefix = prefix.to_string() + "  ";
+                for x in node.children.iter() {
+                    self.dumpr(x, &prefix).await?;
+                }
+            }
+        };
+        Ok(())
+    }
+
+    pub async fn dump(&self) -> Result<()> {
+        match &self.root {
+            Some(index) => self.dump0(index, "").await,
+            None => {
+                println!("empty");
+                Ok(())
+            }
+        }        
     }
 
     /// creates a new tree
-    pub fn new(store: Box<dyn Store>) -> Self {
+    pub fn new(store: Box<dyn Store + Send + Sync + 'static>) -> Self {
         Self::load(store, None)
     }
 
     /// loads the tree from the store, given a secret and a root cid
-    pub fn load(store: Box<dyn Store>, root: Option<Index>) -> Self {
+    pub fn load(store: Box<dyn Store + Send + Sync + 'static>, root: Option<Index>) -> Self {
         Self {
             store,
             root,
@@ -368,8 +464,11 @@ impl<T: Serialize + DeserializeOwned> Tree<T> {
         }
     }
 
-    /// saves the tree in the store
-    pub async fn save() -> Result<Cid> {
-        Err(std::io::Error::new(std::io::ErrorKind::Other, "unable to save").into())
+    pub fn is_empty(&self) -> bool {
+        self.count() == 0
+    }
+
+    pub fn count(&self) -> u64 {
+        self.root.as_ref().map(|x| x.count()).unwrap_or(0)
     }
 }
