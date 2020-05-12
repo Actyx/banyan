@@ -100,6 +100,18 @@ pub struct CborZstdArrayBuilder<T> {
     _t: PhantomData<T>,
 }
 
+impl<T> std::fmt::Debug for CborZstdArrayBuilder<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "CborZstdArrayBuilder")
+    }
+}
+
+impl<T> Clone for CborZstdArrayBuilder<T> {
+    fn clone(&self) -> Self {
+        panic!()
+    }
+}
+
 pub enum WriteMode {
     None,
     Flush,

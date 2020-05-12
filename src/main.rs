@@ -4,6 +4,7 @@ use std::io::prelude::*;
 use std::io::{Cursor, SeekFrom, Write};
 use stream_cipher::SyncStreamCipher;
 use zstd::stream::raw::{Decoder as ZDecoder, Encoder as ZEncoder, InBuffer, Operation, OutBuffer};
+use std::sync::Arc;
 
 mod cache;
 mod czaa;
@@ -131,7 +132,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     println!("building a tree");
     let store = TestStore::new();
-    let mut tree = Tree::<u64>::new(Box::new(store));
+    let mut tree = Tree::<u64>::new(Arc::new(store));
     for i in 0..1000 {
         println!("{}", i);
         let res = tree.push(&i).await?;
