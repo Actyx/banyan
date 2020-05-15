@@ -1,6 +1,11 @@
 use crate::czaa::*;
+use derive_more::Display;
 use derive_more::From;
-use futures::{future::BoxFuture, prelude::*, stream::{BoxStream, LocalBoxStream}};
+use futures::{
+    future::BoxFuture,
+    prelude::*,
+    stream::{BoxStream, LocalBoxStream},
+};
 use multihash::{Code, Multihash, Sha2_256};
 use serde::{
     de::{DeserializeOwned, IgnoredAny},
@@ -13,7 +18,6 @@ use std::{
     sync::{Arc, RwLock},
 };
 use tracing::{debug, info, trace};
-use derive_more::Display;
 
 type ArcStore = Arc<dyn Store + Send + Sync + 'static>;
 type Error = Box<dyn std::error::Error + Send + Sync>;
@@ -342,12 +346,18 @@ impl<T: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> Tree<T> {
     }
 
     fn store_leaf(&self, index: LeafIndex, node: Leaf<T>) -> Index {
-        self.leaf_cache.write().unwrap().put(index.cid.clone(), node);
+        self.leaf_cache
+            .write()
+            .unwrap()
+            .put(index.cid.clone(), node);
         index.into()
     }
 
     fn store_branch(&self, index: BranchIndex, node: Branch) -> Index {
-        self.branch_cache.write().unwrap().put(index.cid.clone(), node);
+        self.branch_cache
+            .write()
+            .unwrap()
+            .put(index.cid.clone(), node);
         index.into()
     }
 
@@ -359,6 +369,12 @@ impl<T: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> Tree<T> {
         Box::pin(self.push0(node, value))
     }
 
+    /// note: you could make this more efficient by passing in a mut &Index, but then
+    /// you would have to be really careful to do all modification after anything that
+    /// can fail, otherwise you might end up with an inconsistent state.
+    ///
+    /// The functional way of threading the index through the call and returning it is
+    /// safer to get correct.
     async fn push0(&self, index: &Index, value: &T) -> Result<Index> {
         // calling push0 for a sealed node makes no sense and should not happen!
         assert!(!index.sealed());
@@ -368,8 +384,7 @@ impl<T: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> Tree<T> {
                 let mut index = index.clone();
                 // update the index data
                 index.count += 1;
-                index.sealed =
-                    self.leaf_sealed(leaf.items.buffer().len() as u64, index.count);
+                index.sealed = self.leaf_sealed(leaf.items.buffer().len() as u64, index.count);
                 index.cid = self.store.put(leaf.items.buffer()).await?;
                 Ok(self.store_leaf(index, leaf))
             }
@@ -392,8 +407,7 @@ impl<T: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> Tree<T> {
                 let cid = self.store.put(data.buffer()).await?;
                 let mut index = index.clone();
                 index.count += 1;
-                index.sealed =
-                    self.branch_sealed(data.buffer().len() as u64, &branch.children);
+                index.sealed = self.branch_sealed(data.buffer().len() as u64, &branch.children);
                 index.cid = cid;
                 Ok(self.store_branch(index, branch))
             }
@@ -516,7 +530,7 @@ impl<T: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> Tree<T> {
     pub fn load(store: ArcStore, root: Option<Index>) -> Self {
         let branch_cache = RwLock::new(lru::LruCache::<Cid, Branch>::new(1000));
         let leaf_cache = RwLock::new(lru::LruCache::<Cid, Leaf<T>>::new(1000));
-        Self {                        
+        Self {
             store,
             root,
             config: Config::debug(),

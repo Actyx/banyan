@@ -151,7 +151,6 @@ impl<T> CborZstdArrayBuilder<T> {
 }
 
 impl<T: Serialize> CborZstdArrayBuilder<T> {
-
     pub fn data<'a>(&'a self) -> CborZstdArrayRef<'a, T>
     where
         T: DeserializeOwned,
