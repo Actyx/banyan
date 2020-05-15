@@ -7,6 +7,7 @@ use zstd::stream::raw::{Decoder as ZDecoder, Encoder as ZEncoder, InBuffer, Oper
 
 mod czaa;
 mod tree;
+mod zstd_array;
 
 use tree::*;
 
@@ -129,7 +130,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     println!("building a tree");
     let store = TestStore::new();
-    let mut tree = Tree::<u64>::new(Arc::new(store));
+    let forest = Arc::new(Forest::new(Arc::new(store)));
+    let mut tree = Tree::<u64>::new(forest);
     for i in 0..1000 {
         println!("{}", i);
         let res = tree.push(&i).await?;

@@ -231,9 +231,72 @@ impl<T: Serialize + DeserializeOwned + Clone> Leaf<T> {
     }
 }
 
-/// A handle for a tree, consisting of the root and some data to access the store
 pub struct Tree<T> {
     root: Option<Index>,
+    forest: Arc<Forest<T>>,
+}
+
+impl<T: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> Tree<T> {
+
+    pub fn new(forest: Arc<Forest<T>>) -> Self {
+        Self {
+            root: None,
+            forest,
+        }
+    }
+
+    pub async fn dump(&self) -> Result<()> {
+        match &self.root {
+            Some(index) => self.forest.dump0(index, "").await,
+            None => {
+                println!("empty");
+                Ok(())
+            }
+        }
+    }
+    
+    /// append a single element
+    pub async fn push(&mut self, value: &T) -> Result<()> {
+        self.root = Some(match &self.root {
+            Some(index) => {
+                if !index.sealed() {
+                    self.forest.push0(index, value).await?
+                } else {
+                    let index = self.forest.single_branch(index.clone()).await?.into();
+                    self.forest.push0(&index, value).await?
+                }
+            }
+            None => self.forest.single_leaf(value).await?.into(),
+        });
+        Ok(())
+    }
+
+    /// element at index
+    pub async fn get(&self, offset: u64) -> Result<Option<T>> {
+        Ok(match &self.root {
+            Some(index) => Some(self.forest.get0(index, offset).await?),
+            None => None,
+        })
+    }
+
+    pub fn stream<'a>(&'a self) -> impl Stream<Item = Result<T>> + 'a {
+        match &self.root {
+            Some(index) => self.forest.stream0(index.clone()).left_stream(),
+            None => stream::empty().right_stream(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.count() == 0
+    }
+
+    pub fn count(&self) -> u64 {
+        self.root.as_ref().map(|x| x.count()).unwrap_or(0)
+    }
+}
+
+/// a number of trees that are grouped together, sharing common caches
+pub struct Forest<T> {
     store: ArcStore,
     config: Config,
     branch_cache: RwLock<lru::LruCache<Cid, Branch>>,
@@ -242,7 +305,7 @@ pub struct Tree<T> {
 }
 
 /// basic random access append only async tree
-impl<T: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> Tree<T> {
+impl<T: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> Forest<T> {
     /// predicate to determine if a leaf is sealed
     fn leaf_sealed(&self, bytes: u64, count: u64) -> bool {
         bytes >= self.config.max_leaf_size || count >= self.config.max_leaf_count
@@ -439,30 +502,6 @@ impl<T: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> Tree<T> {
         }
     }
 
-    /// append a single element
-    pub async fn push(&mut self, value: &T) -> Result<()> {
-        self.root = Some(match &self.root {
-            Some(index) => {
-                if !index.sealed() {
-                    self.push0(index, value).await?
-                } else {
-                    let index = self.single_branch(index.clone()).await?.into();
-                    self.push0(&index, value).await?
-                }
-            }
-            None => self.single_leaf(value).await?.into(),
-        });
-        Ok(())
-    }
-
-    /// element at index
-    pub async fn get(&self, offset: u64) -> Result<Option<T>> {
-        Ok(match &self.root {
-            Some(index) => Some(self.get0(index, offset).await?),
-            None => None,
-        })
-    }
-
     fn stream0<'a>(&'a self, index: Index) -> LocalBoxStream<'a, Result<T>> {
         let s = async move {
             Ok(match self.load_node(&index).await? {
@@ -478,13 +517,6 @@ impl<T: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> Tree<T> {
         }
         .try_flatten_stream();
         Box::pin(s)
-    }
-
-    pub fn stream<'a>(&'a self) -> impl Stream<Item = Result<T>> + 'a {
-        match &self.root {
-            Some(index) => self.stream0(index.clone()).left_stream(),
-            None => stream::empty().right_stream(),
-        }
     }
 
     fn dumpr<'a>(
@@ -511,40 +543,16 @@ impl<T: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> Tree<T> {
         Ok(())
     }
 
-    pub async fn dump(&self) -> Result<()> {
-        match &self.root {
-            Some(index) => self.dump0(index, "").await,
-            None => {
-                println!("empty");
-                Ok(())
-            }
-        }
-    }
-
-    /// creates a new tree
+    /// creates a new forest
     pub fn new(store: ArcStore) -> Self {
-        Self::load(store, None)
-    }
-
-    /// loads the tree from the store, given a secret and a root cid
-    pub fn load(store: ArcStore, root: Option<Index>) -> Self {
         let branch_cache = RwLock::new(lru::LruCache::<Cid, Branch>::new(1000));
         let leaf_cache = RwLock::new(lru::LruCache::<Cid, Leaf<T>>::new(1000));
         Self {
             store,
-            root,
             config: Config::debug(),
             branch_cache,
             leaf_cache,
             _t: PhantomData,
         }
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.count() == 0
-    }
-
-    pub fn count(&self) -> u64 {
-        self.root.as_ref().map(|x| x.count()).unwrap_or(0)
     }
 }
