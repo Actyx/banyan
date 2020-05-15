@@ -1,4 +1,5 @@
 use crate::czaa::*;
+use std::fmt::Debug;
 use derive_more::Display;
 use derive_more::From;
 use futures::{
@@ -18,10 +19,11 @@ use std::{
     sync::{Arc, RwLock},
 };
 use tracing::{debug, info, trace};
+use crate::zstd_array::*;
 
 type ArcStore = Arc<dyn Store + Send + Sync + 'static>;
-type Error = Box<dyn std::error::Error + Send + Sync>;
-type Result<T> = std::result::Result<T, Error>;
+pub type Error = Box<dyn std::error::Error + Send + Sync>;
+pub type Result<T> = std::result::Result<T, Error>;
 type ArcResult<T> = std::result::Result<T, ArcError>;
 
 #[derive(Debug, Clone, Display)]
@@ -192,56 +194,48 @@ impl Branch {
 
 /// fully in memory representation of a leaf node
 #[derive(Debug)]
-struct Leaf<T> {
-    items: CborZstdArrayBuilder<T>,
+struct Leaf {
+    items: ZstdArrayBuilder,
 }
 
-impl<T> Clone for Leaf<T> {
-    fn clone(&self) -> Self {
-        Self {
-            items: self.items.clone(),
-        }
-    }
-}
-
-impl<T> Leaf<T> {
-    fn new(items: CborZstdArrayBuilder<T>) -> Self {
+impl Leaf {
+    fn new(items: ZstdArrayBuilder) -> Self {
         Self { items }
     }
 }
 
-enum Node<T> {
+enum Node {
     Branch(Branch),
-    Leaf(Leaf<T>),
+    Leaf(Leaf),
 }
 
-enum NodeInfo<'a, T> {
+enum NodeInfo<'a> {
     Branch(&'a BranchIndex, Branch),
-    Leaf(&'a LeafIndex, Leaf<T>),
+    Leaf(&'a LeafIndex, Leaf),
 }
 
-impl<T: Serialize + DeserializeOwned + Clone> Leaf<T> {
-    fn child_at(&self, offset: u64) -> Result<T> {
-        self.items
-            .data()
-            .items()?
-            .get(offset as usize)
-            .map(|x| x.clone())
+impl Leaf {
+    fn child_at<T: DeserializeOwned>(&self, offset: u64) -> Result<T> {
+        // todo: make this more efficient!
+        let items: Vec<T> = self.items.items()?;
+        items.into_iter().nth(offset as usize)
             .ok_or_else(|| err("nope").into())
     }
 }
 
 pub struct Tree<T> {
     root: Option<Index>,
-    forest: Arc<Forest<T>>,
+    forest: Arc<Forest>,
+    _t: PhantomData<T>
 }
 
-impl<T: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> Tree<T> {
+impl<T: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static> Tree<T> {
 
-    pub fn new(forest: Arc<Forest<T>>) -> Self {
+    pub fn new(forest: Arc<Forest>) -> Self {
         Self {
             root: None,
             forest,
+            _t: PhantomData,
         }
     }
 
@@ -260,13 +254,13 @@ impl<T: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> Tree<T> {
         self.root = Some(match &self.root {
             Some(index) => {
                 if !index.sealed() {
-                    self.forest.push0(index, value).await?
+                    self.forest.push0(index, &value).await?
                 } else {
                     let index = self.forest.single_branch(index.clone()).await?.into();
-                    self.forest.push0(&index, value).await?
+                    self.forest.push0(&index, &value).await?
                 }
             }
-            None => self.forest.single_leaf(value).await?.into(),
+            None => self.forest.single_leaf(&value).await?.into(),
         });
         Ok(())
     }
@@ -296,16 +290,15 @@ impl<T: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> Tree<T> {
 }
 
 /// a number of trees that are grouped together, sharing common caches
-pub struct Forest<T> {
+pub struct Forest {
     store: ArcStore,
     config: Config,
     branch_cache: RwLock<lru::LruCache<Cid, Branch>>,
-    leaf_cache: RwLock<lru::LruCache<Cid, Leaf<T>>>,
-    _t: PhantomData<T>,
+    leaf_cache: RwLock<lru::LruCache<Cid, Leaf>>,
 }
 
 /// basic random access append only async tree
-impl<T: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> Forest<T> {
+impl Forest {
     /// predicate to determine if a leaf is sealed
     fn leaf_sealed(&self, bytes: u64, count: u64) -> bool {
         bytes >= self.config.max_leaf_size || count >= self.config.max_leaf_count
@@ -322,13 +315,13 @@ impl<T: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> Forest<T> 
     ///
     /// for now this just loads from scratch, but in the future this will load from a cache
     /// of hot leaf nodes.
-    async fn load_leaf(&self, index: &LeafIndex) -> Result<Leaf<T>> {
+    async fn load_leaf(&self, index: &LeafIndex) -> Result<Leaf> {
         let bytes = self.store.get(&index.cid).await?;
-        let items = CborZstdArrayBuilder::<T>::init(bytes.as_ref(), self.config.zstd_level)?;
+        let items = ZstdArrayBuilder::init(bytes.as_ref(), self.config.zstd_level)?;
         Ok(Leaf::new(items))
     }
 
-    async fn load_leaf_cached(&self, index: &LeafIndex) -> Result<Leaf<T>> {
+    async fn load_leaf_cached(&self, index: &LeafIndex) -> Result<Leaf> {
         match self.leaf_cache.write().unwrap().pop(&index.cid) {
             Some(leaf) => Ok(leaf),
             None => self.load_leaf(index).await,
@@ -336,13 +329,19 @@ impl<T: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> Forest<T> 
     }
 
     /// Creates a tree containing a single item, and returns the index of that tree
-    async fn single_leaf(&self, value: &T) -> Result<LeafIndex> {
-        let items = CborZstdArrayBuilder::new(self.config.zstd_level)?.push(value)?;
-        let cid = self.store.put(items.buffer()).await?;
+    async fn single_leaf<T: Serialize + Debug>(&self, value: &T) -> Result<LeafIndex> {
+        let t: u64 = 0;
+        let items = ZstdArrayBuilder::new(self.config.zstd_level)?.push(&t)?;
+        println!("push 0 - 1 {:?} {} {}", t, hex::encode(items.as_ref().raw()), items.as_ref().raw().len());
+
+        let items = ZstdArrayBuilder::new(self.config.zstd_level)?.push(value)?;
+        println!("push 0 - 2 {:?} {} {}", value, hex::encode(items.as_ref().raw()), items.as_ref().raw().len());
+        println!("single_leaf {:?}", items.items::<u64>()?.len());
+        let cid = self.store.put(items.as_ref().raw()).await?;
         let index = LeafIndex {
             cid,
             count: 1,
-            sealed: self.leaf_sealed(items.buffer().len() as u64, 1),
+            sealed: self.leaf_sealed(items.as_ref().raw().len() as u64, 1),
         };
         Ok(index)
     }
@@ -401,14 +400,14 @@ impl<T: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> Forest<T> 
         Ok(index)
     }
 
-    async fn load_node<'a>(&self, index: &'a Index) -> Result<NodeInfo<'a, T>> {
+    async fn load_node<'a>(&self, index: &'a Index) -> Result<NodeInfo<'a>> {
         Ok(match index {
             Index::Branch(index) => NodeInfo::Branch(index, self.load_branch_cached(index).await?),
             Index::Leaf(index) => NodeInfo::Leaf(index, self.load_leaf_cached(index).await?),
         })
     }
 
-    fn store_leaf(&self, index: LeafIndex, node: Leaf<T>) -> Index {
+    fn store_leaf(&self, index: LeafIndex, node: Leaf) -> Index {
         self.leaf_cache
             .write()
             .unwrap()
@@ -424,7 +423,7 @@ impl<T: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> Forest<T> 
         index.into()
     }
 
-    fn pushr<'a>(
+    fn pushr<'a, T: Serialize + Debug>(
         &'a self,
         node: &'a Index,
         value: &'a T,
@@ -438,7 +437,7 @@ impl<T: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> Forest<T> 
     ///
     /// The functional way of threading the index through the call and returning it is
     /// safer to get correct.
-    async fn push0(&self, index: &Index, value: &T) -> Result<Index> {
+    async fn push0<T: Serialize + Debug>(&self, index: &Index, value: &T) -> Result<Index> {
         // calling push0 for a sealed node makes no sense and should not happen!
         assert!(!index.sealed());
         match self.load_node(index).await? {
@@ -447,8 +446,8 @@ impl<T: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> Forest<T> 
                 let mut index = index.clone();
                 // update the index data
                 index.count += 1;
-                index.sealed = self.leaf_sealed(leaf.items.buffer().len() as u64, index.count);
-                index.cid = self.store.put(leaf.items.buffer()).await?;
+                index.sealed = self.leaf_sealed(leaf.items.raw().len() as u64, index.count);
+                index.cid = self.store.put(leaf.items.raw()).await?;
                 Ok(self.store_leaf(index, leaf))
             }
             NodeInfo::Branch(index, mut branch) => {
@@ -477,7 +476,7 @@ impl<T: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> Forest<T> 
         }
     }
 
-    fn getr<'a>(
+    fn getr<'a, T: DeserializeOwned + 'a>(
         &'a self,
         node: &'a Index,
         offset: u64,
@@ -485,7 +484,7 @@ impl<T: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> Forest<T> 
         Box::pin(self.get0(node, offset))
     }
 
-    async fn get0(&self, index: &Index, mut offset: u64) -> Result<T> {
+    async fn get0<T: DeserializeOwned>(&self, index: &Index, mut offset: u64) -> Result<T> { 
         assert!(offset < index.count());
         match self.load_node(index).await? {
             NodeInfo::Branch(index, node) => {
@@ -502,11 +501,11 @@ impl<T: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> Forest<T> 
         }
     }
 
-    fn stream0<'a>(&'a self, index: Index) -> LocalBoxStream<'a, Result<T>> {
+    fn stream0<'a, T: DeserializeOwned>(&'a self, index: Index) -> LocalBoxStream<'a, Result<T>> {
         let s = async move {
             Ok(match self.load_node(&index).await? {
                 NodeInfo::Leaf(index, node) => {
-                    let elems: Vec<T> = node.items.data().items()?;
+                    let elems: Vec<T> = node.items.items()?;
                     stream::iter(elems).map(|x| Ok(x)).left_stream()
                 }
                 NodeInfo::Branch(index, node) => stream::iter(node.children)
@@ -546,13 +545,12 @@ impl<T: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> Forest<T> 
     /// creates a new forest
     pub fn new(store: ArcStore) -> Self {
         let branch_cache = RwLock::new(lru::LruCache::<Cid, Branch>::new(1000));
-        let leaf_cache = RwLock::new(lru::LruCache::<Cid, Leaf<T>>::new(1000));
+        let leaf_cache = RwLock::new(lru::LruCache::<Cid, Leaf>::new(1000));
         Self {
             store,
             config: Config::debug(),
             branch_cache,
             leaf_cache,
-            _t: PhantomData,
         }
     }
 }

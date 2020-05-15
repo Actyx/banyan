@@ -97,7 +97,7 @@ struct Test {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+async fn main() -> Result<()> {
     let mut tgt: Vec<u8> = Vec::new();
     tgt.push(CBOR_ARRAY_START);
     for x in 0..10 {
@@ -131,17 +131,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     println!("building a tree");
     let store = TestStore::new();
     let forest = Arc::new(Forest::new(Arc::new(store)));
+    let mut tree = Tree::<u64>::new(forest.clone());
+    tree.push(&0u64).await?;
+    println!("{:?}", tree.get(0).await?);
+
     let mut tree = Tree::<u64>::new(forest);
     for i in 0..1000 {
         println!("{}", i);
         let res = tree.push(&i).await?;
     }
 
+    tree.dump().await?;
+
     for i in 0..1000 {
         println!("{:?}", tree.get(i).await?);
     }
-
-    tree.dump().await?;
 
     let mut stream = tree.stream();
     while let Some(Ok(v)) = stream.next().await {

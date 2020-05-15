@@ -280,9 +280,9 @@ mod tests {
         for x in 0..100 {
             serde_cbor::to_writer(&mut target, &x.to_string()).unwrap();
         }
-        let r = Reader::new(&target);
+        let mut r = Cursor::new(&target);
         loop {
-            let mut deserializer = serde_cbor::Deserializer::from_reader(r.clone());
+            let mut deserializer = serde_cbor::Deserializer::from_reader(r.by_ref());
             let res: std::result::Result<String, _> =
                 serde::de::Deserialize::deserialize(&mut deserializer);
             if res.is_err() {
@@ -295,29 +295,15 @@ mod tests {
     use std::sync::Arc;
     use std::sync::Mutex;
 
-    #[derive(Debug, Clone)]
-    struct Reader<'a>(Arc<Mutex<Cursor<&'a [u8]>>>);
-
-    impl<'a> Reader<'a> {
-        fn new(data: &'a [u8]) -> Self {
-            Self(Arc::new(Mutex::new(Cursor::new(data))))
-        }
-    }
-
-    impl<'a> std::io::Read for Reader<'a> {
-        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-            self.0.lock().unwrap().read(buf)
-        }
-    }
-
     #[test]
     fn roundtrip() -> Result<(), Box<dyn std::error::Error>> {
         // let cipher = test_cipher();
         let mut buffer: CborZstdArrayBuilder<u64> = CborZstdArrayBuilder::new(10)?;
         let mut expected = Vec::<u64>::new();
-        for i in 0..1000 {
+        for i in 0..3 {
             println!("push {}", i);
             buffer = buffer.push(&i)?;
+            println!("buffer {} {}", hex::encode(buffer.buffer()), buffer.buffer().len());
             expected.push(i);
             let actual = buffer.data().items()?;
             // let mut persisted = buffer.data.clone();
