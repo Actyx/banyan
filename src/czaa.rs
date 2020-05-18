@@ -303,7 +303,11 @@ mod tests {
         for i in 0..3 {
             println!("push {}", i);
             buffer = buffer.push(&i)?;
-            println!("buffer {} {}", hex::encode(buffer.buffer()), buffer.buffer().len());
+            println!(
+                "buffer {} {}",
+                hex::encode(buffer.buffer()),
+                buffer.buffer().len()
+            );
             expected.push(i);
             let actual = buffer.data().items()?;
             // let mut persisted = buffer.data.clone();

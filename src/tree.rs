@@ -1,5 +1,5 @@
 use crate::czaa::*;
-use std::fmt::Debug;
+use crate::zstd_array::*;
 use derive_more::Display;
 use derive_more::From;
 use futures::{
@@ -12,6 +12,7 @@ use serde::{
     de::{DeserializeOwned, IgnoredAny},
     Deserialize, Serialize,
 };
+use std::fmt::Debug;
 use std::{
     collections::HashMap,
     marker::PhantomData,
@@ -19,7 +20,6 @@ use std::{
     sync::{Arc, RwLock},
 };
 use tracing::{debug, info, trace};
-use crate::zstd_array::*;
 
 type ArcStore = Arc<dyn Store + Send + Sync + 'static>;
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
@@ -218,7 +218,9 @@ impl Leaf {
     fn child_at<T: DeserializeOwned>(&self, offset: u64) -> Result<T> {
         // todo: make this more efficient!
         let items: Vec<T> = self.items.items()?;
-        items.into_iter().nth(offset as usize)
+        items
+            .into_iter()
+            .nth(offset as usize)
             .ok_or_else(|| err("nope").into())
     }
 }
@@ -226,11 +228,10 @@ impl Leaf {
 pub struct Tree<T> {
     root: Option<Index>,
     forest: Arc<Forest>,
-    _t: PhantomData<T>
+    _t: PhantomData<T>,
 }
 
 impl<T: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static> Tree<T> {
-
     pub fn new(forest: Arc<Forest>) -> Self {
         Self {
             root: None,
@@ -242,13 +243,10 @@ impl<T: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static> Tr
     pub async fn dump(&self) -> Result<()> {
         match &self.root {
             Some(index) => self.forest.dump0(index, "").await,
-            None => {
-                println!("empty");
-                Ok(())
-            }
+            None => Ok(()),
         }
     }
-    
+
     /// append a single element
     pub async fn push(&mut self, value: &T) -> Result<()> {
         self.root = Some(match &self.root {
@@ -330,13 +328,7 @@ impl Forest {
 
     /// Creates a tree containing a single item, and returns the index of that tree
     async fn single_leaf<T: Serialize + Debug>(&self, value: &T) -> Result<LeafIndex> {
-        let t: u64 = 0;
-        let items = ZstdArrayBuilder::new(self.config.zstd_level)?.push(&t)?;
-        println!("push 0 - 1 {:?} {} {}", t, hex::encode(items.as_ref().raw()), items.as_ref().raw().len());
-
         let items = ZstdArrayBuilder::new(self.config.zstd_level)?.push(value)?;
-        println!("push 0 - 2 {:?} {} {}", value, hex::encode(items.as_ref().raw()), items.as_ref().raw().len());
-        println!("single_leaf {:?}", items.items::<u64>()?.len());
         let cid = self.store.put(items.as_ref().raw()).await?;
         let index = LeafIndex {
             cid,
@@ -484,7 +476,7 @@ impl Forest {
         Box::pin(self.get0(node, offset))
     }
 
-    async fn get0<T: DeserializeOwned>(&self, index: &Index, mut offset: u64) -> Result<T> { 
+    async fn get0<T: DeserializeOwned>(&self, index: &Index, mut offset: u64) -> Result<T> {
         assert!(offset < index.count());
         match self.load_node(index).await? {
             NodeInfo::Branch(index, node) => {

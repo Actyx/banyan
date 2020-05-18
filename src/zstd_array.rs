@@ -1,8 +1,8 @@
+use crate::tree::Result;
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::io::prelude::*;
 use std::io::{Cursor, Write};
 use std::sync::Arc;
-use serde::{Serialize, Deserialize, de::DeserializeOwned};
-use crate::tree::{Result};
 use zstd::stream::raw::{Decoder as ZDecoder, Encoder as ZEncoder, InBuffer, Operation, OutBuffer};
 
 use zstd::stream::read::Decoder;
@@ -15,15 +15,11 @@ pub struct ZstdArray {
 
 impl ZstdArray {
     pub fn new(data: Arc<[u8]>) -> Self {
-        Self {
-            data,
-        }
+        Self { data }
     }
 
     pub fn as_ref<'a>(&'a self) -> ZstdArrayRef<'a> {
-        ZstdArrayRef {
-            data: &self.data,
-        }
+        ZstdArrayRef { data: &self.data }
     }
 }
 
@@ -36,9 +32,7 @@ const CBOR_BREAK: u8 = 255;
 
 impl<'a> ZstdArrayRef<'a> {
     pub fn new(data: &'a [u8]) -> Self {
-        Self {
-            data,
-        }
+        Self { data }
     }
 
     /// Get the compressed data
@@ -46,7 +40,25 @@ impl<'a> ZstdArrayRef<'a> {
         self.data
     }
 
+    fn decompress_into_broken(&self, mut uncompressed: Vec<u8>) -> Result<Vec<u8>> {
+        let data = self.raw();
+        let mut c = Cursor::new(data);
+        while c.position() < data.len() as u64 {
+            let mut reader = zstd::stream::read::Decoder::new(c.by_ref())?.single_frame();
+            reader.read_to_end(&mut uncompressed)?;
+        }
+        Ok(uncompressed)
+    }
+
     fn decompress_into(&self, mut uncompressed: Vec<u8>) -> Result<Vec<u8>> {
+        let data = self.raw();
+        let mut writer = zstd::stream::write::Decoder::new(uncompressed.by_ref())?;
+        writer.write_all(data)?;
+        writer.flush()?;
+        Ok(uncompressed)
+    }
+
+    fn decompress_into_lowlevel(&self, mut uncompressed: Vec<u8>) -> Result<Vec<u8>> {
         // let mut cipher = (self.mk_cipher)();
         // todo: avoid cloning the whole thing, but have a buffer for stream apply and decompression source
         let data = self.data.to_vec();
@@ -78,12 +90,14 @@ impl<'a> ZstdArrayRef<'a> {
     }
 
     pub fn items<T: DeserializeOwned>(&self) -> Result<Vec<T>> {
-        println!("items!!!!");
-        let mut uncompressed = Vec::<u8>::new();
-        uncompressed.push(CBOR_ARRAY_START);
-        let mut uncompressed = self.decompress_into(uncompressed)?;
-        uncompressed.push(CBOR_BREAK);
-        Ok(serde_cbor::from_slice(&uncompressed)?)
+        let uncompressed = self.decompress_into(Vec::new())?;
+        let mut result: Vec<T> = Vec::new();
+        let mut r = Cursor::new(&uncompressed);
+        while r.position() < uncompressed.len() as u64 {
+            let mut deserializer = serde_cbor::Deserializer::from_reader(r.by_ref());
+            result.push(serde::de::Deserialize::deserialize(&mut deserializer)?);
+        }
+        Ok(result)
     }
 }
 
@@ -104,15 +118,14 @@ impl ZstdArrayBuilder {
         let res = res.push_bytes(&decompressed)?;
         Ok(res)
     }
-    
+
     pub fn new(level: i32) -> std::io::Result<Self> {
         Ok(Self {
             encoder: Encoder::new(Vec::new(), level)?,
         })
     }
 
-    pub fn as_ref<'a>(&'a self) -> ZstdArrayRef<'a>
-    {
+    pub fn as_ref<'a>(&'a self) -> ZstdArrayRef<'a> {
         ZstdArrayRef::new(self.encoder.get_ref().as_ref())
     }
 
@@ -133,7 +146,6 @@ impl ZstdArrayBuilder {
     pub fn push_bytes(mut self, value: &[u8]) -> Result<Self> {
         self.encoder.write_all(value)?;
         self.encoder.flush()?;
-        self.encoder.get_mut().flush()?;
         Ok(self)
     }
 
@@ -142,7 +154,6 @@ impl ZstdArrayBuilder {
     pub fn push<T: Serialize>(mut self, value: &T) -> Result<Self> {
         serde_cbor::to_writer(&mut self.encoder, value)?;
         self.encoder.flush()?;
-        self.encoder.get_mut().flush()?;
         Ok(self)
     }
 }
@@ -158,7 +169,11 @@ mod tests {
         for i in 0u64..10 {
             w = w.push(&i)?;
             expected.push(i);
-            println!("xxx {} {}", w.as_ref().raw().len(), hex::encode(w.as_ref().raw()));
+            println!(
+                "xxx {} {}",
+                w.as_ref().raw().len(),
+                hex::encode(w.as_ref().raw())
+            );
             let items: Vec<u64> = w.as_ref().items()?;
             assert_eq!(items, expected);
         }
