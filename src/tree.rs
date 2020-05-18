@@ -75,18 +75,20 @@ pub struct Cid(Vec<u8>);
 
 /// index for a leaf of n events
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LeafIndex {
+pub struct LeafIndex<T> {
     // number of events
     count: u64,
     // block is sealed
     sealed: bool,
     // link to the block
     cid: Cid,
+    //
+    data: T,
 }
 
 /// index for a branch node
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BranchIndex {
+pub struct BranchIndex<T> {
     // number of events
     count: u64,
     // level of the tree node
@@ -95,16 +97,28 @@ pub struct BranchIndex {
     sealed: bool,
     // link to the branch node
     cid: Cid,
+    // extra data
+    data: T,
 }
 
 /// index
 #[derive(Debug, Clone, Serialize, Deserialize, From)]
-pub enum Index {
-    Leaf(LeafIndex),
-    Branch(BranchIndex),
+pub enum Index<T> {
+    Leaf(LeafIndex<T>),
+    Branch(BranchIndex<T>),
 }
 
-impl Index {
+impl<T> Index<T> {
+
+    fn data(&self) -> &T {
+        match self {
+            Index::Leaf(x) => &x.data,
+            Index::Branch(x) => &x.data,
+        }
+    }
+}
+
+impl<T> Index<T> {
     fn cid(&self) -> &Cid {
         match self {
             Index::Leaf(x) => &x.cid,
@@ -170,23 +184,23 @@ fn err(text: &str) -> std::io::Error {
 
 #[derive(Debug, Clone)]
 /// fully in memory representation of a branch node
-struct Branch {
+struct Branch<T> {
     // index data for the children
-    children: Vec<Index>,
+    children: Vec<Index<T>>,
 }
 
-impl Branch {
-    fn new(children: Vec<Index>) -> Self {
+impl<T: Clone> Branch<T> {
+    fn new(children: Vec<Index<T>>) -> Self {
         assert!(!children.is_empty());
         Self { children }
     }
-    fn last_child(&mut self) -> Index {
+    fn last_child(&mut self) -> Index<T> {
         self.children
             .last()
             .expect("branch can never have 0 children")
             .clone()
     }
-    fn last_child_mut(&mut self) -> &mut Index {
+    fn last_child_mut(&mut self) -> &mut Index<T> {
         self.children
             .last_mut()
             .expect("branch can never have 0 children")
@@ -205,14 +219,14 @@ impl Leaf {
     }
 }
 
-enum Node {
-    Branch(Branch),
+enum Node<T> {
+    Branch(Branch<T>),
     Leaf(Leaf),
 }
 
-enum NodeInfo<'a> {
-    Branch(&'a BranchIndex, Branch),
-    Leaf(&'a LeafIndex, Leaf),
+enum NodeInfo<'a, T> {
+    Branch(&'a BranchIndex<T>, Branch<T>),
+    Leaf(&'a LeafIndex<T>, Leaf),
 }
 
 impl Leaf {
@@ -226,14 +240,14 @@ impl Leaf {
     }
 }
 
-pub struct Tree<TT, T> {
-    root: Option<Index>,
-    forest: Arc<Forest<TT>>,
-    _t: PhantomData<T>,
+pub struct Tree<T: TreeTypes, V> {
+    root: Option<Index<T::Seq>>,
+    forest: Arc<Forest<T>>,
+    _t: PhantomData<V>,
 }
 
-impl<T: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static, TT: TreeTypes> Tree<TT, T> {
-    pub fn new(forest: Arc<Forest<TT>>) -> Self {
+impl<V: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static, T: TreeTypes> Tree<T, V> where {
+    pub fn new(forest: Arc<Forest<T>>) -> Self {
         Self {
             root: None,
             forest,
@@ -249,30 +263,30 @@ impl<T: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static, TT
     }
 
     /// append a single element
-    pub async fn push(&mut self, value: &T) -> Result<()> {
+    pub async fn push(&mut self, key: T::Key, value: &V) -> Result<()> {
         self.root = Some(match &self.root {
             Some(index) => {
                 if !index.sealed() {
-                    self.forest.push0(index, &value).await?
+                    self.forest.push0(index, key, &value).await?
                 } else {
                     let index = self.forest.single_branch(index.clone()).await?.into();
-                    self.forest.push0(&index, &value).await?
+                    self.forest.push0(&index, key, &value).await?
                 }
             }
-            None => self.forest.single_leaf(&value).await?.into(),
+            None => self.forest.single_leaf(key, &value).await?.into(),
         });
         Ok(())
     }
 
     /// element at index
-    pub async fn get(&self, offset: u64) -> Result<Option<T>> {
+    pub async fn get(&self, offset: u64) -> Result<Option<V>> {
         Ok(match &self.root {
             Some(index) => Some(self.forest.get0(index, offset).await?),
             None => None,
         })
     }
 
-    pub fn stream<'a>(&'a self) -> impl Stream<Item = Result<T>> + 'a {
+    pub fn stream<'a>(&'a self) -> impl Stream<Item = Result<V>> + 'a {
         match &self.root {
             Some(index) => self.forest.stream0(index.clone()).left_stream(),
             None => stream::empty().right_stream(),
@@ -288,47 +302,50 @@ impl<T: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static, TT
     }
 }
 
-pub trait TreeTypes where {
+pub trait TreeTypes {
     /// key type
-    type Key: Semigroup;
+    type Key: Semigroup + Debug;
     /// compact sequence type to be used for indices
-    type Seq: CompactSeq<Item=Self::Key>;
+    type Seq: CompactSeq<Item=Self::Key> + Serialize + DeserializeOwned + Clone + Debug;
 }
 
 /// a number of trees that are grouped together, sharing common caches
-pub struct Forest<TT> {
+pub struct Forest<T: TreeTypes> {
     store: ArcStore,
     config: Config,
-    branch_cache: RwLock<lru::LruCache<Cid, Branch>>,
+    branch_cache: RwLock<lru::LruCache<Cid, Branch<T::Seq>>>,
     leaf_cache: RwLock<lru::LruCache<Cid, Leaf>>,
-    _tt: PhantomData<TT>,
+    _tt: PhantomData<T>,
 }
 
 /// basic random access append only async tree
-impl<TT: TreeTypes> Forest<TT> {
+impl<T> Forest<T>
+    where
+        T: TreeTypes {
+
     /// predicate to determine if a leaf is sealed
     fn leaf_sealed(&self, bytes: u64, count: u64) -> bool {
         bytes >= self.config.max_leaf_size || count >= self.config.max_leaf_count
     }
 
-    /// create a new leaf index given a cid and some data
-    fn new_leaf_index(&self, cid: Cid, data: &[u8]) -> Result<LeafIndex> {
-        let count = CborZstdArrayRef::<IgnoredAny>::new(data).items()?.len() as u64;
-        let sealed = self.leaf_sealed(data.len() as u64, count);
-        Ok(LeafIndex { cid, count, sealed })
-    }
+    // /// create a new leaf index given a cid and some data
+    // fn new_leaf_index(&self, cid: Cid, data: &[u8]) -> Result<LeafIndex<T::Seq>> {
+    //     let count = CborZstdArrayRef::<IgnoredAny>::new(data).items()?.len() as u64;
+    //     let sealed = self.leaf_sealed(data.len() as u64, count);
+    //     Ok(LeafIndex { cid, count, sealed })
+    // }
 
     /// load a leaf given a leaf index
     ///
     /// for now this just loads from scratch, but in the future this will load from a cache
     /// of hot leaf nodes.
-    async fn load_leaf(&self, index: &LeafIndex) -> Result<Leaf> {
+    async fn load_leaf(&self, index: &LeafIndex<T::Seq>) -> Result<Leaf> {
         let bytes = self.store.get(&index.cid).await?;
         let items = ZstdArrayBuilder::init(bytes.as_ref(), self.config.zstd_level)?;
         Ok(Leaf::new(items))
     }
 
-    async fn load_leaf_cached(&self, index: &LeafIndex) -> Result<Leaf> {
+    async fn load_leaf_cached(&self, index: &LeafIndex<T::Seq>) -> Result<Leaf> {
         match self.leaf_cache.write().unwrap().pop(&index.cid) {
             Some(leaf) => Ok(leaf),
             None => self.load_leaf(index).await,
@@ -336,19 +353,20 @@ impl<TT: TreeTypes> Forest<TT> {
     }
 
     /// Creates a tree containing a single item, and returns the index of that tree
-    async fn single_leaf<T: Serialize + Debug>(&self, value: &T) -> Result<LeafIndex> {
+    async fn single_leaf<V: Serialize + Debug>(&self, key: T::Key, value: &V) -> Result<LeafIndex<T::Seq>> {
         let items = ZstdArrayBuilder::new(self.config.zstd_level)?.push(value)?;
         let cid = self.store.put(items.as_ref().raw()).await?;
         let index = LeafIndex {
             cid,
             count: 1,
             sealed: self.leaf_sealed(items.as_ref().raw().len() as u64, 1),
+            data: T::Seq::single(key),
         };
         Ok(index)
     }
 
     /// predicate to determine if a leaf is sealed
-    fn branch_sealed(&self, bytes: u64, items: &[Index]) -> bool {
+    fn branch_sealed(&self, bytes: u64, items: &[Index<T::Seq>]) -> bool {
         // a branch with less than 1 children is not considered sealed.
         // if we ever get this situation, we should just panic.
         items.len() > 1
@@ -357,39 +375,39 @@ impl<TT: TreeTypes> Forest<TT> {
                 || items.len() as u64 >= self.config.max_branch_count)
     }
 
-    /// create a branch index given a cid and some data
-    fn new_branch_index(&self, cid: Cid, data: &[u8], children: &[Index]) -> BranchIndex {
-        let count = children.iter().map(|c| c.count()).sum();
-        let level = children.iter().fold(1, |l, c| l.max(c.level() + 1));
-        let sealed = self.branch_sealed(data.len() as u64, children);
-        BranchIndex {
-            cid,
-            count,
-            level,
-            sealed,
-        }
-    }
+    // /// create a branch index given a cid and some data
+    // fn new_branch_index(&self, cid: Cid, data: &[u8], children: &[Index<T::Seq>]) -> BranchIndex<T::Seq> {
+    //     let count = children.iter().map(|c| c.count()).sum();
+    //     let level = children.iter().fold(1, |l, c| l.max(c.level() + 1));
+    //     let sealed = self.branch_sealed(data.len() as u64, children);
+    //     BranchIndex {
+    //         cid,
+    //         count,
+    //         level,
+    //         sealed,
+    //     }
+    // }
 
     /// load a branch given a branch index
     ///
     /// for now this just loads from scratch, but in the future this will load from a cache
     /// of hot branch nodes.
-    async fn load_branch(&self, index: &BranchIndex) -> Result<Branch> {
+    async fn load_branch(&self, index: &BranchIndex<T::Seq>) -> Result<Branch<T::Seq>> {
         let bytes = self.store.get(&index.cid).await?;
         let children = CborZstdArrayRef::new(bytes.as_ref()).items()?;
-        Ok(Branch::new(children))
+        Ok(Branch::<T::Seq>::new(children))
     }
 
-    async fn load_branch_cached(&self, index: &BranchIndex) -> Result<Branch> {
+    async fn load_branch_cached(&self, index: &BranchIndex<T::Seq>) -> Result<Branch<T::Seq>> {
         match self.branch_cache.write().unwrap().pop(&index.cid) {
             Some(branch) => Ok(branch),
             None => self.load_branch(index).await,
         }
     }
 
-    async fn single_branch(&self, value: Index) -> Result<BranchIndex> {
-        let children: CborZstdArrayBuilder<Index> =
-            CborZstdArrayBuilder::<Index>::new(self.config.zstd_level)?;
+    async fn single_branch(&self, value: Index<T::Seq>) -> Result<BranchIndex<T::Seq>> {
+        let children: CborZstdArrayBuilder<Index<T::Seq>> =
+            CborZstdArrayBuilder::<Index<T::Seq>>::new(self.config.zstd_level)?;
         let children = children.push(&value)?;
         let cid = self.store.put(children.buffer()).await?;
         let index = BranchIndex {
@@ -397,18 +415,19 @@ impl<TT: TreeTypes> Forest<TT> {
             count: value.count(),
             sealed: false,
             cid,
+            data: T::Seq::single(value.data().summarize()),
         };
         Ok(index)
     }
 
-    async fn load_node<'a>(&self, index: &'a Index) -> Result<NodeInfo<'a>> {
+    async fn load_node<'a>(&self, index: &'a Index<T::Seq>) -> Result<NodeInfo<'a, T::Seq>> {
         Ok(match index {
             Index::Branch(index) => NodeInfo::Branch(index, self.load_branch_cached(index).await?),
             Index::Leaf(index) => NodeInfo::Leaf(index, self.load_leaf_cached(index).await?),
         })
     }
 
-    fn store_leaf(&self, index: LeafIndex, node: Leaf) -> Index {
+    fn store_leaf(&self, index: LeafIndex<T::Seq>, node: Leaf) -> Index<T::Seq> {
         self.leaf_cache
             .write()
             .unwrap()
@@ -416,7 +435,7 @@ impl<TT: TreeTypes> Forest<TT> {
         index.into()
     }
 
-    fn store_branch(&self, index: BranchIndex, node: Branch) -> Index {
+    fn store_branch(&self, index: BranchIndex<T::Seq>, node: Branch<T::Seq>) -> Index<T::Seq> {
         self.branch_cache
             .write()
             .unwrap()
@@ -424,12 +443,13 @@ impl<TT: TreeTypes> Forest<TT> {
         index.into()
     }
 
-    fn pushr<'a, T: Serialize + Debug>(
+    fn pushr<'a, V: Serialize + Debug>(
         &'a self,
-        node: &'a Index,
-        value: &'a T,
-    ) -> std::pin::Pin<Box<dyn Future<Output = Result<Index>> + 'a>> {
-        Box::pin(self.push0(node, value))
+        node: &'a Index<T::Seq>,
+        key: T::Key,
+        value: &'a V,
+    ) -> std::pin::Pin<Box<dyn Future<Output = Result<Index<T::Seq>>> + 'a>> {
+        Box::pin(self.push0(node, key, value))
     }
 
     /// note: you could make this more efficient by passing in a mut &Index, but then
@@ -438,7 +458,7 @@ impl<TT: TreeTypes> Forest<TT> {
     ///
     /// The functional way of threading the index through the call and returning it is
     /// safer to get correct.
-    async fn push0<T: Serialize + Debug>(&self, index: &Index, value: &T) -> Result<Index> {
+    async fn push0<V: Serialize + Debug>(&self, index: &Index<T::Seq>, key: T::Key, value: &V) -> Result<Index<T::Seq>> {
         // calling push0 for a sealed node makes no sense and should not happen!
         assert!(!index.sealed());
         match self.load_node(index).await? {
@@ -448,27 +468,33 @@ impl<TT: TreeTypes> Forest<TT> {
                 // update the index data
                 index.count += 1;
                 index.sealed = self.leaf_sealed(leaf.items.raw().len() as u64, index.count);
+                index.data.push(key);
                 index.cid = self.store.put(leaf.items.raw()).await?;
                 Ok(self.store_leaf(index, leaf))
             }
             NodeInfo::Branch(index, mut branch) => {
                 let child_index = branch.last_child();
+                let mut index = index.clone();
                 if !child_index.sealed() {
                     // there is room in the child. Just push it down and update us
-                    *branch.last_child_mut() = self.pushr(&child_index, value).await?;
+                    index.data.extend(&key);
+                    *branch.last_child_mut() = self.pushr(&child_index, key, value).await?;
                 } else if child_index.level() < index.level - 1 {
                     // there is room for another tree node. Create a new one and push down to it
+                    index.data.extend(&key);                    
                     let child_index = self.single_branch(child_index).await?;
-                    *branch.last_child_mut() = self.pushr(&child_index.into(), value).await?;
+                    *branch.last_child_mut() = self.pushr(&child_index.into(), key, value).await?;
                 } else {
                     // all our children are full, we need to append
-                    let child_index = self.single_leaf(&value).await?;
+                    let child_index = self.single_leaf(key, &value).await?;
+                    // add new index element wiht child summary
+                    index.data.push(child_index.data.summarize());
+                    // add actual new child
                     branch.children.push(child_index.into());
                 }
-                let data = CborZstdArrayBuilder::<Index>::new(self.config.zstd_level)?;
+                let data = CborZstdArrayBuilder::<Index<T::Seq>>::new(self.config.zstd_level)?;
                 let data = data.push_items(branch.children.iter().cloned())?;
                 let cid = self.store.put(data.buffer()).await?;
-                let mut index = index.clone();
                 index.count += 1;
                 index.sealed = self.branch_sealed(data.buffer().len() as u64, &branch.children);
                 index.cid = cid;
@@ -477,15 +503,15 @@ impl<TT: TreeTypes> Forest<TT> {
         }
     }
 
-    fn getr<'a, T: DeserializeOwned + 'a>(
+    fn getr<'a, V: DeserializeOwned + 'a>(
         &'a self,
-        node: &'a Index,
+        node: &'a Index<T::Seq>,
         offset: u64,
-    ) -> std::pin::Pin<Box<dyn Future<Output = Result<T>> + 'a>> {
+    ) -> std::pin::Pin<Box<dyn Future<Output = Result<V>> + 'a>> {
         Box::pin(self.get0(node, offset))
     }
 
-    async fn get0<T: DeserializeOwned>(&self, index: &Index, mut offset: u64) -> Result<T> {
+    async fn get0<V: DeserializeOwned>(&self, index: &Index<T::Seq>, mut offset: u64) -> Result<V> {
         assert!(offset < index.count());
         match self.load_node(index).await? {
             NodeInfo::Branch(index, node) => {
@@ -502,11 +528,11 @@ impl<TT: TreeTypes> Forest<TT> {
         }
     }
 
-    fn stream0<'a, T: DeserializeOwned>(&'a self, index: Index) -> LocalBoxStream<'a, Result<T>> {
+    fn stream0<'a, V: DeserializeOwned>(&'a self, index: Index<T::Seq>) -> LocalBoxStream<'a, Result<V>> {
         let s = async move {
             Ok(match self.load_node(&index).await? {
                 NodeInfo::Leaf(index, node) => {
-                    let elems: Vec<T> = node.items.items()?;
+                    let elems: Vec<V> = node.items.items()?;
                     stream::iter(elems).map(|x| Ok(x)).left_stream()
                 }
                 NodeInfo::Branch(index, node) => stream::iter(node.children)
@@ -521,19 +547,19 @@ impl<TT: TreeTypes> Forest<TT> {
 
     fn dumpr<'a>(
         &'a self,
-        index: &'a Index,
+        index: &'a Index<T::Seq>,
         prefix: &'a str,
     ) -> std::pin::Pin<Box<dyn Future<Output = Result<()>> + 'a>> {
         Box::pin(self.dump0(index, prefix))
     }
 
-    async fn dump0(&self, index: &Index, prefix: &str) -> Result<()> {
+    async fn dump0(&self, index: &Index<T::Seq>, prefix: &str) -> Result<()> {
         match self.load_node(index).await? {
             NodeInfo::Leaf(index, leaf) => {
                 println!("{}Leaf({}, {})", prefix, index.count, index.sealed);
             }
             NodeInfo::Branch(index, branch) => {
-                println!("{}Branch({}, {})", prefix, index.count, index.sealed);
+                println!("{}Branch({}, {} {:?})", prefix, index.count, index.sealed, index.data);
                 let prefix = prefix.to_string() + "  ";
                 for x in branch.children.iter() {
                     self.dumpr(x, &prefix).await?;
@@ -545,7 +571,7 @@ impl<TT: TreeTypes> Forest<TT> {
 
     /// creates a new forest
     pub fn new(store: ArcStore) -> Self {
-        let branch_cache = RwLock::new(lru::LruCache::<Cid, Branch>::new(1000));
+        let branch_cache = RwLock::new(lru::LruCache::<Cid, Branch<T::Seq>>::new(1000));
         let leaf_cache = RwLock::new(lru::LruCache::<Cid, Leaf>::new(1000));
         Self {
             store,

@@ -101,8 +101,8 @@ struct Test {
 struct TT();
 
 impl Semigroup for u32 {
-    fn combine(self, b: Self) -> Self {
-        self + b
+    fn combine(&mut self, b: &Self) {
+        *self = std::cmp::Ord::max(*self, *b);
     }
 }
 
@@ -147,13 +147,13 @@ async fn main() -> Result<()> {
     let store = TestStore::new();
     let forest = Arc::new(Forest::new(Arc::new(store)));
     let mut tree = Tree::<TT, u64>::new(forest.clone());
-    tree.push(&0u64).await?;
+    tree.push(0, &0u64).await?;
     println!("{:?}", tree.get(0).await?);
 
     let mut tree = Tree::<TT, u64>::new(forest);
     for i in 0..1000 {
         println!("{}", i);
-        let res = tree.push(&i).await?;
+        tree.push(i as u32, &i).await?;
     }
 
     tree.dump().await?;
