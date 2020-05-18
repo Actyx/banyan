@@ -8,8 +8,10 @@ use zstd::stream::raw::{Decoder as ZDecoder, Encoder as ZEncoder, InBuffer, Oper
 mod czaa;
 mod tree;
 mod zstd_array;
+mod forest;
 
 use tree::*;
+use forest::{Semigroup, SimpleCompactSeq};
 
 const CBOR_ARRAY_START: u8 = (4 << 5) | 31;
 const CBOR_BREAK: u8 = 255;
@@ -96,6 +98,19 @@ struct Test {
     inner: u64,
 }
 
+struct TT();
+
+impl Semigroup for u32 {
+    fn combine(self, b: Self) -> Self {
+        self + b
+    }
+}
+
+impl TreeTypes for TT {
+    type Key = u32;
+    type Seq = SimpleCompactSeq<u32>;
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let mut tgt: Vec<u8> = Vec::new();
@@ -131,11 +146,11 @@ async fn main() -> Result<()> {
     println!("building a tree");
     let store = TestStore::new();
     let forest = Arc::new(Forest::new(Arc::new(store)));
-    let mut tree = Tree::<u64>::new(forest.clone());
+    let mut tree = Tree::<TT, u64>::new(forest.clone());
     tree.push(&0u64).await?;
     println!("{:?}", tree.get(0).await?);
 
-    let mut tree = Tree::<u64>::new(forest);
+    let mut tree = Tree::<TT, u64>::new(forest);
     for i in 0..1000 {
         println!("{}", i);
         let res = tree.push(&i).await?;

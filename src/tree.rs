@@ -20,6 +20,7 @@ use std::{
     sync::{Arc, RwLock},
 };
 use tracing::{debug, info, trace};
+use crate::forest::{Semigroup, CompactSeq};
 
 type ArcStore = Arc<dyn Store + Send + Sync + 'static>;
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
@@ -225,14 +226,14 @@ impl Leaf {
     }
 }
 
-pub struct Tree<T> {
+pub struct Tree<TT, T> {
     root: Option<Index>,
-    forest: Arc<Forest>,
+    forest: Arc<Forest<TT>>,
     _t: PhantomData<T>,
 }
 
-impl<T: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static> Tree<T> {
-    pub fn new(forest: Arc<Forest>) -> Self {
+impl<T: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static, TT: TreeTypes> Tree<TT, T> {
+    pub fn new(forest: Arc<Forest<TT>>) -> Self {
         Self {
             root: None,
             forest,
@@ -287,16 +288,24 @@ impl<T: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static> Tr
     }
 }
 
+pub trait TreeTypes where {
+    /// key type
+    type Key: Semigroup;
+    /// compact sequence type to be used for indices
+    type Seq: CompactSeq<Item=Self::Key>;
+}
+
 /// a number of trees that are grouped together, sharing common caches
-pub struct Forest {
+pub struct Forest<TT> {
     store: ArcStore,
     config: Config,
     branch_cache: RwLock<lru::LruCache<Cid, Branch>>,
     leaf_cache: RwLock<lru::LruCache<Cid, Leaf>>,
+    _tt: PhantomData<TT>,
 }
 
 /// basic random access append only async tree
-impl Forest {
+impl<TT: TreeTypes> Forest<TT> {
     /// predicate to determine if a leaf is sealed
     fn leaf_sealed(&self, bytes: u64, count: u64) -> bool {
         bytes >= self.config.max_leaf_size || count >= self.config.max_leaf_count
@@ -543,6 +552,7 @@ impl Forest {
             config: Config::debug(),
             branch_cache,
             leaf_cache,
+            _tt: PhantomData,
         }
     }
 }
