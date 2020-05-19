@@ -6,12 +6,12 @@ use std::sync::Arc;
 use zstd::stream::raw::{Decoder as ZDecoder, Encoder as ZEncoder, InBuffer, Operation, OutBuffer};
 
 mod czaa;
+mod forest;
 mod tree;
 mod zstd_array;
-mod forest;
 
-use tree::*;
 use forest::{Semigroup, SimpleCompactSeq};
+use tree::*;
 
 const CBOR_ARRAY_START: u8 = (4 << 5) | 31;
 const CBOR_BREAK: u8 = 255;
@@ -147,13 +147,13 @@ async fn main() -> Result<()> {
     let store = TestStore::new();
     let forest = Arc::new(Forest::new(Arc::new(store)));
     let mut tree = Tree::<TT, u64>::new(forest.clone());
-    tree.push(0, &0u64).await?;
+    tree.push(&0, &0u64).await?;
     println!("{:?}", tree.get(0).await?);
 
     let mut tree = Tree::<TT, u64>::new(forest);
     for i in 0..1000 {
         println!("{}", i);
-        tree.push(i as u32, &i).await?;
+        tree.push(&(i as u32), &i).await?;
     }
 
     tree.dump().await?;
