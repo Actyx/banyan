@@ -427,7 +427,8 @@ where
     /// of hot branch nodes.
     async fn load_branch(&self, index: &BranchIndex<T::Seq>) -> Result<Branch<T::Seq>> {
         let bytes = self.store.get(&index.cid).await?;
-        let children = CborZstdArrayRef::new(bytes.as_ref()).items()?;
+        let children: Vec<_> = serde_cbor::from_slice(&bytes)?;
+        // let children = CborZstdArrayRef::new(bytes.as_ref()).items()?;
         Ok(Branch::<T::Seq>::new(children))
     }
 
@@ -439,10 +440,11 @@ where
     }
 
     async fn single_branch(&self, value: Index<T::Seq>) -> Result<BranchIndex<T::Seq>> {
-        let children: CborZstdArrayBuilder<Index<T::Seq>> =
-            CborZstdArrayBuilder::<Index<T::Seq>>::new(self.config.zstd_level)?;
-        let children = children.push(&value)?;
-        let cid = self.store.put(children.buffer()).await?;
+        // let children: CborZstdArrayBuilder<Index<T::Seq>> =
+        //     CborZstdArrayBuilder::<Index<T::Seq>>::new(self.config.zstd_level)?;
+        // let children = children.push(&value)?;
+        let cbor = serde_cbor::to_vec(&vec![&value])?;
+        let cid = self.store.put(&cbor).await?;
         let index = BranchIndex {
             level: value.level() + 1,
             count: value.count(),
@@ -530,11 +532,13 @@ where
                     // add actual new child
                     branch.children.push(child_index.into());
                 }
-                let data = CborZstdArrayBuilder::<Index<T::Seq>>::new(self.config.zstd_level)?;
-                let data = data.push_items(branch.children.iter().cloned())?;
-                let cid = self.store.put(data.buffer()).await?;
+                let cbor = serde_cbor::to_vec(&branch.children.iter().collect::<Vec<_>>())?;
+                let cid = self.store.put(&cbor).await?;
+                // let data = CborZstdArrayBuilder::<Index<T::Seq>>::new(self.config.zstd_level)?;
+                // let data = data.push_items(branch.children.iter().cloned())?;
+                // let cid = self.store.put(data.buffer()).await?;
                 index.count += 1;
-                index.sealed = self.branch_sealed(data.buffer().len() as u64, &branch.children);
+                index.sealed = self.branch_sealed(cbor.len() as u64, &branch.children);
                 index.cid = cid;
                 Ok(self.store_branch(index, branch))
             }
