@@ -7,6 +7,7 @@ use zstd::stream::raw::{Decoder as ZDecoder, Encoder as ZEncoder, InBuffer, Oper
 
 mod czaa;
 mod forest;
+mod ipfs;
 mod tree;
 mod zstd_array;
 
@@ -144,7 +145,8 @@ async fn main() -> Result<()> {
     println!("{:?}", decompressed);
 
     println!("building a tree");
-    let store = TestStore::new();
+    // let store = TestStore::new();
+    let store = IpfsStore::new();
     let forest = Arc::new(Forest::new(Arc::new(store)));
     let mut tree = Tree::<TT, u64>::new(forest.clone());
     tree.push(&0, &0u64).await?;
@@ -166,6 +168,8 @@ async fn main() -> Result<()> {
     while let Some(Ok(v)) = stream.next().await {
         println!("{:?}", v);
     }
+
+    println!("{:?}", tree);
 
     Ok(())
 }

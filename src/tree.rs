@@ -1,5 +1,6 @@
 use crate::czaa::*;
 use crate::forest::{CompactSeq, Semigroup};
+use crate::ipfs::Cid;
 use crate::zstd_array::*;
 use derive_more::Display;
 use derive_more::From;
@@ -16,6 +17,7 @@ use serde::{
 use std::fmt::Debug;
 use std::{
     collections::HashMap,
+    fmt,
     marker::PhantomData,
     pin::Pin,
     sync::{Arc, RwLock},
@@ -69,9 +71,6 @@ impl Default for Config {
         }
     }
 }
-
-#[derive(Debug, Clone, Serialize, Deserialize, Hash, PartialEq, Eq)]
-pub struct Cid(Vec<u8>);
 
 /// index for a leaf of n events
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -145,8 +144,8 @@ impl<T> Index<T> {
 }
 
 pub trait Store {
-    fn put(&self, data: &[u8]) -> BoxFuture<std::io::Result<Cid>>;
-    fn get(&self, cid: &Cid) -> BoxFuture<std::io::Result<Arc<[u8]>>>;
+    fn put(&self, data: &[u8]) -> BoxFuture<Result<Cid>>;
+    fn get(&self, cid: &Cid) -> BoxFuture<Result<Arc<[u8]>>>;
 }
 
 pub struct TestStore(Arc<RwLock<HashMap<Cid, Arc<[u8]>>>>);
@@ -158,8 +157,8 @@ impl TestStore {
 }
 
 impl Store for TestStore {
-    fn put(&self, data: &[u8]) -> BoxFuture<std::io::Result<Cid>> {
-        let cid = Cid(Sha2_256::digest(data).digest().to_vec());
+    fn put(&self, data: &[u8]) -> BoxFuture<Result<Cid>> {
+        let cid = Cid::dag_cbor(data);
         self.0
             .as_ref()
             .write()
@@ -167,7 +166,7 @@ impl Store for TestStore {
             .insert(cid.clone(), data.into());
         future::ok(cid).boxed()
     }
-    fn get(&self, cid: &Cid) -> BoxFuture<std::io::Result<Arc<[u8]>>> {
+    fn get(&self, cid: &Cid) -> BoxFuture<Result<Arc<[u8]>>> {
         let x = self.0.as_ref().read().unwrap();
         if let Some(value) = x.get(cid) {
             future::ok(value.clone()).boxed()
@@ -177,8 +176,28 @@ impl Store for TestStore {
     }
 }
 
-fn err(text: &str) -> std::io::Error {
-    std::io::Error::new(std::io::ErrorKind::Other, text)
+pub struct IpfsStore {}
+
+impl IpfsStore {
+    pub fn new() -> Self {
+        Self {}
+    }
+}
+
+impl Store for IpfsStore {
+    fn put(&self, data: &[u8]) -> BoxFuture<Result<Cid>> {
+        let data = data.to_vec();
+        async move { crate::ipfs::block_put(&data, false).await }.boxed()
+    }
+
+    fn get(&self, cid: &Cid) -> BoxFuture<Result<Arc<[u8]>>> {
+        let cid = cid.clone();
+        async move { crate::ipfs::block_get(&cid).await }.boxed()
+    }
+}
+
+fn err(text: &str) -> crate::Error {
+    Box::new(std::io::Error::new(std::io::ErrorKind::Other, text))
 }
 
 #[derive(Debug, Clone)]
@@ -243,6 +262,15 @@ pub struct Tree<T: TreeTypes, V> {
     root: Option<Index<T::Seq>>,
     forest: Arc<Forest<T>>,
     _t: PhantomData<V>,
+}
+
+impl<T: TreeTypes, V> fmt::Debug for Tree<T, V> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.root {
+            Some(root) => write!(f, "Tree {}", root.cid()),
+            None => write!(f, "empy tree"),
+        }
+    }
 }
 
 impl<V: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static, T: TreeTypes>
