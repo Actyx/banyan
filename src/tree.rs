@@ -12,7 +12,7 @@ use futures::{
 use multihash::{Code, Multihash, Sha2_256};
 use serde::{
     de::{DeserializeOwned, IgnoredAny},
-    Deserialize, Serialize,
+    Deserialize, Serialize, Serializer, Deserializer,
 };
 use std::fmt::Debug;
 use std::{
@@ -73,7 +73,7 @@ impl Default for Config {
 }
 
 /// index for a leaf of n events
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct LeafIndex<T> {
     // number of events
     count: u64,
@@ -86,7 +86,7 @@ pub struct LeafIndex<T> {
 }
 
 /// index for a branch node
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct BranchIndex<T> {
     // number of events
     count: u64,
@@ -100,11 +100,97 @@ pub struct BranchIndex<T> {
     data: T,
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct IndexW<'a, T> {
+    // number of events
+    count: u64,
+    // level of the tree node
+    level: Option<u32>,
+    // block is sealed
+    sealed: bool,
+    // link to the branch node
+    cid: &'a Cid,
+    // extra data
+    data: &'a T,
+}
+
+impl<'a, T> From<&'a Index<T>> for IndexW<'a, T> {
+    fn from(value: &'a Index<T>) -> Self {
+        match value {
+            Index::Branch(i) =>  Self {
+                count: i.count,
+                sealed: i.sealed,
+                level: Some(i.level),
+                cid: &i.cid,
+                data: &i.data,
+            },
+            Index::Leaf(i) => Self {
+                count: i.count,
+                sealed: i.sealed,
+                level: None,
+                cid: &i.cid,
+                data: &i.data,
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct IndexR<T> {
+    // number of events
+    count: u64,
+    // level of the tree node
+    level: Option<u32>,
+    // block is sealed
+    sealed: bool,
+    // link to the branch node
+    cid: Cid,
+    // extra data
+    data: T,
+}
+
+impl<T> From<IndexR<T>> for Index<T> {
+    fn from(v: IndexR<T>) -> Self {
+        if let Some(level) = v.level {
+            BranchIndex {                
+                count: v.count,
+                cid: v.cid,
+                data: v.data,
+                sealed: v.sealed,
+                level,
+            }.into()
+        } else {
+            LeafIndex {           
+                count: v.count,
+                cid: v.cid,
+                data: v.data,
+                sealed: v.sealed,
+            }.into()
+        }
+    }
+}
+
 /// index
-#[derive(Debug, Clone, Serialize, Deserialize, From)]
+#[derive(Debug, Clone, From)]
 pub enum Index<T> {
     Leaf(LeafIndex<T>),
     Branch(BranchIndex<T>),
+}
+
+use std::result;
+
+impl<T: Serialize> Serialize for Index<T> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> result::Result<S::Ok, S::Error>
+    {
+        IndexW::<T>::from(self).serialize(serializer)
+    }
+}
+
+impl<'de, T: DeserializeOwned> Deserialize<'de> for Index<T> {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> result::Result<Index<T>, D::Error>
+    {
+        IndexR::<T>::deserialize(deserializer).map(Into::into)        
+    }
 }
 
 impl<T> Index<T> {
@@ -399,13 +485,18 @@ where
     }
 
     /// predicate to determine if a leaf is sealed
-    fn branch_sealed(&self, bytes: u64, items: &[Index<T::Seq>]) -> bool {
-        // a branch with less than 1 children is not considered sealed.
-        // if we ever get this situation, we should just panic.
-        items.len() > 1
-            && items.last().unwrap().sealed()
-            && ((bytes >= self.config.max_branch_size)
-                || items.len() as u64 >= self.config.max_branch_count)
+    fn branch_sealed(&self, bytes: u64, items: &[Index<T::Seq>], level: u32) -> bool {
+        // a branch with less than 2 children is never considered sealed.
+        // if we ever get this a branch that is too large despite having just 1 child,
+        // we should just panic.
+        if let Some(last_child) = items.last() {
+            items.len() > 1
+                && (last_child.sealed() && last_child.level() >= level - 1)
+                && ((bytes >= self.config.max_branch_size)
+                    || items.len() as u64 >= self.config.max_branch_count)
+        } else {
+            false
+        }
     }
 
     // /// create a branch index given a cid and some data
@@ -538,7 +629,7 @@ where
                 // let data = data.push_items(branch.children.iter().cloned())?;
                 // let cid = self.store.put(data.buffer()).await?;
                 index.count += 1;
-                index.sealed = self.branch_sealed(cbor.len() as u64, &branch.children);
+                index.sealed = self.branch_sealed(cbor.len() as u64, &branch.children, index.level);
                 index.cid = cid;
                 Ok(self.store_branch(index, branch))
             }

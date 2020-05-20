@@ -2,7 +2,7 @@ use futures::prelude::*;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::io::prelude::*;
 use std::io::{Cursor, SeekFrom, Write};
-use std::sync::Arc;
+use std::{collections::BTreeSet, sync::Arc};
 use zstd::stream::raw::{Decoder as ZDecoder, Encoder as ZEncoder, InBuffer, Operation, OutBuffer};
 
 mod czaa;
@@ -11,7 +11,7 @@ mod ipfs;
 mod tree;
 mod zstd_array;
 
-use forest::{Semigroup, SimpleCompactSeq};
+use forest::{Semigroup, SimpleCompactSeq, CompactSeq};
 use tree::*;
 
 const CBOR_ARRAY_START: u8 = (4 << 5) | 31;
@@ -108,8 +108,126 @@ impl Semigroup for u32 {
 }
 
 impl TreeTypes for TT {
-    type Key = u32;
-    type Seq = SimpleCompactSeq<u32>;
+    type Key = Value;
+    type Seq = ValueSeq;
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialOrd, PartialEq, Ord, Eq)]
+struct Tag(String);
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct Tags(BTreeSet<Tag>);
+
+impl Tags {
+    fn empty() -> Self {
+        Self(BTreeSet::new())
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct Value {
+    min_lamport: u64,
+    min_time: u64,
+    max_time: u64,
+    tags: Tags,
+}
+
+impl Value {
+    fn single(lamport: u64, time: u64, tags: Tags) -> Self {
+        Self {
+            min_lamport: lamport,
+            min_time: time,
+            max_time: time,
+            tags,
+        }
+    }
+}
+
+impl Semigroup for Value {
+    fn combine(&mut self, b: &Value) {
+        self.min_lamport = self.min_lamport.min(b.min_lamport);
+        self.min_time = self.min_time.min(b.min_time);
+        self.max_time = self.max_time.max(b.max_time);
+        self.tags.0.extend(b.tags.0.iter().cloned());
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct ValueSeq {
+    min_lamport: Vec<u64>,
+    min_time: Vec<u64>,
+    max_time: Vec<u64>,
+    tags: Vec<Tags>,
+}
+
+impl CompactSeq for ValueSeq {
+    type Item = Value;
+    
+    fn single(value: &Value) -> Self {
+        Self {
+            min_lamport: vec![value.min_lamport],
+            min_time: vec![value.min_time],
+            max_time: vec![value.max_time],
+            tags: vec![value.tags.clone()],
+        }
+    }
+
+    fn push(&mut self, value: &Value) {
+        self.min_lamport.push(value.min_lamport);
+        self.min_time.push(value.min_time);
+        self.max_time.push(value.max_time);
+        self.tags.push(value.tags.clone());
+    }
+
+    fn extend(&mut self, value: &Value) {
+        let min_lamport = self.min_lamport.last_mut().unwrap();
+        let min_time = self.min_time.last_mut().unwrap();
+        let max_time = self.max_time.last_mut().unwrap();
+        let tags = self.tags.last_mut().unwrap();
+        *min_lamport = value.min_lamport.min(*min_lamport);
+        *min_time = value.min_time.min(*min_time);
+        *max_time = value.max_time.min(*max_time);
+        tags.0.extend(value.tags.0.iter().cloned());
+    }
+
+    fn get(&self, index: usize) -> Option<Value> {
+        if let (
+            Some(min_lamport),
+            Some(min_time),
+            Some(max_time),
+            Some(tags)) =
+        (
+            self.min_lamport.get(index),
+            self.min_time.get(index),
+            self.max_time.get(index),
+            self.tags.get(index),
+        ) {
+            Some(Value {
+                min_lamport: *min_lamport,
+                min_time: *min_time,
+                max_time: *max_time,
+                tags: tags.clone(),
+            })
+        } else {
+            None
+        }
+    }
+
+    fn items(&self) -> Vec<Value> {
+        let mut items = Vec::new();
+        for i in 0..self.tags.len() {
+            items.push(self.get(i).unwrap());
+        }
+        items
+    }
+
+    fn summarize(&self) -> Value {
+        let mut result = self.get(0).unwrap();        
+        for i in 1..self.tags.len() {
+            result.combine(&self.get(i).unwrap());
+        }
+        result
+    }
 }
 
 #[tokio::main]
@@ -149,13 +267,13 @@ async fn main() -> Result<()> {
     let store = IpfsStore::new();
     let forest = Arc::new(Forest::new(Arc::new(store)));
     let mut tree = Tree::<TT, u64>::new(forest.clone());
-    tree.push(&0, &0u64).await?;
+    tree.push(&Value::single(0, 0, Tags::empty()), &0u64).await?;
     println!("{:?}", tree.get(0).await?);
 
     let mut tree = Tree::<TT, u64>::new(forest);
     for i in 0..1000 {
         println!("{}", i);
-        tree.push(&(i as u32), &i).await?;
+        tree.push(&Value::single(i,i, Tags::empty()), &i).await?;
     }
 
     tree.dump().await?;
