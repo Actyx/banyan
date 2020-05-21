@@ -7,6 +7,7 @@ use std::{collections::BTreeSet, sync::Arc};
 use zstd::stream::raw::{Decoder as ZDecoder, Encoder as ZEncoder, InBuffer, Operation, OutBuffer};
 
 mod czaa;
+mod flat_tree;
 mod forest;
 mod ipfs;
 mod tree;
@@ -318,8 +319,8 @@ async fn main() -> Result<()> {
     println!("{:?}", decompressed);
 
     println!("building a tree");
-    let store = TestStore::new();
-    // let store = IpfsStore::new();
+    // let store = TestStore::new();
+    let store = IpfsStore::new();
     let forest = Arc::new(Forest::new(Arc::new(store)));
     let mut tree = Tree::<TT, u64>::empty(forest.clone());
     tree.push(&Value::single(0, 0, Tags::empty()), &0u64)
@@ -366,5 +367,6 @@ async fn main() -> Result<()> {
 
     println!("{:?}", tree);
 
+    flat_tree::test();
     Ok(())
 }
