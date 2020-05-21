@@ -1,5 +1,5 @@
 use crate::czaa::*;
-use crate::forest::{CompactSeq, Semigroup};
+use crate::forest::{compactseq_items, CompactSeq, Semigroup};
 use crate::ipfs::Cid;
 use crate::zstd_array::*;
 use derive_more::Display;
@@ -12,7 +12,7 @@ use futures::{
 use multihash::{Code, Multihash, Sha2_256};
 use serde::{
     de::{DeserializeOwned, IgnoredAny},
-    Deserialize, Serialize, Serializer, Deserializer,
+    Deserialize, Deserializer, Serialize, Serializer,
 };
 use std::fmt::Debug;
 use std::{
@@ -75,35 +75,33 @@ impl Default for Config {
 /// index for a leaf of n events
 #[derive(Debug, Clone)]
 pub struct LeafIndex<T> {
-    // number of events
-    count: u64,
     // block is sealed
-    sealed: bool,
+    pub sealed: bool,
     // link to the block
-    cid: Cid,
+    pub cid: Cid,
     //
-    data: T,
+    pub data: T,
 }
 
 /// index for a branch node
 #[derive(Debug, Clone)]
 pub struct BranchIndex<T> {
     // number of events
-    count: u64,
+    pub count: u64,
     // level of the tree node
-    level: u32,
+    pub level: u32,
     // block is sealed
-    sealed: bool,
+    pub sealed: bool,
     // link to the branch node
-    cid: Cid,
+    pub cid: Cid,
     // extra data
-    data: T,
+    pub data: T,
 }
 
 #[derive(Debug, Clone, Serialize)]
 struct IndexW<'a, T> {
     // number of events
-    count: u64,
+    count: Option<u64>,
     // level of the tree node
     level: Option<u32>,
     // block is sealed
@@ -117,15 +115,15 @@ struct IndexW<'a, T> {
 impl<'a, T> From<&'a Index<T>> for IndexW<'a, T> {
     fn from(value: &'a Index<T>) -> Self {
         match value {
-            Index::Branch(i) =>  Self {
-                count: i.count,
+            Index::Branch(i) => Self {
+                count: Some(i.count),
                 sealed: i.sealed,
                 level: Some(i.level),
                 cid: &i.cid,
                 data: &i.data,
             },
             Index::Leaf(i) => Self {
-                count: i.count,
+                count: None,
                 sealed: i.sealed,
                 level: None,
                 cid: &i.cid,
@@ -138,7 +136,7 @@ impl<'a, T> From<&'a Index<T>> for IndexW<'a, T> {
 #[derive(Debug, Clone, Deserialize)]
 struct IndexR<T> {
     // number of events
-    count: u64,
+    count: Option<u64>,
     // level of the tree node
     level: Option<u32>,
     // block is sealed
@@ -151,21 +149,22 @@ struct IndexR<T> {
 
 impl<T> From<IndexR<T>> for Index<T> {
     fn from(v: IndexR<T>) -> Self {
-        if let Some(level) = v.level {
-            BranchIndex {                
-                count: v.count,
+        if let (Some(level), Some(count)) = (v.level, v.count) {
+            BranchIndex {
                 cid: v.cid,
                 data: v.data,
                 sealed: v.sealed,
+                count,
                 level,
-            }.into()
+            }
+            .into()
         } else {
-            LeafIndex {           
-                count: v.count,
+            LeafIndex {
                 cid: v.cid,
                 data: v.data,
                 sealed: v.sealed,
-            }.into()
+            }
+            .into()
         }
     }
 }
@@ -180,16 +179,14 @@ pub enum Index<T> {
 use std::result;
 
 impl<T: Serialize> Serialize for Index<T> {
-    fn serialize<S: Serializer>(&self, serializer: S) -> result::Result<S::Ok, S::Error>
-    {
+    fn serialize<S: Serializer>(&self, serializer: S) -> result::Result<S::Ok, S::Error> {
         IndexW::<T>::from(self).serialize(serializer)
     }
 }
 
 impl<'de, T: DeserializeOwned> Deserialize<'de> for Index<T> {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> result::Result<Index<T>, D::Error>
-    {
-        IndexR::<T>::deserialize(deserializer).map(Into::into)        
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> result::Result<Index<T>, D::Error> {
+        IndexR::<T>::deserialize(deserializer).map(Into::into)
     }
 }
 
@@ -202,7 +199,7 @@ impl<T> Index<T> {
     }
 }
 
-impl<T> Index<T> {
+impl<T: CompactSeq> Index<T> {
     fn cid(&self) -> &Cid {
         match self {
             Index::Leaf(x) => &x.cid,
@@ -211,7 +208,7 @@ impl<T> Index<T> {
     }
     fn count(&self) -> u64 {
         match self {
-            Index::Leaf(x) => x.count,
+            Index::Leaf(x) => x.data.count(),
             Index::Branch(x) => x.count,
         }
     }
@@ -354,15 +351,28 @@ impl<T: TreeTypes, V> fmt::Debug for Tree<T, V> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.root {
             Some(root) => write!(f, "Tree {}", root.cid()),
-            None => write!(f, "empy tree"),
+            None => write!(f, "empty tree"),
         }
     }
+}
+
+pub trait Query<T: TreeTypes> {
+    /// the iterator type
+    type IndexIterator: Iterator<Item = bool>;
+    /// checks whether a single item that could be a combination of multiple values can possibly match the query
+    fn intersects(&self, x: &T::Key) -> bool;
+    /// checks wether an individual item does match the query
+    fn contains(&self, x: &T::Key) -> bool;
+    /// an iterator returning x.count() elements, where each value is a bool indicating if the query does match
+    fn containing(&self, offset: u64, x: &LeafIndex<T::Seq>) -> Self::IndexIterator;
+    /// an iterator returning x.count() elements, where each value is a bool indicating if the query can match
+    fn intersecting(&self, offset: u64, x: &BranchIndex<T::Seq>) -> Self::IndexIterator;
 }
 
 impl<V: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static, T: TreeTypes>
     Tree<T, V>
 {
-    pub fn new(forest: Arc<Forest<T>>) -> Self {
+    pub fn empty(forest: Arc<Forest<T>>) -> Self {
         Self {
             root: None,
             forest,
@@ -408,6 +418,19 @@ impl<V: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static, T:
         }
     }
 
+    pub fn stream_filtered<'a, Q: Query<T>>(
+        &'a self,
+        query: &'a Q,
+    ) -> impl Stream<Item = Result<(u64, T::Key, V)>> + 'a {
+        match &self.root {
+            Some(index) => self
+                .forest
+                .stream_filtered0(0, query, index.clone())
+                .left_stream(),
+            None => stream::empty().right_stream(),
+        }
+    }
+
     pub fn is_empty(&self) -> bool {
         self.count() == 0
     }
@@ -417,8 +440,18 @@ impl<V: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static, T:
     }
 }
 
+fn zip_with_offset<'a, I: Iterator<Item = Index<T>> + 'a, T: CompactSeq + 'a>(
+    value: I,
+    offset: u64,
+) -> impl Iterator<Item = (Index<T>, u64)> + 'a {
+    value.scan(offset, |offset, x| {
+        *offset += x.count();
+        Some((x, *offset))
+    })
+}
+
 pub trait TreeTypes {
-    /// key type
+    /// key type. This also doubles as the type for a combination (union) of keys
     type Key: Semigroup + Debug;
     /// compact sequence type to be used for indices
     type Seq: CompactSeq<Item = Self::Key> + Serialize + DeserializeOwned + Clone + Debug;
@@ -477,7 +510,6 @@ where
         let cid = self.store.put(items.as_ref().raw()).await?;
         let index = LeafIndex {
             cid,
-            count: 1,
             sealed: self.leaf_sealed(items.as_ref().raw().len() as u64, 1),
             data: T::Seq::single(key),
         };
@@ -597,9 +629,8 @@ where
                 leaf.items = leaf.items.push(&value)?;
                 let mut index = index.clone();
                 // update the index data
-                index.count += 1;
-                index.sealed = self.leaf_sealed(leaf.items.raw().len() as u64, index.count);
                 index.data.push(key);
+                index.sealed = self.leaf_sealed(leaf.items.raw().len() as u64, index.data.count());
                 index.cid = self.store.put(leaf.items.raw()).await?;
                 Ok(self.store_leaf(index, leaf))
             }
@@ -663,7 +694,7 @@ where
             }
             NodeInfo::Leaf(index, node) => {
                 let v = node.child_at::<V>(offset)?;
-                let k = index.data.get(offset as usize).unwrap();
+                let k = index.data.get(offset).unwrap();
                 Ok((k, v))
             }
         }
@@ -676,15 +707,58 @@ where
         let s = async move {
             Ok(match self.load_node(&index).await? {
                 NodeInfo::Leaf(index, node) => {
-                    let keys = index.data.items();
+                    let keys = compactseq_items(&index.data);
                     let elems: Vec<V> = node.items.items()?;
-                    let pairs = keys.into_iter().zip(elems);
+                    let pairs = keys.zip(elems).collect::<Vec<_>>();
                     stream::iter(pairs).map(|x| Ok(x)).left_stream()
                 }
                 NodeInfo::Branch(index, node) => stream::iter(node.children)
                     .map(move |child| self.stream0(child))
                     .flatten()
                     .right_stream(),
+            })
+        }
+        .try_flatten_stream();
+        Box::pin(s)
+    }
+
+    fn stream_filtered0<'a, V: DeserializeOwned, Q: Query<T>>(
+        &'a self,
+        offset: u64,
+        query: &'a Q,
+        index: Index<T::Seq>,
+    ) -> LocalBoxStream<'a, Result<(u64, T::Key, V)>> {
+        let s = async move {
+            Ok(match self.load_node(&index).await? {
+                NodeInfo::Leaf(index, node) => {
+                    let matching = query.containing(offset, index);
+                    let keys = compactseq_items(&index.data);
+                    let elems: Vec<V> = node.items.items()?;
+                    let pairs = keys
+                        .zip(elems)
+                        .zip(matching)
+                        .enumerate()
+                        .filter_map(|(o, ((k, v), m))| {
+                            if m {
+                                Some((offset + o as u64, k, v))
+                            } else {
+                                None
+                            }
+                        })
+                        .collect::<Vec<_>>();
+                    stream::iter(pairs).map(|x| Ok(x)).left_stream()
+                }
+                NodeInfo::Branch(index, node) => {
+                    let matching = query.intersecting(offset, index);
+                    let offsets = zip_with_offset(node.children.into_iter(), offset);
+                    let children = matching
+                        .zip(offsets)
+                        .filter_map(|(m, c)| if m { Some(c) } else { None });
+                    stream::iter(children)
+                        .map(move |(child, offset)| self.stream_filtered0(offset, query, child))
+                        .flatten()
+                        .right_stream()
+                }
             })
         }
         .try_flatten_stream();
@@ -702,7 +776,7 @@ where
     async fn dump0(&self, index: &Index<T::Seq>, prefix: &str) -> Result<()> {
         match self.load_node(index).await? {
             NodeInfo::Leaf(index, leaf) => {
-                println!("{}Leaf({}, {})", prefix, index.count, index.sealed);
+                println!("{}Leaf({}, {})", prefix, index.data.count(), index.sealed);
             }
             NodeInfo::Branch(index, branch) => {
                 println!(

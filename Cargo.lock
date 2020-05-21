@@ -219,6 +219,7 @@ dependencies = [
  "futures",
  "hex",
  "lru",
+ "maplit",
  "multihash",
  "parking_lot",
  "quickcheck",
@@ -690,6 +691,12 @@ checksum = "0609345ddee5badacf857d4f547e0e5a2e987db77085c24cd887f73573a04237"
 dependencies = [
  "hashbrown",
 ]
+
+[[package]]
+name = "maplit"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3e2e65a1a2e43cfcb47a895c4c8b10d1f4a61097f9f254f183aee60cad9c651d"
 
 [[package]]
 name = "matches"
