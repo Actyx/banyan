@@ -7,6 +7,7 @@ use futures::{prelude::*, stream::LocalBoxStream};
 use serde::{de::DeserializeOwned, Serialize};
 use std::fmt::Debug;
 use std::{
+    collections::VecDeque,
     fmt,
     marker::PhantomData,
     sync::{Arc, RwLock},
@@ -140,6 +141,26 @@ impl<V: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static, T:
             }
             None => self.forest.single_leaf(key, value).await?.into(),
         });
+        Ok(())
+    }
+
+    pub async fn extend(&mut self, values: &mut VecDeque<(T::Key, V)>) -> Result<()> {
+        let mut root = if let Some(root) = &self.root {
+            root.clone()
+        } else {
+            if let Some((k, v)) = values.pop_front() {
+                self.forest.single_leaf(&k, &v).await?.into()
+            } else {
+                return Ok(());
+            }
+        };
+        while !values.is_empty() {
+            root = self.forest.extend(&root, values).await?;
+            if !values.is_empty() {
+                root = self.forest.single_branch(root).await?.into();
+            }
+        }
+        self.root = Some(root);
         Ok(())
     }
 
@@ -413,6 +434,75 @@ where
         value: &'a V,
     ) -> LocalBoxFuture<'a, Result<Index<T::Seq>>> {
         self.push(node, key, value).boxed_local()
+    }
+
+    async fn extend<V: Serialize + Debug>(
+        &self,
+        index: &Index<T::Seq>,
+        values: &mut VecDeque<(T::Key, V)>,
+    ) -> Result<Index<T::Seq>> {
+        if index.sealed() {
+            return Ok(index.clone());
+        }
+        match self.load_node_write(index).await? {
+            NodeInfo::Leaf(index, mut leaf) => {
+                let mut index = index.clone();
+                while let Some((k, v)) = values.pop_front() {
+                    leaf = leaf.push(&v, self.config.zstd_level)?;
+                    index.data.push(&k);
+                    index.sealed =
+                        self.leaf_sealed(leaf.as_ref().raw().len() as u64, index.data.count());
+                    if index.sealed {
+                        break;
+                    }
+                }
+                index.cid = self.store.put(leaf.as_ref().raw(), cid::Codec::Raw).await?;
+                assert!(index.sealed || values.is_empty());
+                Ok(self.cache_leaf(index, leaf).into())
+            }
+            NodeInfo::Branch(index, mut branch) => {
+                let mut index = index.clone();
+                while !values.is_empty() && !index.sealed {
+                    // push as much as possible into leaf
+                    *branch.last_child_mut() = self.extendr(branch.last_child(), values).await?;
+                    index.data.extend(&branch.last_child().data().summarize());
+                    // create new leafs until it is no longer possible
+                    while !values.is_empty() && branch.last_child().level() < index.level - 1 {
+                        let child_index = self.single_branch(branch.last_child().clone()).await?;
+                        *branch.last_child_mut() =
+                            self.extendr(&child_index.into(), values).await?;
+                        index.data.extend(&branch.last_child().data().summarize());
+                    }
+                    // make a new leaf
+                    if let Some((k, v)) = values.pop_front() {
+                        let child_index = self.single_leaf(&k, &v).await?;
+                        let summary = child_index.data.summarize();
+                        branch.children.push(child_index.into());
+                        index.data.push(&summary);
+                    }
+                    // we can not consider compressed size for the sealed criterium
+                    index.sealed = self.branch_sealed(1000000000, &branch.children, index.level);
+                    println!(
+                        "branch.children {:?} sealed {:?}",
+                        branch.children.iter().map(|x| (x.level(), x.sealed())).collect::<Vec<_>>(),
+                        index,
+                    );
+                }
+                let ipld = serialize_compressed(&branch.children, self.config.zstd_level)?;
+                let cid = self.store.put(&ipld, cid::Codec::DagCBOR).await?;
+                index.count = branch.children.iter().map(|x| x.count()).sum();
+                index.cid = cid;
+                Ok(self.cache_branch(index, branch).into())
+            }
+        }
+    }
+
+    fn extendr<'a, V: Serialize + Debug>(
+        &'a self,
+        node: &'a Index<T::Seq>,
+        values: &'a mut VecDeque<(T::Key, V)>,
+    ) -> LocalBoxFuture<'a, Result<Index<T::Seq>>> {
+        self.extend(node, values).boxed_local()
     }
 
     async fn get<V: DeserializeOwned>(

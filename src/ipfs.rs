@@ -5,7 +5,7 @@ use serde::{de::Visitor, ser::SerializeStruct, Deserialize, Deserializer, Serial
 use serde_cbor::tags::Tagged;
 use std::{convert::TryFrom, fmt, result, str::FromStr};
 
-#[derive(Debug, Clone, Hash, PartialEq, Eq, Display, From, FromStr)]
+#[derive(Clone, Hash, PartialEq, Eq, Display, From, FromStr)]
 pub struct Cid(cid::Cid);
 
 impl Cid {
@@ -17,6 +17,12 @@ impl Cid {
     }
     pub fn codec(&self) -> cid::Codec {
         self.0.codec()
+    }
+}
+
+impl fmt::Debug for Cid {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
     }
 }
 

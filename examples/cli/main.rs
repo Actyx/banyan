@@ -3,7 +3,11 @@ use clap::{App, Arg, SubCommand};
 use futures::prelude::*;
 use maplit::btreeset;
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeSet, str::FromStr, sync::Arc};
+use std::{
+    collections::{BTreeSet, VecDeque},
+    str::FromStr,
+    sync::Arc,
+};
 
 mod ipfs;
 
@@ -248,8 +252,8 @@ async fn main() -> Result<()> {
         .await?;
     println!("{:?}", tree.get(0).await?);
 
-    let n = 1000;
-    let mut tree = Tree::<TT, u64>::empty(forest);
+    let n = 100;
+    let mut tree = Tree::<TT, u64>::empty(forest.clone());
     for i in 0..n {
         println!("{}", i);
         tree.push(&Value::single(i, i, Tags::single("foo")), &i)
@@ -287,6 +291,16 @@ async fn main() -> Result<()> {
     }
 
     println!("{:?}", tree);
+
+    let mut tree2 = Tree::<TT, u64>::empty(forest);
+    let mut v = (0..n)
+        .map(|i| {
+            println!("{}", i);
+            (Value::single(i, i, Tags::single("foo")), i)
+        })
+        .collect::<VecDeque<_>>();
+    tree2.extend(&mut v).await?;
+    tree2.dump().await?;
 
     czaa::flat_tree::test();
     Ok(())
