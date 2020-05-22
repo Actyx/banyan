@@ -6,23 +6,9 @@ use std::io::{Cursor, SeekFrom, Write};
 use std::{collections::BTreeSet, sync::Arc};
 use zstd::stream::raw::{Decoder as ZDecoder, Encoder as ZEncoder, InBuffer, Operation, OutBuffer};
 
-// some old experiments
-#[allow(dead_code, unused_imports)]
-mod czaa;
-
-// some new experiments
-#[allow(dead_code, unused_imports)]
-mod flat_tree;
-
-mod index;
-mod ipfs;
-mod store;
-mod tree;
-mod zstd_array;
-
-use store::IpfsStore;
-use index::*;
-use tree::*;
+use czaa::store::IpfsStore;
+use czaa::index::*;
+use czaa::tree::*;
 
 const CBOR_ARRAY_START: u8 = (4 << 5) | 31;
 const CBOR_BREAK: u8 = 255;
@@ -113,12 +99,6 @@ struct Test {
 }
 
 struct TT();
-
-impl Semigroup for u32 {
-    fn combine(&mut self, b: &Self) {
-        *self = std::cmp::Ord::max(*self, *b);
-    }
-}
 
 impl TreeTypes for TT {
     type Key = Value;
@@ -374,6 +354,6 @@ async fn main() -> Result<()> {
 
     println!("{:?}", tree);
 
-    flat_tree::test();
+    czaa::flat_tree::test();
     Ok(())
 }
