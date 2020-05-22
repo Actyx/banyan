@@ -12,6 +12,9 @@ mod forest;
 mod ipfs;
 mod tree;
 mod zstd_array;
+mod store;
+
+use store::IpfsStore;
 
 use forest::{compactseq_items, CompactSeq, Semigroup, SimpleCompactSeq};
 use tree::*;
@@ -203,15 +206,11 @@ impl Query<TT> for DnfQuery {
         self.0.iter().any(|x| x.contains(v))
     }
     fn intersecting(&self, offset: u64, x: &BranchIndex<ValueSeq>) -> Self::IndexIterator {
-        let bools = compactseq_items(&x.data)
-            .map(|x| self.intersects(&x))
-            .collect::<Vec<_>>();
+        let bools = x.items().map(|x| self.intersects(&x)).collect::<Vec<_>>();
         bools.into_iter()
     }
     fn containing(&self, offset: u64, x: &LeafIndex<ValueSeq>) -> Self::IndexIterator {
-        let bools = compactseq_items(&x.data)
-            .map(|x| self.contains(&x))
-            .collect::<Vec<_>>();
+        let bools = x.items().map(|x| self.contains(&x)).collect::<Vec<_>>();
         bools.into_iter()
     }
 }

@@ -6,11 +6,9 @@ fn roots0(index: u64, size: u64, res: &mut Vec<u64>) {
     if index < size {
         res.push(index);
     } else {
-        for child in left_child(index) {
-            roots0(child, size, res);
-        }
-        for child in right_child(index) {
-            roots0(child, size, res);
+        for (l, r) in children(index) {
+            roots0(l, size, res);
+            roots0(r, size, res);
         }
     }
 }
@@ -48,6 +46,18 @@ fn level(o: u64) -> u64 {
 
 fn is_leaf(o: u64) -> bool {
     level(o) == 0
+}
+
+fn children(offset: u64) -> Option<(u64, u64)> {
+    let (_, level) = info(offset);
+
+    if level > 0 {
+        let leafs = 1 << (level - 1);
+        let branches = leafs - 1;
+        Some((offset - leafs - branches - 1, offset - 1))
+    } else {
+        None
+    }
 }
 
 fn left_child(offset: u64) -> Option<u64> {

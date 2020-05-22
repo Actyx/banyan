@@ -1,8 +1,11 @@
 use crate::tree::Result;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{
+    de::{DeserializeOwned, IgnoredAny},
+    Deserialize, Serialize,
+};
 use std::io::prelude::*;
 use std::io::{Cursor, Write};
-use std::sync::Arc;
+use std::{marker::PhantomData, sync::Arc};
 use zstd::stream::raw::{Decoder as ZDecoder, Encoder as ZEncoder, InBuffer, Operation, OutBuffer};
 
 use zstd::stream::read::Decoder;
@@ -95,11 +98,54 @@ impl<'a> ZstdArrayRef<'a> {
         let mut r = Cursor::new(&uncompressed);
         while r.position() < uncompressed.len() as u64 {
             let mut deserializer = serde_cbor::Deserializer::from_reader(r.by_ref());
-            result.push(serde::de::Deserialize::deserialize(&mut deserializer)?);
+            result.push(T::deserialize(&mut deserializer)?);
+        }
+        Ok(result)
+    }
+
+    /// select the items marked by the iterator and deserialize them into a vec.
+    ///
+    /// Other items will be skipped when deserializing, saving some unnecessary work.
+    pub fn select<T: DeserializeOwned>(
+        &self,
+        mut take: impl Iterator<Item = bool>,
+    ) -> Result<Vec<T>> {
+        let uncompressed = self.decompress_into(Vec::new())?;
+        let mut result: Vec<T> = Vec::new();
+        let mut r = Cursor::new(&uncompressed);
+        while r.position() < uncompressed.len() as u64 {
+            if let Some(p) = take.next() {
+                let mut deserializer = serde_cbor::Deserializer::from_reader(r.by_ref());
+                if p {
+                    result.push(T::deserialize(&mut deserializer)?);
+                } else {
+                    IgnoredAny::deserialize(&mut deserializer)?;
+                }
+            } else {
+                break;
+            }
         }
         Ok(result)
     }
 }
+
+// struct CborIterator<'a, T, P> {
+//     reader: Cursor<&'a [u8]>,
+//     take: P,
+//     _p: PhantomData<T>,
+// }
+
+// impl<'a, T: DeserializeOwned, P: FnMut(usize) -> bool> Iterator for CborIterator<'a, T, P> {
+//     type Item = T;
+//     fn next(&mut self) -> Option<T> {
+//         while self.reader.position() < self.reader.get_ref().len() as u64 {
+//             if self.take() {
+
+//             }
+//         }
+//         None
+//     }
+// }
 
 pub struct ZstdArrayBuilder {
     encoder: zstd::stream::write::Encoder<Vec<u8>>,

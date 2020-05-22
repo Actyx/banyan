@@ -1,25 +1,21 @@
-use crate::czaa::*;
-use crate::forest::{compactseq_items, CompactSeq, Semigroup};
+use crate::forest::{compactseq_items, compactseq_select_items, CompactSeq, Semigroup};
 use crate::ipfs::Cid;
 use crate::zstd_array::*;
-use derive_more::Display;
-use derive_more::From;
+use crate::store::Store;
+use derive_more::{Display, From};
 use futures::{
-    future::BoxFuture,
     prelude::*,
-    stream::{BoxStream, LocalBoxStream},
+    future::BoxFuture,
+    stream::LocalBoxStream,
 };
-use multihash::{Code, Multihash, Sha2_256};
 use serde::{
-    de::{DeserializeOwned, IgnoredAny},
-    Deserialize, Deserializer, Serialize, Serializer,
+    de::DeserializeOwned, Deserialize, Deserializer, Serialize, Serializer,
 };
 use std::fmt::Debug;
 use std::{
     collections::HashMap,
     fmt,
     marker::PhantomData,
-    pin::Pin,
     sync::{Arc, RwLock},
 };
 use tracing::{debug, info, trace};
@@ -83,6 +79,18 @@ pub struct LeafIndex<T> {
     pub data: T,
 }
 
+impl<T: CompactSeq> LeafIndex<T> {
+    pub fn items<'a>(&'a self) -> impl Iterator<Item = T::Item> + 'a {
+        compactseq_items(&self.data)
+    }
+    pub fn select<'a>(
+        &'a self,
+        it: impl Iterator<Item = bool> + 'a,
+    ) -> impl Iterator<Item = (u64, T::Item)> + 'a {
+        compactseq_select_items(&self.data, it)
+    }
+}
+
 /// index for a branch node
 #[derive(Debug, Clone)]
 pub struct BranchIndex<T> {
@@ -96,6 +104,19 @@ pub struct BranchIndex<T> {
     pub cid: Cid,
     // extra data
     pub data: T,
+}
+
+impl<T: CompactSeq> BranchIndex<T> {
+    pub fn items<'a>(&'a self) -> impl Iterator<Item = T::Item> + 'a {
+        compactseq_items(&self.data)
+    }
+
+    pub fn select_data<'a>(
+        &'a self,
+        it: impl Iterator<Item = bool> + 'a,
+    ) -> impl Iterator<Item = (u64, T::Item)> + 'a {
+        compactseq_select_items(&self.data, it)
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -226,59 +247,6 @@ impl<T: CompactSeq> Index<T> {
     }
 }
 
-pub trait Store {
-    fn put(&self, data: &[u8]) -> BoxFuture<Result<Cid>>;
-    fn get(&self, cid: &Cid) -> BoxFuture<Result<Arc<[u8]>>>;
-}
-
-pub struct TestStore(Arc<RwLock<HashMap<Cid, Arc<[u8]>>>>);
-
-impl TestStore {
-    pub fn new() -> Self {
-        Self(Arc::new(RwLock::new(HashMap::new())))
-    }
-}
-
-impl Store for TestStore {
-    fn put(&self, data: &[u8]) -> BoxFuture<Result<Cid>> {
-        let cid = Cid::dag_cbor(data);
-        self.0
-            .as_ref()
-            .write()
-            .unwrap()
-            .insert(cid.clone(), data.into());
-        future::ok(cid).boxed()
-    }
-    fn get(&self, cid: &Cid) -> BoxFuture<Result<Arc<[u8]>>> {
-        let x = self.0.as_ref().read().unwrap();
-        if let Some(value) = x.get(cid) {
-            future::ok(value.clone()).boxed()
-        } else {
-            future::err(err("not there")).boxed()
-        }
-    }
-}
-
-pub struct IpfsStore {}
-
-impl IpfsStore {
-    pub fn new() -> Self {
-        Self {}
-    }
-}
-
-impl Store for IpfsStore {
-    fn put(&self, data: &[u8]) -> BoxFuture<Result<Cid>> {
-        let data = data.to_vec();
-        async move { crate::ipfs::block_put(&data, false).await }.boxed()
-    }
-
-    fn get(&self, cid: &Cid) -> BoxFuture<Result<Arc<[u8]>>> {
-        let cid = cid.clone();
-        async move { crate::ipfs::block_get(&cid).await }.boxed()
-    }
-}
-
 fn err(text: &str) -> crate::Error {
     Box::new(std::io::Error::new(std::io::ErrorKind::Other, text))
 }
@@ -332,11 +300,11 @@ enum NodeInfo<'a, T> {
 
 impl Leaf {
     fn child_at<T: DeserializeOwned>(&self, offset: u64) -> Result<T> {
-        // todo: make this more efficient!
-        let items: Vec<T> = self.items.items()?;
-        items
+        self.items
+            .as_ref()
+            .select((0..=offset).map(|x| x == offset))?
             .into_iter()
-            .nth(offset as usize)
+            .last()
             .ok_or_else(|| err("nope").into())
     }
 }
@@ -654,7 +622,7 @@ where
                     // add actual new child
                     branch.children.push(child_index.into());
                 }
-                let cbor = serde_cbor::to_vec(&branch.children.iter().collect::<Vec<_>>())?;
+                let cbor = serde_cbor::to_vec(&branch.children)?;
                 let cid = self.store.put(&cbor).await?;
                 // let data = CborZstdArrayBuilder::<Index<T::Seq>>::new(self.config.zstd_level)?;
                 // let data = data.push_items(branch.children.iter().cloned())?;
@@ -707,7 +675,7 @@ where
         let s = async move {
             Ok(match self.load_node(&index).await? {
                 NodeInfo::Leaf(index, node) => {
-                    let keys = compactseq_items(&index.data);
+                    let keys = index.items();
                     let elems: Vec<V> = node.items.items()?;
                     let pairs = keys.zip(elems).collect::<Vec<_>>();
                     stream::iter(pairs).map(|x| Ok(x)).left_stream()
@@ -731,20 +699,12 @@ where
         let s = async move {
             Ok(match self.load_node(&index).await? {
                 NodeInfo::Leaf(index, node) => {
-                    let matching = query.containing(offset, index);
-                    let keys = compactseq_items(&index.data);
-                    let elems: Vec<V> = node.items.items()?;
+                    let matching = query.containing(offset, index).collect::<Vec<_>>();
+                    let keys = index.select(matching.iter().cloned());
+                    let elems: Vec<V> = node.items.as_ref().select(matching.iter().cloned())?;
                     let pairs = keys
                         .zip(elems)
-                        .zip(matching)
-                        .enumerate()
-                        .filter_map(|(o, ((k, v), m))| {
-                            if m {
-                                Some((offset + o as u64, k, v))
-                            } else {
-                                None
-                            }
-                        })
+                        .map(|((o, k), v)| (o + offset, k, v))
                         .collect::<Vec<_>>();
                     stream::iter(pairs).map(|x| Ok(x)).left_stream()
                 }

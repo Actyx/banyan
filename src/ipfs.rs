@@ -1,4 +1,4 @@
-use super::Result;
+use anyhow::Result;
 use multihash::Sha2_256;
 use reqwest::multipart::Part;
 use serde::ser::SerializeStruct;
