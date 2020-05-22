@@ -1,14 +1,14 @@
-use crate::tree::Result;
+//! This module provides some utilities to work with zstd compressed arrays of cbor values
+use anyhow::Result;
 use serde::{
     de::{DeserializeOwned, IgnoredAny},
     Deserialize, Serialize,
 };
-use std::io::prelude::*;
-use std::io::{Cursor, Write};
-use std::{marker::PhantomData, sync::Arc};
-use zstd::stream::raw::{Decoder as ZDecoder, Encoder as ZEncoder, InBuffer, Operation, OutBuffer};
-
-use zstd::stream::read::Decoder;
+use std::{
+    io::{prelude::*, Cursor, Write},
+    sync::Arc,
+};
+use zstd::stream::raw::{Decoder as ZDecoder, Operation, OutBuffer};
 use zstd::stream::write::Encoder;
 
 /// An array of zstd compressed data
@@ -30,9 +30,6 @@ pub struct ZstdArrayRef<'a> {
     data: &'a [u8],
 }
 
-const CBOR_ARRAY_START: u8 = (4 << 5) | 31;
-const CBOR_BREAK: u8 = 255;
-
 impl<'a> ZstdArrayRef<'a> {
     pub fn new(data: &'a [u8]) -> Self {
         Self { data }
@@ -43,6 +40,7 @@ impl<'a> ZstdArrayRef<'a> {
         self.data
     }
 
+    #[allow(dead_code)]
     fn decompress_into_broken(&self, mut uncompressed: Vec<u8>) -> Result<Vec<u8>> {
         let data = self.raw();
         let mut c = Cursor::new(data);
@@ -61,6 +59,7 @@ impl<'a> ZstdArrayRef<'a> {
         Ok(uncompressed)
     }
 
+    #[allow(dead_code)]
     fn decompress_into_lowlevel(&self, mut uncompressed: Vec<u8>) -> Result<Vec<u8>> {
         // let mut cipher = (self.mk_cipher)();
         // todo: avoid cloning the whole thing, but have a buffer for stream apply and decompression source
@@ -94,7 +93,7 @@ impl<'a> ZstdArrayRef<'a> {
 
     pub fn items<T: DeserializeOwned>(&self) -> Result<Vec<T>> {
         let uncompressed = self.decompress_into(Vec::new())?;
-        let mut result: Vec<T> = Vec::new();
+        let mut result = Vec::new();
         let mut r = Cursor::new(&uncompressed);
         while r.position() < uncompressed.len() as u64 {
             let mut deserializer = serde_cbor::Deserializer::from_reader(r.by_ref());

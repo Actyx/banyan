@@ -82,7 +82,7 @@ fn right_child(offset: u64) -> Option<u64> {
 
 pub fn test() {
     let mut res = Vec::<String>::new();
-    for i in 0..100 {
+    for _ in 0..100 {
         res.push("i".into());
     }
     for i in 0..30 {

@@ -6,21 +6,29 @@ use std::io::{Cursor, SeekFrom, Write};
 use std::{collections::BTreeSet, sync::Arc};
 use zstd::stream::raw::{Decoder as ZDecoder, Encoder as ZEncoder, InBuffer, Operation, OutBuffer};
 
+// some old experiments
+#[allow(dead_code, unused_imports)]
 mod czaa;
+
+// some new experiments
+#[allow(dead_code, unused_imports)]
 mod flat_tree;
-mod forest;
+
+mod index;
 mod ipfs;
+mod store;
 mod tree;
 mod zstd_array;
-mod store;
 
 use store::IpfsStore;
-
-use forest::{compactseq_items, CompactSeq, Semigroup, SimpleCompactSeq};
+use index::*;
 use tree::*;
 
 const CBOR_ARRAY_START: u8 = (4 << 5) | 31;
 const CBOR_BREAK: u8 = 255;
+
+pub type Error = anyhow::Error;
+pub type Result<T> = anyhow::Result<T>;
 
 fn decode<T: DeserializeOwned>(data: &mut [u8]) -> std::io::Result<Vec<T>> {
     // cipher.apply_keystream(data);

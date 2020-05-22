@@ -1,12 +1,18 @@
-use futures::{future::BoxFuture, prelude::*};
+//! ipfs block stores
 use crate::ipfs::Cid;
-use std::{collections::{HashMap}, sync::{Arc, RwLock}};
 use anyhow::{anyhow, Result};
+use futures::{future::BoxFuture, prelude::*};
+use std::{
+    collections::HashMap,
+    sync::{Arc, RwLock},
+};
 
 pub trait Store {
     fn put(&self, data: &[u8]) -> BoxFuture<Result<Cid>>;
     fn get(&self, cid: &Cid) -> BoxFuture<Result<Arc<[u8]>>>;
 }
+
+pub type ArcStore = Arc<dyn Store + Send + Sync + 'static>;
 
 pub struct TestStore(Arc<RwLock<HashMap<Cid, Arc<[u8]>>>>);
 

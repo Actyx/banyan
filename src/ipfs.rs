@@ -1,18 +1,18 @@
+//! helper methods to work with ipfs/ipld
 use anyhow::Result;
 use multihash::Sha2_256;
 use reqwest::multipart::Part;
-use serde::ser::SerializeStruct;
-use serde::{de::Visitor, Deserialize, Deserializer, Serialize, Serializer};
+use serde::{de::Visitor, ser::SerializeStruct, Deserialize, Deserializer, Serialize, Serializer};
 use serde_cbor::tags::Tagged;
 use std::{convert::TryFrom, fmt, result, str::FromStr, sync::Arc};
 
-pub async fn block_get(key: &Cid) -> Result<Arc<[u8]>> {
+pub(crate) async fn block_get(key: &Cid) -> Result<Arc<[u8]>> {
     let url = format!("http://localhost:5001/api/v0/block/get?arg={}", key);
     let data: Vec<u8> = reqwest::get(url.as_str()).await?.bytes().await?.to_vec();
     Ok(data.into())
 }
 
-pub async fn block_put(data: &[u8], pin: bool) -> Result<Cid> {
+pub(crate) async fn block_put(data: &[u8], pin: bool) -> Result<Cid> {
     let url = format!(
         "http://localhost:5001/api/v0/block/put?format=cbor&pin={}",
         pin
@@ -26,7 +26,7 @@ pub async fn block_put(data: &[u8], pin: bool) -> Result<Cid> {
         .await?
         .json()
         .await?;
-    let cid = cid::Cid::from_str(&res.Key)?;
+    let cid = cid::Cid::from_str(&res.key)?;
     Ok(Cid(cid))
 }
 
@@ -34,11 +34,14 @@ pub async fn block_put(data: &[u8], pin: bool) -> Result<Cid> {
 pub struct Cid(cid::Cid);
 
 impl Cid {
-    pub fn dag_cbor(data: &[u8]) -> Self {
+    pub fn new(data: &[u8], codec: cid::Codec) -> Self {
         Self(cid::Cid::new_v1(
-            cid::Codec::DagCBOR,
+            codec,
             Sha2_256::digest(data),
         ))
+    }
+    pub fn dag_cbor(data: &[u8]) -> Self {
+        Self::new(data, cid::Codec::DagCBOR)
     }
 }
 
@@ -120,7 +123,8 @@ impl<'de> Deserialize<'de> for Cid {
 
 #[derive(Deserialize)]
 struct IpfsBlockPutResponseIo {
-    Key: String,
+    #[serde(rename = "Key")]
+    key: String,
 }
 
 /// helper struct to serialize a cid in an dag-cbor compliant way

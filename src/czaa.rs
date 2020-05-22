@@ -183,7 +183,7 @@ impl<T: Serialize> CborZstdArrayBuilder<T> {
         Ok(self)
     }
 
-    pub fn seal(mut self) -> std::io::Result<Vec<u8>> {
+    pub fn seal(self) -> std::io::Result<Vec<u8>> {
         Ok(self.data)
     }
 
