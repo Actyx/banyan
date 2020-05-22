@@ -1,3 +1,7 @@
+//! this is just some brainstorming how you would map an append-only binary tree to an append-only log.
+//!
+//! this would be the dat approach of using an index and a data hypercore. The index hypercore would be a tree mapped to an
+//! append only log.
 fn offset(index: u64) -> u64 {
     index * 2 - (index.count_ones() as u64)
 }
