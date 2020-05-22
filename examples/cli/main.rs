@@ -222,7 +222,7 @@ async fn main() -> Result<()> {
                 .value_of("root")
                 .ok_or(anyhow!("root must be provided"))?,
         )?;
-        let tree = Tree::<TT, u64>::new(root, forest).await?;
+        let tree = Tree::<TT, serde_cbor::Value>::new(root, forest).await?;
         tree.dump().await?;
         return Ok(());
     } else if let Some(matches) = matches.subcommand_matches("stream") {
@@ -231,7 +231,7 @@ async fn main() -> Result<()> {
                 .value_of("root")
                 .ok_or(anyhow!("root must be provided"))?,
         )?;
-        let tree = Tree::<TT, u64>::new(root, forest).await?;
+        let tree = Tree::<TT, serde_cbor::Value>::new(root, forest).await?;
         let mut stream = tree.stream();
         while let Some(Ok(v)) = stream.next().await {
             println!("{:?}", v);
@@ -248,7 +248,7 @@ async fn main() -> Result<()> {
         .await?;
     println!("{:?}", tree.get(0).await?);
 
-    let n = 100;
+    let n = 1000;
     let mut tree = Tree::<TT, u64>::empty(forest);
     for i in 0..n {
         println!("{}", i);
