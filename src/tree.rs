@@ -11,7 +11,6 @@ use std::{
     marker::PhantomData,
     sync::{Arc, RwLock},
 };
-use tracing::{debug, info, trace};
 
 /// Trees can be parametrized with the key type and the sequence type
 ///
@@ -34,7 +33,9 @@ pub struct Forest<T: TreeTypes> {
     _tt: PhantomData<T>,
 }
 
-/// A tree
+/// A tree. This is mostly an user friendly handle.
+///
+/// Most of the logic except for handling the empty case is implemented in the forest
 pub struct Tree<T: TreeTypes, V> {
     root: Option<Index<T::Seq>>,
     forest: Arc<Forest<T>>,
@@ -43,7 +44,8 @@ pub struct Tree<T: TreeTypes, V> {
 
 /// A query
 ///
-/// Queries work on value sequences instead of individual values for efficiency
+/// Queries work on value sequences instead of individual values for efficiency. Methods that work on individual
+/// values are just provided for consistency checks.
 pub trait Query<T: TreeTypes> {
     /// the iterator type
     type IndexIterator: Iterator<Item = bool>;
@@ -102,6 +104,13 @@ impl<T: TreeTypes, V> fmt::Debug for Tree<T, V> {
 impl<V: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static, T: TreeTypes>
     Tree<T, V>
 {
+    pub async fn new(cid: Cid, forest: Arc<Forest<T>>) -> Result<Self> {
+        Ok(Self {
+            root: Some(forest.load_branch_from_cid(cid).await?),
+            forest,
+            _t: PhantomData,
+        })
+    }
     pub fn empty(forest: Arc<Forest<T>>) -> Self {
         Self {
             root: None,
@@ -123,13 +132,13 @@ impl<V: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static, T:
         self.root = Some(match &self.root {
             Some(index) => {
                 if !index.sealed() {
-                    self.forest.push(index, key, &value).await?
+                    self.forest.push(index, key, value).await?
                 } else {
                     let index = self.forest.single_branch(index.clone()).await?.into();
-                    self.forest.push(&index, key, &value).await?
+                    self.forest.push(&index, key, value).await?
                 }
             }
-            None => self.forest.single_leaf(key, &value).await?.into(),
+            None => self.forest.single_leaf(key, value).await?.into(),
         });
         Ok(())
     }
@@ -216,7 +225,7 @@ where
         value: &V,
     ) -> Result<LeafIndex<T::Seq>> {
         let leaf = Leaf::single(value, self.config.zstd_level)?;
-        let cid = self.store.put(leaf.as_ref().raw()).await?;
+        let cid = self.store.put(leaf.as_ref().raw(), cid::Codec::Raw).await?;
         let index = LeafIndex {
             cid,
             sealed: self.leaf_sealed(leaf.as_ref().raw().len() as u64, 1),
@@ -243,9 +252,27 @@ where
     /// load a branch given a branch index
     async fn load_branch(&self, index: &BranchIndex<T::Seq>) -> Result<Branch<T::Seq>> {
         let bytes = self.store.get(&index.cid).await?;
-        let children: Vec<_> = serde_cbor::from_slice(&bytes)?;
+        let children: Vec<_> = deserialize_compressed(&bytes)?;
         // let children = CborZstdArrayRef::new(bytes.as_ref()).items()?;
         Ok(Branch::<T::Seq>::new(children))
+    }
+
+    async fn load_branch_from_cid(&self, cid: Cid) -> Result<Index<T::Seq>> {
+        assert_eq!(cid.codec(), cid::Codec::DagCBOR);
+        let bytes = self.store.get(&cid).await?;
+        let children: Vec<Index<T::Seq>> = deserialize_compressed(&bytes)?;
+        let count = children.iter().map(|x| x.count()).sum();
+        let level = children.iter().map(|x| x.level()).max().unwrap() + 1;
+        let data = compactseq_create(children.iter().map(|x| x.data().summarize()))?;
+        let result = BranchIndex {
+            cid,
+            level,
+            count,
+            data,
+            sealed: self.branch_sealed(bytes.len() as u64, &children, level),
+        }
+        .into();
+        Ok(result)
     }
 
     /// load a branch given a branch index, from the cache
@@ -258,8 +285,10 @@ where
 
     /// creates a branch containing a single item
     async fn single_branch(&self, value: Index<T::Seq>) -> Result<BranchIndex<T::Seq>> {
-        let cbor = serde_cbor::to_vec(&vec![&value])?;
-        let cid = self.store.put(&cbor).await?;
+        let t = [value];
+        let cbor = serialize_compressed(&t, self.config.zstd_level)?;
+        let value = &t[0];
+        let cid = self.store.put(&cbor, cid::Codec::DagCBOR).await?;
         let index = BranchIndex {
             level: value.level() + 1,
             count: value.count(),
@@ -338,7 +367,7 @@ where
                 index.data.push(key);
                 index.sealed =
                     self.leaf_sealed(leaf.as_ref().raw().len() as u64, index.data.count());
-                index.cid = self.store.put(leaf.as_ref().raw()).await?;
+                index.cid = self.store.put(leaf.as_ref().raw(), cid::Codec::Raw).await?;
                 Ok(self.cache_leaf(index, leaf).into())
             }
             NodeInfo::Branch(index, mut branch) => {
@@ -361,10 +390,10 @@ where
                     // add actual new child
                     branch.children.push(child_index.into());
                 }
-                let cbor = serde_cbor::to_vec(&branch.children)?;
-                let cid = self.store.put(&cbor).await?;
+                let ipld = serialize_compressed(&branch.children, self.config.zstd_level)?;
+                let cid = self.store.put(&ipld, cid::Codec::DagCBOR).await?;
                 index.count += 1;
-                index.sealed = self.branch_sealed(cbor.len() as u64, &branch.children, index.level);
+                index.sealed = self.branch_sealed(ipld.len() as u64, &branch.children, index.level);
                 index.cid = cid;
                 Ok(self.cache_branch(index, branch).into())
             }
@@ -374,9 +403,7 @@ where
     /// helper to avoid compiler error when doing recursive call from async fn
     ///
     /// If you call push0().boxed_local() directly in push0, you get this error:
-    /// ```
     /// recursion in an `async fn` requires boxing a recursive `async fn` must be rewritten to return a boxed `dyn Future`
-    /// ```
     ///
     /// in any case, it is nice to have everything explicitly spelled out.
     fn pushr<'a, V: Serialize + Debug>(
@@ -403,7 +430,7 @@ where
                         offset -= child.count();
                     }
                 }
-                Err(anyhow!("index out of bounds").into())
+                Err(anyhow!("index out of bounds: {}", offset).into())
             }
             NodeInfo::Leaf(index, node) => {
                 let v = node.child_at::<V>(offset)?;

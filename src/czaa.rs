@@ -264,15 +264,6 @@ impl<T: Serialize> CborZstdArrayBuilder<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use salsa20::Salsa20;
-    use stream_cipher::NewStreamCipher;
-
-    /// create a test cipher
-    fn test_cipher() -> Salsa20 {
-        let key = [0u8; 32];
-        let nonce = [0u8; 8];
-        Salsa20::new(&key.into(), &nonce.into())
-    }
 
     #[test]
     fn incremental_decode_test() {

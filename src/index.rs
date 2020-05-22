@@ -14,7 +14,6 @@ use std::{convert::From, sync::Arc};
 pub trait Semigroup {
     fn combine(&mut self, b: &Self);
 }
-
 /// a compact representation of a sequence of 1 or more items
 ///
 /// in general, this will have a different internal representation than just a bunch of values that is more compact and
@@ -34,6 +33,18 @@ pub trait CompactSeq: Serialize + DeserializeOwned {
     fn get(&self, index: u64) -> Option<Self::Item>;
     /// combines all elements with the semigroup op
     fn summarize(&self) -> Self::Item;
+}
+
+pub fn compactseq_create<'a, T: CompactSeq>(mut items: impl Iterator<Item = T::Item>) -> Result<T> {
+    let mut result = T::single(
+        &items
+            .next()
+            .ok_or(anyhow!("iterator must have at least one item"))?,
+    );
+    for item in items {
+        result.push(&item);
+    }
+    Ok(result)
 }
 
 /// utility function to get all items for a compactseq.
@@ -340,5 +351,112 @@ impl Leaf {
         self.as_ref()
             .get(offset)?
             .ok_or_else(|| anyhow!("index out of bounds {}", offset).into())
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct IndexWC<'a, T> {
+    // number of events
+    count: Option<u64>,
+    // level of the tree node
+    level: Option<u32>,
+    // block is sealed
+    sealed: bool,
+    // extra data
+    data: &'a T,
+}
+
+impl<'a, T> From<&'a Index<T>> for IndexWC<'a, T> {
+    fn from(value: &'a Index<T>) -> Self {
+        match value {
+            Index::Branch(i) => Self {
+                count: Some(i.count),
+                sealed: i.sealed,
+                level: Some(i.level),
+                data: &i.data,
+            },
+            Index::Leaf(i) => Self {
+                count: None,
+                sealed: i.sealed,
+                level: None,
+                data: &i.data,
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct IndexRC<T> {
+    // block is sealed
+    sealed: bool,
+    // extra data
+    data: T,
+    // number of events, for branches
+    count: Option<u64>,
+    // level of the tree node, for branches
+    level: Option<u32>,
+}
+
+impl<T> IndexRC<T> {
+    fn to_index(self, cid: Cid) -> Index<T> {
+        if let (Some(level), Some(count)) = (self.level, self.count) {
+            BranchIndex {
+                data: self.data,
+                sealed: self.sealed,
+                count,
+                level,
+                cid,
+            }
+            .into()
+        } else {
+            LeafIndex {
+                data: self.data,
+                sealed: self.sealed,
+                cid,
+            }
+            .into()
+        }
+    }
+}
+
+use std::io::{Cursor, Write};
+
+const CBOR_ARRAY_START: u8 = (4 << 5) | 31;
+const CBOR_BREAK: u8 = 255;
+
+pub fn serialize_compressed<T: Serialize + CompactSeq>(
+    items: &[Index<T>],
+    level: i32,
+) -> Result<Vec<u8>> {
+    let mut cids: Vec<&Cid> = Vec::new();
+    let mut compressed: Vec<u8> = Vec::new();
+    let mut writer = zstd::stream::write::Encoder::new(compressed.by_ref(), level)?;
+    writer.write_all(&[CBOR_ARRAY_START])?;
+    for item in items.iter() {
+        cids.push(item.cid());
+        serde_cbor::to_writer(writer.by_ref(), &IndexWC::from(item))?;
+    }
+    writer.write_all(&[CBOR_BREAK])?;
+    writer.finish()?;
+    let ipld = serde_cbor::to_vec(&(cids, serde_cbor::Value::Bytes(compressed)))?;
+    Ok(ipld)
+}
+
+pub fn deserialize_compressed<T: DeserializeOwned>(ipld: &[u8]) -> Result<Vec<Index<T>>> {
+    let (cids, compressed): (Vec<Cid>, serde_cbor::Value) = serde_cbor::from_slice(ipld)?;
+    if let serde_cbor::Value::Bytes(compressed) = compressed {
+        let reader = zstd::stream::read::Decoder::new(Cursor::new(compressed))?;
+
+        let data: Vec<IndexRC<T>> = serde_cbor::from_reader(reader)?;
+        let result = data
+            .into_iter()
+            .zip(cids)
+            .map(|(data, cid)| data.to_index(cid))
+            .collect::<Vec<_>>();
+        Ok(result)
+    } else {
+        Err(anyhow!(
+            "expected a byte array containing zstd compressed cbor"
+        ))
     }
 }

@@ -1,36 +1,11 @@
 //! helper methods to work with ipfs/ipld
-use anyhow::Result;
+use derive_more::{Display, From, FromStr};
 use multihash::Sha2_256;
-use reqwest::multipart::Part;
 use serde::{de::Visitor, ser::SerializeStruct, Deserialize, Deserializer, Serialize, Serializer};
 use serde_cbor::tags::Tagged;
-use std::{convert::TryFrom, fmt, result, str::FromStr, sync::Arc};
+use std::{convert::TryFrom, fmt, result, str::FromStr};
 
-pub(crate) async fn block_get(key: &Cid) -> Result<Arc<[u8]>> {
-    let url = format!("http://localhost:5001/api/v0/block/get?arg={}", key);
-    let data: Vec<u8> = reqwest::get(url.as_str()).await?.bytes().await?.to_vec();
-    Ok(data.into())
-}
-
-pub(crate) async fn block_put(data: &[u8], pin: bool) -> Result<Cid> {
-    let url = format!(
-        "http://localhost:5001/api/v0/block/put?format=cbor&pin={}",
-        pin
-    );
-    let client = reqwest::Client::new();
-    let form = reqwest::multipart::Form::new().part("file", Part::bytes(data.to_vec()));
-    let res: IpfsBlockPutResponseIo = client
-        .post(url.as_str())
-        .multipart(form)
-        .send()
-        .await?
-        .json()
-        .await?;
-    let cid = cid::Cid::from_str(&res.key)?;
-    Ok(Cid(cid))
-}
-
-#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq, Display, From, FromStr)]
 pub struct Cid(cid::Cid);
 
 impl Cid {
@@ -40,11 +15,8 @@ impl Cid {
     pub fn dag_cbor(data: &[u8]) -> Self {
         Self::new(data, cid::Codec::DagCBOR)
     }
-}
-
-impl fmt::Display for Cid {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
+    pub fn codec(&self) -> cid::Codec {
+        self.0.codec()
     }
 }
 
@@ -116,12 +88,6 @@ impl<'de> Deserialize<'de> for Cid {
             deserializer.deserialize_bytes(CidVisitor)
         }
     }
-}
-
-#[derive(Deserialize)]
-struct IpfsBlockPutResponseIo {
-    #[serde(rename = "Key")]
-    key: String,
 }
 
 /// helper struct to serialize a cid in an dag-cbor compliant way
