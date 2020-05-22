@@ -6,8 +6,8 @@ use std::io::{Cursor, SeekFrom, Write};
 use std::{collections::BTreeSet, sync::Arc};
 use zstd::stream::raw::{Decoder as ZDecoder, Encoder as ZEncoder, InBuffer, Operation, OutBuffer};
 
-use czaa::store::IpfsStore;
 use czaa::index::*;
+use czaa::store::IpfsStore;
 use czaa::tree::*;
 
 const CBOR_ARRAY_START: u8 = (4 << 5) | 31;

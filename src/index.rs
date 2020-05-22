@@ -4,7 +4,7 @@ use super::zstd_array::ZstdArrayBuilder;
 use anyhow::{anyhow, Result};
 use derive_more::From;
 use serde::{de::DeserializeOwned, Deserialize, Deserializer, Serialize, Serializer};
-use std::convert::From;
+use std::{convert::From, sync::Arc};
 
 /// trait for items that can be combined in an associative way
 ///
@@ -215,6 +215,7 @@ pub enum Index<T> {
     Branch(BranchIndex<T>),
 }
 
+use crate::zstd_array::{ZstdArray, ZstdArrayRef};
 use std::result;
 
 impl<T: Serialize> Serialize for Index<T> {
@@ -289,13 +290,43 @@ impl<T: Clone> Branch<T> {
 
 /// fully in memory representation of a leaf node
 #[derive(Debug)]
-pub struct Leaf {
-    pub items: ZstdArrayBuilder,
+pub enum Leaf {
+    Writable(ZstdArrayBuilder),
+    Readonly(ZstdArray),
 }
 
 impl Leaf {
-    pub fn new(items: ZstdArrayBuilder) -> Self {
-        Self { items }
+    /// Create a leaf from data in readonly mode. Conversion to writeable will only happen on demand.
+    ///
+    /// Note that this does not provide any validation that the passed data is in fact zstd compressed cbor.    
+    /// If you pass random data, you will only notice that something is wrong once you try to use it.
+    pub fn new(data: Arc<[u8]>) -> Self {
+        Self::Readonly(ZstdArray::new(data))
+    }
+
+    fn builder(self, level: i32) -> Result<ZstdArrayBuilder> {
+        match self {
+            Leaf::Writable(x) => Ok(x),
+            Leaf::Readonly(x) => ZstdArrayBuilder::init(x.as_ref().raw(), level),
+        }
+    }
+
+    /// Create a leaf containing a single item, with the given compression level
+    pub fn single<V: Serialize>(value: &V, level: i32) -> Result<Self> {
+        Ok(Leaf::Writable(ZstdArrayBuilder::new(level)?.push(value)?))
+    }
+
+    /// Push an item. The compression level will only be used if this leaf is in readonly mode, otherwise
+    /// the compression level of the builder will be used.
+    pub fn push<V: Serialize>(self, value: &V, level: i32) -> Result<Self> {
+        Ok(Leaf::Writable(self.builder(level)?.push(value)?))
+    }
+
+    pub fn as_ref(&self) -> ZstdArrayRef {
+        match self {
+            Leaf::Writable(x) => x.as_ref(),
+            Leaf::Readonly(x) => x.as_ref(),
+        }
     }
 }
 
@@ -306,11 +337,8 @@ pub enum NodeInfo<'a, T> {
 
 impl Leaf {
     pub fn child_at<T: DeserializeOwned>(&self, offset: u64) -> Result<T> {
-        self.items
-            .as_ref()
-            .select((0..=offset).map(|x| x == offset))?
-            .into_iter()
-            .last()
+        self.as_ref()
+            .get(offset)?
             .ok_or_else(|| anyhow!("index out of bounds {}", offset).into())
     }
 }

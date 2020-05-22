@@ -26,6 +26,12 @@ impl ZstdArray {
     }
 }
 
+impl std::fmt::Debug for ZstdArray {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ZstdArray")
+    }
+}
+
 pub struct ZstdArrayRef<'a> {
     data: &'a [u8],
 }
@@ -100,6 +106,25 @@ impl<'a> ZstdArrayRef<'a> {
             result.push(T::deserialize(&mut deserializer)?);
         }
         Ok(result)
+    }
+
+    /// select the items marked by the iterator and deserialize them into a vec.
+    ///
+    /// Other items will be skipped when deserializing, saving some unnecessary work.
+    pub fn get<T: DeserializeOwned>(&self, index: u64) -> Result<Option<T>> {
+        let uncompressed = self.decompress_into(Vec::new())?;
+        let mut r = Cursor::new(&uncompressed);
+        let mut remaining = index;
+        while r.position() < uncompressed.len() as u64 {
+            let mut deserializer = serde_cbor::Deserializer::from_reader(r.by_ref());
+            if remaining > 0 {
+                IgnoredAny::deserialize(&mut deserializer)?;
+                remaining -= 1;
+            } else {
+                return Ok(Some(T::deserialize(&mut deserializer)?));
+            }
+        }
+        Ok(None)
     }
 
     /// select the items marked by the iterator and deserialize them into a vec.

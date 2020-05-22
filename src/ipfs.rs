@@ -35,10 +35,7 @@ pub struct Cid(cid::Cid);
 
 impl Cid {
     pub fn new(data: &[u8], codec: cid::Codec) -> Self {
-        Self(cid::Cid::new_v1(
-            codec,
-            Sha2_256::digest(data),
-        ))
+        Self(cid::Cid::new_v1(codec, Sha2_256::digest(data)))
     }
     pub fn dag_cbor(data: &[u8]) -> Self {
         Self::new(data, cid::Codec::DagCBOR)

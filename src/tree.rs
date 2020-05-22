@@ -1,7 +1,6 @@
 use super::index::*;
 use crate::ipfs::Cid;
 use crate::store::ArcStore;
-use crate::zstd_array::*;
 use anyhow::{anyhow, Result};
 use future::LocalBoxFuture;
 use futures::{prelude::*, stream::LocalBoxStream};
@@ -199,9 +198,7 @@ where
 
     /// load a leaf given a leaf index
     async fn load_leaf(&self, index: &LeafIndex<T::Seq>) -> Result<Leaf> {
-        let bytes = self.store.get(&index.cid).await?;
-        let items = ZstdArrayBuilder::init(bytes.as_ref(), self.config.zstd_level)?;
-        Ok(Leaf::new(items))
+        Ok(Leaf::new(self.store.get(&index.cid).await?))
     }
 
     /// load a leaf from a cache
@@ -218,14 +215,14 @@ where
         key: &T::Key,
         value: &V,
     ) -> Result<LeafIndex<T::Seq>> {
-        let items = ZstdArrayBuilder::new(self.config.zstd_level)?.push(value)?;
-        let cid = self.store.put(items.as_ref().raw()).await?;
+        let leaf = Leaf::single(value, self.config.zstd_level)?;
+        let cid = self.store.put(leaf.as_ref().raw()).await?;
         let index = LeafIndex {
             cid,
-            sealed: self.leaf_sealed(items.as_ref().raw().len() as u64, 1),
+            sealed: self.leaf_sealed(leaf.as_ref().raw().len() as u64, 1),
             data: T::Seq::single(key),
         };
-        Ok(index)
+        Ok(self.cache_leaf(index, leaf))
     }
 
     /// predicate to determine if a leaf is sealed, based on the config
@@ -274,29 +271,47 @@ where
     }
 
     /// load a node, returning a structure containing the index and value for convenient matching
-    async fn load_node<'a>(&self, index: &'a Index<T::Seq>) -> Result<NodeInfo<'a, T::Seq>> {
+    ///
+    /// this is identical to load_node, except that it will also try to find leaf nodes in the cache.
+    /// readonly leaf nodes are too cheap to bother caching them, but writable leaf nodes are quite expensive and therefore
+    /// worthwhile to cache.
+    ///
+    /// Branch nodes are expensive to decode, so they will always be cached even for reading.
+    async fn load_node_write<'a>(&self, index: &'a Index<T::Seq>) -> Result<NodeInfo<'a, T::Seq>> {
         Ok(match index {
             Index::Branch(index) => NodeInfo::Branch(index, self.load_branch_cached(index).await?),
             Index::Leaf(index) => NodeInfo::Leaf(index, self.load_leaf_cached(index).await?),
         })
     }
 
+    /// load a node, returning a structure containing the index and value for convenient matching
+    async fn load_node<'a>(&self, index: &'a Index<T::Seq>) -> Result<NodeInfo<'a, T::Seq>> {
+        Ok(match index {
+            Index::Branch(index) => NodeInfo::Branch(index, self.load_branch_cached(index).await?),
+            Index::Leaf(index) => NodeInfo::Leaf(index, self.load_leaf(index).await?),
+        })
+    }
+
     /// store a leaf in the cache, and return it wrapped into a generic index
-    fn cache_leaf(&self, index: LeafIndex<T::Seq>, node: Leaf) -> Index<T::Seq> {
+    fn cache_leaf(&self, index: LeafIndex<T::Seq>, node: Leaf) -> LeafIndex<T::Seq> {
         self.leaf_cache
             .write()
             .unwrap()
             .put(index.cid.clone(), node);
-        index.into()
+        index
     }
 
     /// store a branch in the cache, and return it wrapped into a generic index
-    fn cache_branch(&self, index: BranchIndex<T::Seq>, node: Branch<T::Seq>) -> Index<T::Seq> {
+    fn cache_branch(
+        &self,
+        index: BranchIndex<T::Seq>,
+        node: Branch<T::Seq>,
+    ) -> BranchIndex<T::Seq> {
         self.branch_cache
             .write()
             .unwrap()
             .put(index.cid.clone(), node);
-        index.into()
+        index
     }
 
     /// Push a single item to the end of the tree
@@ -315,15 +330,16 @@ where
     ) -> Result<Index<T::Seq>> {
         // calling push0 for a sealed node makes no sense and should not happen!
         assert!(!index.sealed());
-        match self.load_node(index).await? {
+        match self.load_node_write(index).await? {
             NodeInfo::Leaf(index, mut leaf) => {
-                leaf.items = leaf.items.push(&value)?;
+                leaf = leaf.push(&value, self.config.zstd_level)?;
                 let mut index = index.clone();
                 // update the index data
                 index.data.push(key);
-                index.sealed = self.leaf_sealed(leaf.items.raw().len() as u64, index.data.count());
-                index.cid = self.store.put(leaf.items.raw()).await?;
-                Ok(self.cache_leaf(index, leaf))
+                index.sealed =
+                    self.leaf_sealed(leaf.as_ref().raw().len() as u64, index.data.count());
+                index.cid = self.store.put(leaf.as_ref().raw()).await?;
+                Ok(self.cache_leaf(index, leaf).into())
             }
             NodeInfo::Branch(index, mut branch) => {
                 let child_index = branch.last_child();
@@ -350,7 +366,7 @@ where
                 index.count += 1;
                 index.sealed = self.branch_sealed(cbor.len() as u64, &branch.children, index.level);
                 index.cid = cid;
-                Ok(self.cache_branch(index, branch))
+                Ok(self.cache_branch(index, branch).into())
             }
         }
     }
@@ -413,7 +429,7 @@ where
             Ok(match self.load_node(&index).await? {
                 NodeInfo::Leaf(index, node) => {
                     let keys = index.items();
-                    let elems: Vec<V> = node.items.items()?;
+                    let elems: Vec<V> = node.as_ref().items()?;
                     let pairs = keys.zip(elems).collect::<Vec<_>>();
                     stream::iter(pairs).map(|x| Ok(x)).left_stream()
                 }
@@ -438,7 +454,7 @@ where
                 NodeInfo::Leaf(index, node) => {
                     let matching = query.containing(offset, index).collect::<Vec<_>>();
                     let keys = index.select(matching.iter().cloned());
-                    let elems: Vec<V> = node.items.as_ref().select(matching.iter().cloned())?;
+                    let elems: Vec<V> = node.as_ref().select(matching.iter().cloned())?;
                     let pairs = keys
                         .zip(elems)
                         .map(|((o, k), v)| (o + offset, k, v))
