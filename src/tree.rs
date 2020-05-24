@@ -1,13 +1,12 @@
 use super::index::*;
 use crate::ipfs::Cid;
-use crate::store::ArcStore;
+use crate::{store::ArcStore, zstd_array::ZstdArrayBuilder};
 use anyhow::{anyhow, Result};
 use future::LocalBoxFuture;
 use futures::{prelude::*, stream::LocalBoxStream};
 use serde::{de::DeserializeOwned, Serialize};
 use std::fmt::Debug;
 use std::{
-    collections::VecDeque,
     fmt,
     marker::PhantomData,
     sync::{Arc, RwLock},
@@ -145,23 +144,16 @@ impl<V: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static, T:
         Ok(())
     }
 
-    pub async fn extend(&mut self, values: &mut VecDeque<(T::Key, V)>) -> Result<()> {
-        let mut root = if let Some(root) = &self.root {
+    pub async fn extend(
+        &mut self,
+        mut from: std::iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
+    ) -> Result<()> {
+        let root = if let Some(root) = &self.root {
             root.clone()
         } else {
-            if let Some((k, v)) = values.pop_front() {
-                self.forest.single_leaf(&k, &v).await?.into()
-            } else {
-                return Ok(());
-            }
+            self.forest.fill_node(0, from.by_ref()).await?.into()
         };
-        while !values.is_empty() {
-            root = self.forest.extend(&root, values).await?;
-            if !values.is_empty() {
-                root = self.forest.single_branch(root).await?.into();
-            }
-        }
-        self.root = Some(root);
+        self.root = Some(self.forest.extend_above(root, from.by_ref()).await?);
         Ok(())
     }
 
@@ -254,6 +246,106 @@ where
             data: T::Seq::single(key),
         };
         Ok(self.cache_leaf(index, leaf))
+    }
+
+    /// Creates a leaf from a sequence that either contains all items from the sequence, or is full
+    async fn create_leaf<V: Serialize + Debug>(
+        &self,
+        mut data: T::Seq,
+        builder: ZstdArrayBuilder,
+        from: &mut std::iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
+    ) -> Result<LeafIndex<T::Seq>> {
+        assert!(from.peek().is_some());
+        let builder = builder.fill(
+            || {
+                from.next().map(|(k, v)| {
+                    data.push(&k);
+                    v
+                })
+            },
+            self.config.max_leaf_size,
+        )?;
+        let leaf = Leaf::Writable(builder);
+        let cid = self.store.put(leaf.as_ref().raw(), cid::Codec::Raw).await?;
+        let index = LeafIndex {
+            cid,
+            sealed: self.leaf_sealed(leaf.as_ref().raw().len() as u64, 1),
+            data,
+        };
+        Ok(self.cache_leaf(index, leaf))
+    }
+
+    async fn extend_above<V: Serialize + Debug>(
+        &self,
+        node: Index<T::Seq>,
+        from: &mut std::iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
+    ) -> Result<Index<T::Seq>> {
+        let mut node = self.extend(&node, from).await?;
+        while from.peek().is_some() {
+            let level = node.level() + 1;
+            node = self.create_branch(vec![node], level, from).await?.into();
+        }
+        Ok(node)
+    }
+
+    async fn create_branch<V: Serialize + Debug>(
+        &self,
+        mut children: Vec<Index<T::Seq>>,
+        level: u32,
+        from: &mut std::iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
+    ) -> Result<BranchIndex<T::Seq>> {
+        assert!(children.iter().all(|child| child.level() == level - 1));
+        let mut keys = children
+            .iter()
+            .map(|child| child.data().summarize())
+            .collect::<Vec<_>>();
+        while from.peek().is_some() && ((children.len() as u64) <= self.config.max_branch_count) {
+            let child = self.fill_noder(level - 1, from).await?;
+            let summary = child.data().summarize();
+            keys.push(summary);
+            children.push(child);
+        }
+        let cbor = serialize_compressed(&children, self.config.zstd_level)?;
+        let cid = self.store.put(&cbor, cid::Codec::DagCBOR).await?;
+        let count = keys.len() as u64;
+        let sealed = self.branch_sealed(0, &children, level);
+        let data: T::Seq = compactseq_create(keys.into_iter())?;
+        let index = BranchIndex {
+            level,
+            count,
+            sealed,
+            cid,
+            data,
+        };
+        Ok(index)
+    }
+
+    async fn fill_node<V: Serialize + Debug>(
+        &self,
+        level: u32,
+        from: &mut std::iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
+    ) -> Result<Index<T::Seq>> {
+        assert!(from.peek().is_some());
+        if level == 0 {
+            Ok(self
+                .create_leaf(
+                    T::Seq::empty(),
+                    ZstdArrayBuilder::new(self.config.zstd_level)?,
+                    from,
+                )
+                .await?
+                .into())
+        } else {
+            Ok(self.create_branch(Vec::new(), level, from).await?.into())
+        }
+    }
+
+    fn fill_noder<'a, V: Serialize + Debug + 'a>(
+        &'a self,
+        level: u32,
+        from: &'a mut std::iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
+    ) -> LocalBoxFuture<'a, Result<Index<T::Seq>>> {
+        self.fill_node(level, from).boxed_local()
     }
 
     /// predicate to determine if a leaf is sealed, based on the config
@@ -440,74 +532,34 @@ where
     async fn extend<V: Serialize + Debug>(
         &self,
         index: &Index<T::Seq>,
-        values: &mut VecDeque<(T::Key, V)>,
+        values: &mut std::iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
     ) -> Result<Index<T::Seq>> {
         if index.sealed() {
             return Ok(index.clone());
         }
         match self.load_node_write(index).await? {
-            NodeInfo::Leaf(index, mut leaf) => {
-                let mut index = index.clone();
-                leaf = leaf.fill(
-                    || {
-                        if let Some((k, v)) = values.pop_front() {
-                            index.data.push(&k);
-                            Some(v)
-                        } else {
-                            None
-                        }
-                    },
-                    self.config.max_leaf_size,
-                    self.config.zstd_level,
-                )?;
-                index.sealed =
-                    self.leaf_sealed(leaf.as_ref().raw().len() as u64, index.data.count());
-                index.cid = self.store.put(leaf.as_ref().raw(), cid::Codec::Raw).await?;
-                assert!(index.sealed || values.is_empty());
-                Ok(self.cache_leaf(index, leaf).into())
+            NodeInfo::Leaf(index, leaf) => {
+                let data = index.data.clone();
+                let builder = leaf.builder(self.config.zstd_level)?;
+                Ok(self.create_leaf(data, builder, values).await?.into())
             }
-            NodeInfo::Branch(index, mut branch) => {
-                let mut index = index.clone();
-                while !values.is_empty() && !index.sealed {
-                    // push as much as possible into leaf
-                    *branch.last_child_mut() = self.extendr(branch.last_child(), values).await?;
-                    index.data.extend(&branch.last_child().data().summarize());
-                    // create new leafs until it is no longer possible
-                    while !values.is_empty() && branch.last_child().level() < index.level - 1 {
-                        let child_index = self.single_branch(branch.last_child().clone()).await?;
-                        *branch.last_child_mut() =
-                            self.extendr(&child_index.into(), values).await?;
-                        index.data.extend(&branch.last_child().data().summarize());
-                    }
-                    // we might be full now, so we need to check
-                    index.sealed = self.branch_sealed(0, &branch.children, index.level);
-                    if index.sealed {
-                        break;
-                    }
-                    // make a new leaf
-                    if let Some((k, v)) = values.pop_front() {
-                        let child_index = self.single_leaf(&k, &v).await?;
-                        let summary = child_index.data.summarize();
-                        branch.children.push(child_index.into());
-                        index.data.push(&summary);
-                    }
-                    // we can not consider compressed size for the sealed criterium
-                    index.sealed = self.branch_sealed(0, &branch.children, index.level);
+            NodeInfo::Branch(index, branch) => {
+                let mut children = branch.children;
+                if let Some(last_child) = children.last_mut() {
+                    *last_child = self.extendr(&last_child, values).await?;
                 }
-                info!("branch created {}", index.level);
-                let ipld = serialize_compressed(&branch.children, self.config.zstd_level)?;
-                let cid = self.store.put(&ipld, cid::Codec::DagCBOR).await?;
-                index.count = branch.children.iter().map(|x| x.count()).sum();
-                index.cid = cid;
-                Ok(self.cache_branch(index, branch).into())
+                Ok(self
+                    .create_branch(children, index.level, values)
+                    .await?
+                    .into())
             }
         }
     }
 
-    fn extendr<'a, V: Serialize + Debug>(
+    fn extendr<'a, V: Serialize + Debug + 'a>(
         &'a self,
         node: &'a Index<T::Seq>,
-        values: &'a mut VecDeque<(T::Key, V)>,
+        values: &'a mut std::iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
     ) -> LocalBoxFuture<'a, Result<Index<T::Seq>>> {
         self.extend(node, values).boxed_local()
     }
