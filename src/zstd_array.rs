@@ -72,12 +72,10 @@ impl<'a> ZstdArrayRef<'a> {
     #[allow(dead_code)]
     fn decompress_into_lowlevel(&self, mut uncompressed: Vec<u8>) -> Result<Vec<u8>> {
         // let mut cipher = (self.mk_cipher)();
-        // todo: avoid cloning the whole thing, but have a buffer for stream apply and decompression source
-        let data = self.data.to_vec();
         // cipher.apply_keystream(&mut data);
-        let mut src = zstd::stream::raw::InBuffer::around(&data);
+        let mut src = zstd::stream::raw::InBuffer::around(self.data);
         // todo: thread local buffers that grow dynamically
-        let mut tmp = [0u8; 4096 * 100];
+        let mut tmp = [0u8; 4096];
         let mut decompressor = ZDecoder::new()?;
         // decompress until input is consumed
         loop {
