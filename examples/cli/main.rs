@@ -3,11 +3,7 @@ use clap::{App, Arg, SubCommand};
 use futures::prelude::*;
 use maplit::btreeset;
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::{BTreeSet, VecDeque},
-    str::FromStr,
-    sync::Arc,
-};
+use std::{collections::BTreeSet, str::FromStr, sync::Arc};
 use tracing::Level;
 use tracing_subscriber;
 
@@ -135,6 +131,15 @@ struct ValueSeq {
 
 impl CompactSeq for ValueSeq {
     type Item = Value;
+
+    fn empty() -> Self {
+        Self {
+            min_lamport: Vec::new(),
+            min_time: Vec::new(),
+            max_time: Vec::new(),
+            tags: Vec::new(),
+        }
+    }
 
     fn single(value: &Value) -> Self {
         Self {
@@ -321,13 +326,15 @@ async fn main() -> Result<()> {
 
         let mut tree2 = Tree::<TT, u64>::empty(forest);
         let tags = Tags::single("foo");
-        let mut v = (0..n)
+        let v = (0..n)
             .map(|i| {
-                println!("{}", i);
+                if i % 1000 == 0 {
+                    println!("{}", i);
+                }
                 (Value::single(i, i, tags.clone()), i)
             })
-            .collect::<VecDeque<_>>();
-        tree2.extend(&mut v).await?;
+            .collect::<Vec<_>>();
+        tree2.extend(v.into_iter().peekable()).await?;
         tree2.dump().await?;
         println!("{:?}", tree2);
 

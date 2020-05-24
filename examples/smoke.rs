@@ -126,6 +126,15 @@ struct ValueSeq {
 impl CompactSeq for ValueSeq {
     type Item = Value;
 
+    fn empty() -> Self {
+        Self {
+            min_lamport: Vec::new(),
+            min_time: Vec::new(),
+            max_time: Vec::new(),
+            tags: Vec::new(),
+        }
+    }
+
     fn single(value: &Value) -> Self {
         Self {
             min_lamport: vec![value.min_lamport],

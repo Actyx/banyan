@@ -22,6 +22,8 @@ pub trait CompactSeq: Serialize + DeserializeOwned {
     /// item type
     type Item: Semigroup;
     /// Creates a sequence with a single element
+    fn empty() -> Self;
+    /// Creates a sequence with a single element
     fn single(item: &Self::Item) -> Self;
     /// pushes an additional element to the end
     fn push(&mut self, value: &Self::Item);
@@ -80,6 +82,9 @@ pub struct SimpleCompactSeq<T>(Vec<T>);
 
 impl<T: Serialize + DeserializeOwned + Semigroup + Clone> CompactSeq for SimpleCompactSeq<T> {
     type Item = T;
+    fn empty() -> Self {
+        Self(Vec::new())
+    }
     fn single(item: &T) -> Self {
         Self(vec![item.clone()])
     }
@@ -315,7 +320,7 @@ impl Leaf {
         Self::Readonly(ZstdArray::new(data))
     }
 
-    fn builder(self, level: i32) -> Result<ZstdArrayBuilder> {
+    pub fn builder(self, level: i32) -> Result<ZstdArrayBuilder> {
         match self {
             Leaf::Writable(x) => Ok(x),
             Leaf::Readonly(x) => ZstdArrayBuilder::init(x.as_ref().raw(), level),
