@@ -75,7 +75,7 @@ impl<'a> ZstdArrayRef<'a> {
         // cipher.apply_keystream(&mut data);
         let mut src = zstd::stream::raw::InBuffer::around(self.data);
         // todo: thread local buffers that grow dynamically
-        let mut tmp = [0u8; 4096];
+        let mut tmp = [0u8; 4096 * 100];
         let mut decompressor = ZDecoder::new()?;
         // decompress until input is consumed
         loop {
