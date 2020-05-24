@@ -12,7 +12,7 @@ use std::{
 mod ipfs;
 
 use czaa::index::*;
-use czaa::{ipfs::Cid, tree::*};
+use czaa::{ipfs::Cid, tree::*, store::MemStore};
 use ipfs::IpfsStore;
 
 pub type Error = anyhow::Error;
@@ -26,7 +26,7 @@ impl TreeTypes for TT {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialOrd, PartialEq, Ord, Eq)]
-struct Tag(String);
+struct Tag(Arc<str>);
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct Tags(BTreeSet<Tag>);
@@ -195,8 +195,8 @@ impl CompactSeq for ValueSeq {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let store = IpfsStore::new();
-    let forest = Arc::new(Forest::<TT>::new(Arc::new(store)));
+    let store = Arc::new(IpfsStore::new());
+    let forest = Arc::new(Forest::<TT>::new(store, Config::debug()));
     let matches = App::new("banyan-cli")
         .version("0.1")
         .author("Rüdiger Klaehn")
@@ -245,8 +245,8 @@ async fn main() -> Result<()> {
     println!("{:?}", matches);
     println!("building a tree");
     // let store = TestStore::new();
-    let store = IpfsStore::new();
-    let forest = Arc::new(Forest::new(Arc::new(store)));
+    let store = Arc::new(IpfsStore::new());
+    let forest = Arc::new(Forest::new(store, Config::default()));
     let mut tree = Tree::<TT, u64>::empty(forest.clone());
     tree.push(&Value::single(0, 0, Tags::empty()), &0u64)
         .await?;
@@ -293,15 +293,17 @@ async fn main() -> Result<()> {
     println!("{:?}", tree);
 
     let mut tree2 = Tree::<TT, u64>::empty(forest);
-    let mut v = (0..n)
+    let tags = Tags::single("foo");
+    let mut v = (0..10_000_000)
         .map(|i| {
             println!("{}", i);
-            (Value::single(i, i, Tags::single("foo")), i)
+            (Value::single(i, i, tags.clone()), i)
         })
         .collect::<VecDeque<_>>();
     tree2.extend(&mut v).await?;
     tree2.dump().await?;
+    println!("{:?}", tree2);
 
-    czaa::flat_tree::test();
+    // czaa::flat_tree::test();
     Ok(())
 }

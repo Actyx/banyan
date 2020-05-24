@@ -333,6 +333,12 @@ impl Leaf {
         Ok(Leaf::Writable(self.builder(level)?.push(value)?))
     }
 
+    /// Push an item. The compression level will only be used if this leaf is in readonly mode, otherwise
+    /// the compression level of the builder will be used.
+    pub fn fill<V: Serialize>(self, from: impl FnMut() -> Option<V>, compressed_size:u64, level: i32) -> Result<Self> {
+        Ok(Leaf::Writable(self.builder(level)?.fill(from, compressed_size)?))
+    }
+
     pub fn as_ref(&self) -> ZstdArrayRef {
         match self {
             Leaf::Writable(x) => x.as_ref(),

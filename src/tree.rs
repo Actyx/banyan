@@ -447,16 +447,17 @@ where
         match self.load_node_write(index).await? {
             NodeInfo::Leaf(index, mut leaf) => {
                 let mut index = index.clone();
-                while let Some((k, v)) = values.pop_front() {
-                    leaf = leaf.push(&v, self.config.zstd_level)?;
-                    index.data.push(&k);
-                    index.sealed =
-                        self.leaf_sealed(leaf.as_ref().raw().len() as u64, index.data.count());
-                    if index.sealed {
-                        break;
-                    }
-                }
+                    leaf = leaf.fill(|| {
+                        if let Some((k, v)) = values.pop_front() {
+                            index.data.push(&k);
+                            Some(v)
+                        } else {
+                            None
+                        }
+                    }, self.config.max_leaf_size, self.config.zstd_level)?;
+                index.sealed = self.leaf_sealed(leaf.as_ref().raw().len() as u64, index.data.count());
                 index.cid = self.store.put(leaf.as_ref().raw(), cid::Codec::Raw).await?;
+                println!("created leaf with size {} / {}", leaf.as_ref().raw().len(), self.config.max_branch_size);
                 assert!(index.sealed || values.is_empty());
                 Ok(self.cache_leaf(index, leaf).into())
             }
@@ -473,6 +474,11 @@ where
                             self.extendr(&child_index.into(), values).await?;
                         index.data.extend(&branch.last_child().data().summarize());
                     }
+                    // we might be full now, so we need to check
+                    index.sealed = self.branch_sealed(0, &branch.children, index.level);
+                    if index.sealed {
+                        break;
+                    }
                     // make a new leaf
                     if let Some((k, v)) = values.pop_front() {
                         let child_index = self.single_leaf(&k, &v).await?;
@@ -481,13 +487,9 @@ where
                         index.data.push(&summary);
                     }
                     // we can not consider compressed size for the sealed criterium
-                    index.sealed = self.branch_sealed(1000000000, &branch.children, index.level);
-                    println!(
-                        "branch.children {:?} sealed {:?}",
-                        branch.children.iter().map(|x| (x.level(), x.sealed())).collect::<Vec<_>>(),
-                        index,
-                    );
+                    index.sealed = self.branch_sealed(0, &branch.children, index.level);
                 }
+                println!("branch created {}", index.level);
                 let ipld = serialize_compressed(&branch.children, self.config.zstd_level)?;
                 let cid = self.store.put(&ipld, cid::Codec::DagCBOR).await?;
                 index.count = branch.children.iter().map(|x| x.count()).sum();
@@ -623,12 +625,12 @@ where
     }
 
     /// creates a new forest
-    pub fn new(store: ArcStore) -> Self {
+    pub fn new(store: ArcStore, config: Config) -> Self {
         let branch_cache = RwLock::new(lru::LruCache::<Cid, Branch<T::Seq>>::new(1000));
         let leaf_cache = RwLock::new(lru::LruCache::<Cid, Leaf>::new(1000));
         Self {
             store,
-            config: Config::debug(),
+            config,
             branch_cache,
             leaf_cache,
             _tt: PhantomData,

@@ -8,7 +8,7 @@ edition = "2018"
 
 [dependencies]
 zstd = "0.5.1+zstd.1.4.4"
-serde = { version = "1.0.106", features = ["derive"] }
+serde = { version = "1.0.106", features = ["derive", "rc"] }
 serde_cbor = { version = "0.11.1", features = ["tags"] }
 
 multihash = "0.11.1"

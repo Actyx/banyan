@@ -226,6 +226,22 @@ impl ZstdArrayBuilder {
         self.encoder.flush()?;
         Ok(self)
     }
+
+    /// fill the array from a source, until the compressed size exceeds the given size.
+    ///
+    /// note that the encoder will be flushed just once at the end of the fill op, so the size might be
+    /// significantly above the target size.
+    pub fn fill<T: Serialize>(mut self, mut from: impl FnMut() -> Option<T>, compressed_size: u64) -> Result<Self> {
+        while (self.raw().len() as u64) < compressed_size {
+            if let Some(value) = from() {
+                serde_cbor::to_writer(&mut self.encoder, &value)?;
+            } else {
+                break
+            }
+        }
+        self.encoder.flush()?;
+        Ok(self)
+    }
 }
 
 #[cfg(test)]
