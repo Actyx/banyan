@@ -189,7 +189,7 @@ impl CompactSeq for ValueSeq {
 async fn main() -> Result<()> {
     println!("building a tree");
     let store = MemStore::new();
-    let forest = Arc::new(Forest::new(Arc::new(store)));
+    let forest = Arc::new(Forest::new(Arc::new(store), Config::debug()));
     let mut tree = Tree::<TT, u64>::empty(forest.clone());
     tree.push(&Value::single(0, 0, Tags::empty()), &0u64)
         .await?;

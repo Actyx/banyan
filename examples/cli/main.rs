@@ -8,11 +8,13 @@ use std::{
     str::FromStr,
     sync::Arc,
 };
+use tracing::Level;
+use tracing_subscriber;
 
 mod ipfs;
 
 use czaa::index::*;
-use czaa::{ipfs::Cid, tree::*, store::MemStore};
+use czaa::{ipfs::Cid, store::MemStore, tree::*};
 use ipfs::IpfsStore;
 
 pub type Error = anyhow::Error;
@@ -195,6 +197,14 @@ impl CompactSeq for ValueSeq {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // a builder for `FmtSubscriber`.
+    tracing_subscriber::fmt()
+        // all spans/events with a level higher than TRACE (e.g, debug, info, warn, etc.)
+        // will be written to stdout.
+        .with_max_level(Level::INFO)
+        // completes the builder and sets the constructed `Subscriber` as the default.
+        .init();
+
     let store = Arc::new(IpfsStore::new());
     let forest = Arc::new(Forest::<TT>::new(store, Config::debug()));
     let matches = App::new("banyan-cli")
@@ -219,6 +229,15 @@ async fn main() -> Result<()> {
                     .help("The root hash to use"),
             ),
         )
+        .subcommand(
+            SubCommand::with_name("build").about("Build a tree").arg(
+                Arg::with_name("count")
+                    .long("count")
+                    .required(true)
+                    .takes_value(true)
+                    .help("The number of values"),
+            ),
+        )
         .get_matches();
     if let Some(matches) = matches.subcommand_matches("dump") {
         let root = Cid::from_str(
@@ -236,74 +255,83 @@ async fn main() -> Result<()> {
                 .ok_or(anyhow!("root must be provided"))?,
         )?;
         let tree = Tree::<TT, serde_cbor::Value>::new(root, forest).await?;
-        let mut stream = tree.stream();
+        let mut stream = tree.stream().enumerate();
+        while let Some((i, Ok(v))) = stream.next().await {
+            if i % 1000 == 0 {
+                println!("{:?}", v);
+            }
+        }
+        return Ok(());
+    } else if let Some(matches) = matches.subcommand_matches("build") {
+        let n: u64 = matches
+            .value_of("count")
+            .ok_or(anyhow!("required arg count not provided"))?
+            .parse()?;
+        println!("{:?}", matches);
+        println!("building a tree");
+        // let store = TestStore::new();
+        let store = Arc::new(IpfsStore::new());
+        let forest = Arc::new(Forest::new(store, Config::default()));
+        let mut tree = Tree::<TT, u64>::empty(forest.clone());
+        tree.push(&Value::single(0, 0, Tags::empty()), &0u64)
+            .await?;
+        println!("{:?}", tree.get(0).await?);
+
+        // let n = 100;
+        // let mut tree = Tree::<TT, u64>::empty(forest.clone());
+        // for i in 0..n {
+        //     println!("{}", i);
+        //     tree.push(&Value::single(i, i, Tags::single("foo")), &i)
+        //         .await?;
+        // }
+
+        // tree.dump().await?;
+
+        // for i in 0..n {
+        //     println!("{:?}", tree.get(i).await?);
+        // }
+
+        let mut stream = tree.stream().enumerate();
+        while let Some((i, Ok(v))) = stream.next().await {
+            if i % 1000 == 0 {
+                println!("{:?}", v);
+            }
+        }
+
+        println!("filtered iteration!");
+        let query = DnfQuery(vec![Value::range(0, 50, Tags::single("foo"))]);
+        let mut stream = tree.stream_filtered(&query);
         while let Some(Ok(v)) = stream.next().await {
             println!("{:?}", v);
         }
-        return Ok(());
+
+        println!("filtered iteration - brute force!");
+        let mut stream = tree.stream().try_filter_map(|(k, v)| {
+            future::ok(if query.contains(&k) {
+                Some((k, v))
+            } else {
+                None
+            })
+        });
+        while let Some(Ok(v)) = stream.next().await {
+            println!("{:?}", v);
+        }
+
+        println!("{:?}", tree);
+
+        let mut tree2 = Tree::<TT, u64>::empty(forest);
+        let tags = Tags::single("foo");
+        let mut v = (0..n)
+            .map(|i| {
+                println!("{}", i);
+                (Value::single(i, i, tags.clone()), i)
+            })
+            .collect::<VecDeque<_>>();
+        tree2.extend(&mut v).await?;
+        tree2.dump().await?;
+        println!("{:?}", tree2);
+
+        // czaa::flat_tree::test();
     }
-    println!("{:?}", matches);
-    println!("building a tree");
-    // let store = TestStore::new();
-    let store = Arc::new(IpfsStore::new());
-    let forest = Arc::new(Forest::new(store, Config::default()));
-    let mut tree = Tree::<TT, u64>::empty(forest.clone());
-    tree.push(&Value::single(0, 0, Tags::empty()), &0u64)
-        .await?;
-    println!("{:?}", tree.get(0).await?);
-
-    let n = 100;
-    let mut tree = Tree::<TT, u64>::empty(forest.clone());
-    for i in 0..n {
-        println!("{}", i);
-        tree.push(&Value::single(i, i, Tags::single("foo")), &i)
-            .await?;
-    }
-
-    tree.dump().await?;
-
-    for i in 0..n {
-        println!("{:?}", tree.get(i).await?);
-    }
-
-    let mut stream = tree.stream();
-    while let Some(Ok(v)) = stream.next().await {
-        println!("{:?}", v);
-    }
-
-    println!("filtered iteration!");
-    let query = DnfQuery(vec![Value::range(0, 50, Tags::single("foo"))]);
-    let mut stream = tree.stream_filtered(&query);
-    while let Some(Ok(v)) = stream.next().await {
-        println!("{:?}", v);
-    }
-
-    println!("filtered iteration - brute force!");
-    let mut stream = tree.stream().try_filter_map(|(k, v)| {
-        future::ok(if query.contains(&k) {
-            Some((k, v))
-        } else {
-            None
-        })
-    });
-    while let Some(Ok(v)) = stream.next().await {
-        println!("{:?}", v);
-    }
-
-    println!("{:?}", tree);
-
-    let mut tree2 = Tree::<TT, u64>::empty(forest);
-    let tags = Tags::single("foo");
-    let mut v = (0..10_000_000)
-        .map(|i| {
-            println!("{}", i);
-            (Value::single(i, i, tags.clone()), i)
-        })
-        .collect::<VecDeque<_>>();
-    tree2.extend(&mut v).await?;
-    tree2.dump().await?;
-    println!("{:?}", tree2);
-
-    // czaa::flat_tree::test();
     Ok(())
 }

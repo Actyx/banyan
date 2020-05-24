@@ -12,6 +12,7 @@ use std::{
     marker::PhantomData,
     sync::{Arc, RwLock},
 };
+use tracing::*;
 
 /// Trees can be parametrized with the key type and the sequence type
 ///
@@ -447,17 +448,21 @@ where
         match self.load_node_write(index).await? {
             NodeInfo::Leaf(index, mut leaf) => {
                 let mut index = index.clone();
-                    leaf = leaf.fill(|| {
+                leaf = leaf.fill(
+                    || {
                         if let Some((k, v)) = values.pop_front() {
                             index.data.push(&k);
                             Some(v)
                         } else {
                             None
                         }
-                    }, self.config.max_leaf_size, self.config.zstd_level)?;
-                index.sealed = self.leaf_sealed(leaf.as_ref().raw().len() as u64, index.data.count());
+                    },
+                    self.config.max_leaf_size,
+                    self.config.zstd_level,
+                )?;
+                index.sealed =
+                    self.leaf_sealed(leaf.as_ref().raw().len() as u64, index.data.count());
                 index.cid = self.store.put(leaf.as_ref().raw(), cid::Codec::Raw).await?;
-                println!("created leaf with size {} / {}", leaf.as_ref().raw().len(), self.config.max_branch_size);
                 assert!(index.sealed || values.is_empty());
                 Ok(self.cache_leaf(index, leaf).into())
             }
@@ -489,7 +494,7 @@ where
                     // we can not consider compressed size for the sealed criterium
                     index.sealed = self.branch_sealed(0, &branch.children, index.level);
                 }
-                println!("branch created {}", index.level);
+                info!("branch created {}", index.level);
                 let ipld = serialize_compressed(&branch.children, self.config.zstd_level)?;
                 let cid = self.store.put(&ipld, cid::Codec::DagCBOR).await?;
                 index.count = branch.children.iter().map(|x| x.count()).sum();
@@ -540,22 +545,27 @@ where
         self.get(node, offset).boxed_local()
     }
 
-    fn stream<'a, V: DeserializeOwned>(
+    fn stream<'a, V: DeserializeOwned + Debug>(
         &'a self,
         index: Index<T::Seq>,
     ) -> LocalBoxStream<'a, Result<(T::Key, V)>> {
         let s = async move {
             Ok(match self.load_node(&index).await? {
                 NodeInfo::Leaf(index, node) => {
+                    info!("streaming leaf {}", index.data.count());
                     let keys = index.items();
-                    let elems: Vec<V> = node.as_ref().items()?;
+                    info!("raw compressed data {}", node.as_ref().raw().len());
+                    let elems = node.as_ref().items()?;
                     let pairs = keys.zip(elems).collect::<Vec<_>>();
                     stream::iter(pairs).map(|x| Ok(x)).left_stream()
                 }
-                NodeInfo::Branch(_, node) => stream::iter(node.children)
-                    .map(move |child| self.stream(child))
-                    .flatten()
-                    .right_stream(),
+                NodeInfo::Branch(_, node) => {
+                    info!("streaming branch {} {}", index.level(), node.children.len());
+                    stream::iter(node.children)
+                        .map(move |child| self.stream(child))
+                        .flatten()
+                        .right_stream()
+                }
             })
         }
         .try_flatten_stream();

@@ -8,8 +8,11 @@ use std::{
     io::{prelude::*, Cursor, Write},
     sync::Arc,
 };
-use zstd::stream::raw::{Decoder as ZDecoder, Operation, OutBuffer};
-use zstd::stream::write::Encoder;
+use tracing::*;
+use zstd::stream::{
+    raw::{Decoder as ZDecoder, Operation, OutBuffer},
+    write::Encoder,
+};
 
 /// An array of zstd compressed data
 pub struct ZstdArray {
@@ -57,12 +60,13 @@ impl<'a> ZstdArrayRef<'a> {
         Ok(uncompressed)
     }
 
-    fn decompress_into(&self, mut uncompressed: Vec<u8>) -> Result<Vec<u8>> {
-        let data = self.raw();
-        let mut writer = zstd::stream::write::Decoder::new(uncompressed.by_ref())?;
-        writer.write_all(data)?;
-        writer.flush()?;
-        Ok(uncompressed)
+    fn decompress_into(&self, uncompressed: Vec<u8>) -> Result<Vec<u8>> {
+        // let data = self.raw();
+        // let mut writer = zstd::stream::write::Decoder::new(uncompressed.by_ref())?;
+        // writer.write_all(data)?;
+        // writer.flush()?;
+        // Ok(uncompressed)
+        self.decompress_into_lowlevel(uncompressed)
     }
 
     #[allow(dead_code)]
@@ -98,7 +102,9 @@ impl<'a> ZstdArrayRef<'a> {
     }
 
     pub fn items<T: DeserializeOwned>(&self) -> Result<Vec<T>> {
+        info!("compressed length {}", self.raw().len());
         let uncompressed = self.decompress_into(Vec::new())?;
+        info!("uncompressed length {}", uncompressed.len());
         let mut result = Vec::new();
         let mut r = Cursor::new(&uncompressed);
         while r.position() < uncompressed.len() as u64 {
@@ -231,12 +237,16 @@ impl ZstdArrayBuilder {
     ///
     /// note that the encoder will be flushed just once at the end of the fill op, so the size might be
     /// significantly above the target size.
-    pub fn fill<T: Serialize>(mut self, mut from: impl FnMut() -> Option<T>, compressed_size: u64) -> Result<Self> {
+    pub fn fill<T: Serialize>(
+        mut self,
+        mut from: impl FnMut() -> Option<T>,
+        compressed_size: u64,
+    ) -> Result<Self> {
         while (self.raw().len() as u64) < compressed_size {
             if let Some(value) = from() {
                 serde_cbor::to_writer(&mut self.encoder, &value)?;
             } else {
-                break
+                break;
             }
         }
         self.encoder.flush()?;
