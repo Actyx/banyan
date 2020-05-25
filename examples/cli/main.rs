@@ -313,55 +313,7 @@ async fn main() -> Result<()> {
         // let store = TestStore::new();
         let store = Arc::new(IpfsStore::new());
         let forest = Arc::new(Forest::new(store, Config::default()));
-        let mut tree = Tree::<TT, u64>::empty(forest.clone());
-        tree.push(&Value::single(0, 0, Tags::empty()), &0u64)
-            .await?;
-        println!("{:?}", tree.get(0).await?);
-
-        // let n = 100;
-        // let mut tree = Tree::<TT, u64>::empty(forest.clone());
-        // for i in 0..n {
-        //     println!("{}", i);
-        //     tree.push(&Value::single(i, i, Tags::single("foo")), &i)
-        //         .await?;
-        // }
-
-        // tree.dump().await?;
-
-        // for i in 0..n {
-        //     println!("{:?}", tree.get(i).await?);
-        // }
-
-        let mut stream = tree.stream().enumerate();
-        while let Some((i, Ok(v))) = stream.next().await {
-            if i % 1000 == 0 {
-                println!("{:?}", v);
-            }
-        }
-
-        println!("filtered iteration!");
-        let query = DnfQuery(vec![Value::range(0, 50, Tags::single("foo"))]);
-        let mut stream = tree.stream_filtered(&query);
-        while let Some(Ok(v)) = stream.next().await {
-            println!("{:?}", v);
-        }
-
-        println!("filtered iteration - brute force!");
-        let mut stream = tree.stream().try_filter_map(|(k, v)| {
-            future::ok(if query.contains(&k) {
-                Some((k, v))
-            } else {
-                None
-            })
-        });
-        while let Some(Ok(v)) = stream.next().await {
-            println!("{:?}", v);
-        }
-
-        println!("{:?}", tree);
-
-        let mut tree2 = Tree::<TT, String>::empty(forest);
-        let tags = Tags::single("foo");
+        let mut tree = Tree::<TT, String>::empty(forest);
         let mut offset: u64 = 0;
         let k = 1u64;
         for c in 0..k {
@@ -378,18 +330,26 @@ async fn main() -> Result<()> {
                     result
                 })
                 .collect::<Vec<_>>();
-            tree2.extend_unbalanced(v.into_iter()).await?;
+                tree.extend_unbalanced(v.into_iter()).await?;
             println!("--- dump {} ---", c);
-            println!("{:?}", tree2);
+            println!("{:?}", tree);
         }
-        tree2.dump().await?;
-        println!("{:?}", tree2);
+        tree.dump().await?;
+        println!("{:?}", tree);
         let query = DnfQuery(vec![
             Value::filter_tags(tfizz),
             Value::filter_tags(tbuzz)
         ]);
-        println!("querying");
-        let mut stream = tree2.stream_filtered(&query).enumerate();
+        let sealed = tree.sealed().await?;
+        println!("sealed {}/{}", sealed.count(), tree.count());
+        let mut stream = sealed.stream().enumerate();
+        while let Some((i, v)) = stream.next().await {
+            if i % 1000 == 0 {
+                println!("{:?}", v);
+            }
+        }
+        let query = OffsetQuery::new(sealed.count());
+        let mut stream = tree.stream_filtered(&query).enumerate();
         while let Some((i, v)) = stream.next().await {
             if i % 1000 == 0 {
                 println!("{:?}", v);

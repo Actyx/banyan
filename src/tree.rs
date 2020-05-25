@@ -101,6 +101,16 @@ impl<T: TreeTypes, V> fmt::Debug for Tree<T, V> {
     }
 }
 
+impl<V, T: TreeTypes> Clone for Tree<T, V> {
+    fn clone(&self) -> Self {
+        Self {
+            root: self.root.clone(),
+            forest: self.forest.clone(),
+            _t: PhantomData,
+        }
+    }
+}
+
 impl<V: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static, T: TreeTypes>
     Tree<T, V>
 {
@@ -126,6 +136,32 @@ impl<V: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static, T:
             None => Ok(()),
         }
     }
+
+    /// search along the first child for a sealed node
+    pub async fn sealed(&self) -> Result<Self> {
+        Ok(match &self.root {
+            Some(index) => {
+                Tree {
+                    root: self.forest.sealed(index).await?,
+                    forest: self.forest.clone(),
+                    _t: PhantomData,
+                }
+            },
+            None => Tree::empty(self.forest.clone()),
+        })
+    }
+
+    // pub fn balance(&self) -> Result<Self> {
+    //     if let Some(root) = self.root {
+    //         if let Some(sealed) = self.forest.sealed(root).await? {
+
+    //         } else {
+
+    //         }
+    //     } else {
+    //         self.clone()
+    //     }
+    // }
 
     /// append a single element
     pub async fn push(&mut self, key: &T::Key, value: &V) -> Result<()> {
@@ -775,6 +811,24 @@ where
             }
         };
         Ok(())
+    }
+
+    async fn sealed(&self, index: &Index<T::Seq>) -> Result<Option<Index<T::Seq>>> {
+        if index.sealed() {
+            Ok(Some(index.clone()))
+        } else if let NodeInfo::Branch(_, branch) = self.load_node(index).await? {
+            if let Some(child) = branch.children.first() {
+                self.sealedr(child).await
+            } else {
+                Ok(None)
+            }
+        } else {
+            Ok(None)
+        }
+    }
+    
+    fn sealedr<'a>(&'a self, index: &'a Index<T::Seq>) -> LocalBoxFuture<'a, Result<Option<Index<T::Seq>>>> {
+        self.sealed(index).boxed_local()
     }
 
     /// creates a new forest
