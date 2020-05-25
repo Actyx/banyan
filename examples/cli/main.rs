@@ -56,6 +56,15 @@ impl Value {
         }
     }
 
+    fn filter_tags(tags: Tags) -> Self {
+        Self {
+            min_lamport: u64::MIN,
+            min_time: u64::MIN,
+            max_time: u64::MAX,
+            tags,
+        }
+    }
+
     fn range(min_time: u64, max_time: u64, tags: Tags) -> Self {
         Self {
             min_lamport: 0,
@@ -103,14 +112,17 @@ impl Semigroup for Value {
 
 struct DnfQuery(Vec<Value>);
 
-impl Query<TT> for DnfQuery {
-    type IndexIterator = std::vec::IntoIter<bool>;
+impl DnfQuery {
     fn intersects(&self, v: &Value) -> bool {
         self.0.iter().any(|x| x.intersects(v))
     }
     fn contains(&self, v: &Value) -> bool {
         self.0.iter().any(|x| x.contains(v))
     }
+}
+
+impl Query<TT> for DnfQuery {
+    type IndexIterator = std::vec::IntoIter<bool>;
     fn intersecting(&self, _: u64, x: &BranchIndex<ValueSeq>) -> Self::IndexIterator {
         let bools = x.items().map(|x| self.intersects(&x)).collect::<Vec<_>>();
         bools.into_iter()
@@ -200,19 +212,8 @@ impl CompactSeq for ValueSeq {
     }
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    // a builder for `FmtSubscriber`.
-    tracing_subscriber::fmt()
-        // all spans/events with a level higher than TRACE (e.g, debug, info, warn, etc.)
-        // will be written to stdout.
-        .with_max_level(Level::INFO)
-        // completes the builder and sets the constructed `Subscriber` as the default.
-        .init();
-
-    let store = Arc::new(IpfsStore::new());
-    let forest = Arc::new(Forest::<TT>::new(store, Config::debug()));
-    let matches = App::new("banyan-cli")
+fn app() -> clap::App<'static, 'static> {
+    App::new("banyan-cli")
         .version("0.1")
         .author("Rüdiger Klaehn")
         .about("CLI to work with large banyan trees on ipfs")
@@ -243,7 +244,42 @@ async fn main() -> Result<()> {
                     .help("The number of values"),
             ),
         )
-        .get_matches();
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    // a builder for `FmtSubscriber`.
+    tracing_subscriber::fmt()
+        // all spans/events with a level higher than TRACE (e.g, debug, info, warn, etc.)
+        // will be written to stdout.
+        .with_max_level(Level::INFO)
+        // completes the builder and sets the constructed `Subscriber` as the default.
+        .init();
+
+    let tfizzbuzz = Tags::single("fizzbuzz");
+    let tfizz = Tags::single("fizz");
+    let tbuzz = Tags::single("buzz");
+    let tcompany = Tags::single("com.somecompany.somenamespace.someapp.sometype");
+    let tschema = Tags::single("org.schema.registry.someothertype");
+    let tadapter = Tags::single("factory.provider.interface.adapter");
+    let tlong = Tags::single("we.like.long.identifiers.because.they.seem.professional");
+    let tags_from_offset = |i: u64| -> Tags {
+        let fizz = i % 3 == 0;
+        let buzz = i % 5 == 0;
+        if fizz && buzz {
+            tfizzbuzz.clone()
+        } else if fizz {
+            tfizz.clone()
+        } else if buzz {
+            tbuzz.clone()
+        } else {
+            tlong.clone()
+        }
+    };
+
+    let store = Arc::new(IpfsStore::new());
+    let forest = Arc::new(Forest::<TT>::new(store, Config::debug()));
+    let matches = app().get_matches();
     if let Some(matches) = matches.subcommand_matches("dump") {
         let root = Cid::from_str(
             matches
@@ -324,21 +360,43 @@ async fn main() -> Result<()> {
 
         println!("{:?}", tree);
 
-        let mut tree2 = Tree::<TT, u64>::empty(forest);
+        let mut tree2 = Tree::<TT, String>::empty(forest);
         let tags = Tags::single("foo");
-        let v = (0..n)
-            .map(|i| {
-                if i % 1000 == 0 {
-                    println!("{}", i);
-                }
-                (Value::single(i, i, tags.clone()), i)
-            })
-            .collect::<Vec<_>>();
-        tree2.extend(v.into_iter().peekable()).await?;
+        let mut offset: u64 = 0;
+        let k = 1u64;
+        for c in 0..k {
+            let v = (0..n)
+                .map(|_| {
+                    if offset % 1000 == 0 {
+                        println!("{}", offset);
+                    }
+                    let result = (
+                        Value::single(offset, offset, tags_from_offset(offset)),
+                        offset.to_string(),
+                    );
+                    offset += 1;
+                    result
+                })
+                .collect::<Vec<_>>();
+            tree2.extend_unbalanced(v.into_iter()).await?;
+            println!("--- dump {} ---", c);
+            println!("{:?}", tree2);
+        }
         tree2.dump().await?;
         println!("{:?}", tree2);
-
-        // czaa::flat_tree::test();
+        let query = DnfQuery(vec![
+            Value::filter_tags(tfizz),
+            Value::filter_tags(tbuzz)
+        ]);
+        println!("querying");
+        let mut stream = tree2.stream_filtered(&query).enumerate();
+        while let Some((i, v)) = stream.next().await {
+            if i % 1000 == 0 {
+                println!("{:?}", v);
+            }
+        }
+    } else {
+        app().print_long_help()?;
     }
     Ok(())
 }

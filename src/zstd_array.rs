@@ -96,6 +96,7 @@ impl<'a> ZstdArrayRef<'a> {
                 break;
             }
         }
+        info!("decompress {} {}", self.data.len(), uncompressed.len());
         Ok(uncompressed)
     }
 

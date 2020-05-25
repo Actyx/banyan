@@ -119,6 +119,8 @@ pub struct LeafIndex<T> {
     /// index data. This is a sequence of keys with the same number of elements as
     /// the data block the cid points to.
     pub data: T,
+    // serialized size of the data
+    pub value_bytes: u64,
 }
 
 impl<T: CompactSeq> LeafIndex<T> {
@@ -146,6 +148,10 @@ pub struct BranchIndex<T> {
     pub cid: Cid,
     // extra data
     pub data: T,
+    // serialized size of the children
+    pub value_bytes: u64,
+    // serialized size of the data
+    pub key_bytes: u64,
 }
 
 impl<T: CompactSeq> BranchIndex<T> {
@@ -166,24 +172,30 @@ struct IndexW<'a, T> {
     cid: &'a Cid,
     // extra data
     data: &'a T,
+    value_bytes: u64,
+    key_bytes: Option<u64>,
 }
 
 impl<'a, T> From<&'a Index<T>> for IndexW<'a, T> {
     fn from(value: &'a Index<T>) -> Self {
         match value {
             Index::Branch(i) => Self {
-                count: Some(i.count),
                 sealed: i.sealed,
-                level: Some(i.level),
+                value_bytes: i.value_bytes,
                 cid: &i.cid,
                 data: &i.data,
+                count: Some(i.count),
+                level: Some(i.level),
+                key_bytes: Some(i.key_bytes),
             },
             Index::Leaf(i) => Self {
-                count: None,
                 sealed: i.sealed,
-                level: None,
+                value_bytes: i.value_bytes,
                 cid: &i.cid,
                 data: &i.data,
+                count: None,
+                level: None,
+                key_bytes: None,
             },
         }
     }
@@ -195,21 +207,27 @@ struct IndexR<T> {
     count: Option<u64>,
     // level of the tree node
     level: Option<u32>,
+    // value bytes
+    key_bytes: Option<u64>,
     // block is sealed
     sealed: bool,
     // link to the branch node
     cid: Cid,
     // extra data
     data: T,
+    // value bytes
+    value_bytes: u64,
 }
 
 impl<T> From<IndexR<T>> for Index<T> {
     fn from(v: IndexR<T>) -> Self {
-        if let (Some(level), Some(count)) = (v.level, v.count) {
+        if let (Some(level), Some(count), Some(key_bytes)) = (v.level, v.count, v.key_bytes) {
             BranchIndex {
                 cid: v.cid,
                 data: v.data,
                 sealed: v.sealed,
+                value_bytes: v.value_bytes,
+                key_bytes,
                 count,
                 level,
             }
@@ -219,6 +237,7 @@ impl<T> From<IndexR<T>> for Index<T> {
                 cid: v.cid,
                 data: v.data,
                 sealed: v.sealed,
+                value_bytes: v.value_bytes,
             }
             .into()
         }
@@ -277,6 +296,18 @@ impl<T: CompactSeq> Index<T> {
         match self {
             Index::Leaf(_) => 0,
             Index::Branch(x) => x.level,
+        }
+    }
+    pub fn value_bytes(&self) -> u64 {
+        match self {
+            Index::Leaf(x) => x.value_bytes,
+            Index::Branch(x) => x.value_bytes,
+        }
+    }
+    pub fn key_bytes(&self) -> u64 {
+        match self {
+            Index::Leaf(_) => 0,
+            Index::Branch(x) => x.key_bytes,
         }
     }
 }
@@ -379,6 +410,8 @@ struct IndexWC<'a, T> {
     count: Option<u64>,
     // level of the tree node
     level: Option<u32>,
+    key_bytes: Option<u64>,
+    value_bytes: u64,
     // block is sealed
     sealed: bool,
     // extra data
@@ -389,16 +422,20 @@ impl<'a, T> From<&'a Index<T>> for IndexWC<'a, T> {
     fn from(value: &'a Index<T>) -> Self {
         match value {
             Index::Branch(i) => Self {
-                count: Some(i.count),
                 sealed: i.sealed,
-                level: Some(i.level),
                 data: &i.data,
+                value_bytes: i.value_bytes,
+                count: Some(i.count),
+                level: Some(i.level),
+                key_bytes: Some(i.key_bytes),
             },
             Index::Leaf(i) => Self {
-                count: None,
                 sealed: i.sealed,
-                level: None,
                 data: &i.data,
+                value_bytes: i.value_bytes,
+                count: None,
+                level: None,
+                key_bytes: None,
             },
         }
     }
@@ -414,14 +451,22 @@ struct IndexRC<T> {
     count: Option<u64>,
     // level of the tree node, for branches
     level: Option<u32>,
+    // value bytes
+    value_bytes: u64,
+    // key bytes
+    key_bytes: Option<u64>,
 }
 
 impl<T> IndexRC<T> {
     fn to_index(self, cid: Cid) -> Index<T> {
-        if let (Some(level), Some(count)) = (self.level, self.count) {
+        if let (Some(level), Some(count), Some(key_bytes)) =
+            (self.level, self.count, self.key_bytes)
+        {
             BranchIndex {
                 data: self.data,
                 sealed: self.sealed,
+                value_bytes: self.value_bytes,
+                key_bytes,
                 count,
                 level,
                 cid,
@@ -431,6 +476,7 @@ impl<T> IndexRC<T> {
             LeafIndex {
                 data: self.data,
                 sealed: self.sealed,
+                value_bytes: self.value_bytes,
                 cid,
             }
             .into()

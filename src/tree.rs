@@ -50,10 +50,6 @@ pub struct Tree<T: TreeTypes, V> {
 pub trait Query<T: TreeTypes> {
     /// the iterator type
     type IndexIterator: Iterator<Item = bool>;
-    /// checks whether a single item that could be a combination of multiple values can possibly match the query
-    fn intersects(&self, x: &T::Key) -> bool;
-    /// checks wether an individual item does match the query
-    fn contains(&self, x: &T::Key) -> bool;
     /// an iterator returning x.count() elements, where each value is a bool indicating if the query does match
     fn containing(&self, offset: u64, x: &LeafIndex<T::Seq>) -> Self::IndexIterator;
     /// an iterator returning x.count() elements, where each value is a bool indicating if the query can match
@@ -64,7 +60,6 @@ pub trait Query<T: TreeTypes> {
 pub struct Config {
     max_leaf_size: u64,
     max_leaf_count: u64,
-    max_branch_size: u64,
     max_branch_count: u64,
     zstd_level: i32,
 }
@@ -74,7 +69,6 @@ impl Config {
         Self {
             max_leaf_size: 10000,
             max_leaf_count: 10,
-            max_branch_size: 1000,
             max_branch_count: 4,
             zstd_level: 10,
         }
@@ -84,9 +78,8 @@ impl Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            max_leaf_size: 1 << 12,
-            max_leaf_count: 1 << 12,
-            max_branch_size: 1 << 16,
+            max_leaf_size: 1 << 14,
+            max_leaf_count: 1 << 14,
             max_branch_count: 32,
             zstd_level: 10,
         }
@@ -96,7 +89,13 @@ impl Default for Config {
 impl<T: TreeTypes, V> fmt::Debug for Tree<T, V> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.root {
-            Some(root) => write!(f, "Tree {}", root.cid()),
+            Some(root) => write!(
+                f,
+                "Tree {} {} {}",
+                root.cid(),
+                root.key_bytes(),
+                root.value_bytes()
+            ),
             None => write!(f, "empty tree"),
         }
     }
@@ -145,16 +144,38 @@ impl<V: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static, T:
     }
 
     /// extend the node with the given iterator of key/value pairs
-    pub async fn extend(
-        &mut self,
-        mut from: std::iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
-    ) -> Result<()> {
+    pub async fn extend(&mut self, from: impl Iterator<Item = (T::Key, V)>) -> Result<()> {
+        let mut from = from.peekable();
         let root = if let Some(root) = &self.root {
             root.clone()
         } else {
             self.forest.fill_node(0, from.by_ref()).await?.into()
         };
         self.root = Some(self.forest.extend_above(root, from.by_ref()).await?);
+        Ok(())
+    }
+
+    /// extend the node with the given iterator of key/value pairs
+    pub async fn extend_unbalanced(
+        &mut self,
+        mut from: impl Iterator<Item = (T::Key, V)>,
+    ) -> Result<()> {
+        let mut tree = Tree::empty(self.forest.clone());
+        tree.extend(from.by_ref()).await?;
+        self.root = match (self.root.clone(), tree.root) {
+            (Some(a), Some(b)) => {
+                let level = a.level().max(b.level()) + 1;
+                let mut from = from.peekable();
+                Some(
+                    self.forest
+                        .create_branch(vec![a, b], level, from.by_ref())
+                        .await?
+                        .into(),
+                )
+            },
+            (None, tree) => tree,
+            (tree, None) => tree,
+        };
         Ok(())
     }
 
@@ -199,14 +220,39 @@ impl<V: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static, T:
     }
 }
 
+pub struct OffsetQuery {
+    from: u64,
+}
+
+impl OffsetQuery {
+    pub fn new(from: u64) -> Self {
+        Self { from }
+    }
+}
+
+impl<T: TreeTypes> Query<T> for OffsetQuery {
+    type IndexIterator = Box<dyn std::iter::Iterator<Item=bool>>;
+    fn containing(&self, offset: u64, x: &LeafIndex<T::Seq>) -> Self::IndexIterator {
+        info!("OffsetQuery::containing {}", offset);
+        let from = self.from;
+        Box::new((0..x.data.count()).map(move |o| o + offset >= from))
+    }
+    fn intersecting(&self, offset: u64, x: &BranchIndex<T::Seq>) -> Self::IndexIterator {
+        info!("OffsetQuery::intersecting {}", offset);
+        // TODO
+        Box::new(std::iter::repeat(true).take(x.data.count() as usize))
+    }
+}
+
 /// Utility method to zip a number of indices with an offset that is increased by each index value
 fn zip_with_offset<'a, I: Iterator<Item = Index<T>> + 'a, T: CompactSeq + 'a>(
     value: I,
     offset: u64,
 ) -> impl Iterator<Item = (Index<T>, u64)> + 'a {
     value.scan(offset, |offset, x| {
+        let o0 = *offset;
         *offset += x.count();
-        Some((x, *offset))
+        Some((x, o0))
     })
 }
 
@@ -243,6 +289,7 @@ where
         let cid = self.store.put(leaf.as_ref().raw(), cid::Codec::Raw).await?;
         let index = LeafIndex {
             cid,
+            value_bytes: leaf.as_ref().raw().len() as u64,
             sealed: self.leaf_sealed(leaf.as_ref().raw().len() as u64, 1),
             data: T::Seq::single(key),
         };
@@ -256,13 +303,18 @@ where
         builder: ZstdArrayBuilder,
         from: &mut std::iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
     ) -> Result<LeafIndex<T::Seq>> {
+        info!("create_leaf {}", builder.raw().len());
         assert!(from.peek().is_some());
         let builder = builder.fill(
             || {
-                from.next().map(|(k, v)| {
-                    data.push(&k);
-                    v
-                })
+                if data.count() < self.config.max_leaf_count {
+                    from.next().map(|(k, v)| {
+                        data.push(&k);
+                        v
+                    })
+                } else {
+                    None
+                }
             },
             self.config.max_leaf_size,
         )?;
@@ -270,9 +322,16 @@ where
         let cid = self.store.put(leaf.as_ref().raw(), cid::Codec::Raw).await?;
         let index = LeafIndex {
             cid,
-            sealed: self.leaf_sealed(leaf.as_ref().raw().len() as u64, 1),
+            value_bytes: leaf.as_ref().raw().len() as u64,
+            sealed: self.leaf_sealed(leaf.as_ref().raw().len() as u64, data.count()),
             data,
         };
+        info!(
+            "leaf created {} {} {}",
+            index.data.count(),
+            index.value_bytes,
+            index.sealed
+        );
         Ok(self.cache_leaf(index, leaf))
     }
 
@@ -295,7 +354,7 @@ where
         level: u32,
         from: &mut std::iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
     ) -> Result<BranchIndex<T::Seq>> {
-        assert!(children.iter().all(|child| child.level() == level - 1));
+        assert!(children.iter().all(|child| child.level() <= level - 1));
         let mut keys = children
             .iter()
             .map(|child| child.data().summarize())
@@ -308,7 +367,9 @@ where
         }
         let cbor = serialize_compressed(&children, self.config.zstd_level)?;
         let cid = self.store.put(&cbor, cid::Codec::DagCBOR).await?;
-        let count = keys.len() as u64;
+        let count = children.iter().map(|x| x.count()).sum();
+        let value_bytes = children.iter().map(|x| x.value_bytes()).sum();
+        let key_bytes = children.iter().map(|x| x.key_bytes()).sum::<u64>() + cbor.len() as u64;
         let sealed = self.branch_sealed(&children, level);
         let data: T::Seq = compactseq_create(keys.into_iter())?;
         let index = BranchIndex {
@@ -317,6 +378,8 @@ where
             sealed,
             cid,
             data,
+            key_bytes,
+            value_bytes,
         };
         Ok(index)
     }
@@ -354,24 +417,20 @@ where
         // a branch with less than 2 children is never considered sealed.
         // if we ever get this a branch that is too large despite having just 1 child,
         // we should just panic.
-        if let Some(last_child) = items.last() {
-            // must have at least 2 children
-            if items.len() < 2 {
-                return false;
-            }
-            // all children must be sealed
-            if items.iter().any(|x| !x.sealed()) {
-                return false;
-            }
-            // all children must be one level below us
-            if items.iter().any(|x| x.level() != level - 1) {
-                return false;
-            }
-            //
-            items.len() as u64 >= self.config.max_branch_count
-        } else {
-            false
+        // must have at least 2 children
+        if items.len() < 2 {
+            return false;
         }
+        // all children must be sealed
+        if items.iter().any(|x| !x.sealed()) {
+            return false;
+        }
+        // all children must be one level below us
+        if items.iter().any(|x| x.level() != level - 1) {
+            return false;
+        }
+        // we must be full
+        items.len() as u64 >= self.config.max_branch_count
     }
 
     /// load a branch given a branch index
@@ -388,6 +447,8 @@ where
         let children: Vec<Index<T::Seq>> = deserialize_compressed(&bytes)?;
         let count = children.iter().map(|x| x.count()).sum();
         let level = children.iter().map(|x| x.level()).max().unwrap() + 1;
+        let value_bytes = children.iter().map(|x| x.value_bytes()).sum();
+        let key_bytes = children.iter().map(|x| x.key_bytes()).sum::<u64>() + (bytes.len() as u64);
         let data = compactseq_create(children.iter().map(|x| x.data().summarize()))?;
         let result = BranchIndex {
             cid,
@@ -395,6 +456,8 @@ where
             count,
             data,
             sealed: self.branch_sealed(&children, level),
+            value_bytes,
+            key_bytes,
         }
         .into();
         Ok(result)
@@ -417,6 +480,8 @@ where
         let index = BranchIndex {
             level: value.level() + 1,
             count: value.count(),
+            value_bytes: value.value_bytes(),
+            key_bytes: value.key_bytes() + cbor.len() as u64,
             sealed: false,
             cid,
             data: T::Seq::single(&value.data().summarize()),
@@ -543,24 +608,33 @@ where
     async fn extend<V: Serialize + Debug>(
         &self,
         index: &Index<T::Seq>,
-        values: &mut std::iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
+        from: &mut std::iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
     ) -> Result<Index<T::Seq>> {
-        if index.sealed() {
+        info!(
+            "extend {} {} {} {}",
+            index.level(),
+            index.key_bytes(),
+            index.value_bytes(),
+            index.sealed()
+        );
+        if index.sealed() || from.peek().is_none() {
             return Ok(index.clone());
         }
         match self.load_node_write(index).await? {
             NodeInfo::Leaf(index, leaf) => {
+                info!("extending existing leaf");
                 let data = index.data.clone();
                 let builder = leaf.builder(self.config.zstd_level)?;
-                Ok(self.create_leaf(data, builder, values).await?.into())
+                Ok(self.create_leaf(data, builder, from).await?.into())
             }
             NodeInfo::Branch(index, branch) => {
+                info!("extending branch");
                 let mut children = branch.children;
                 if let Some(last_child) = children.last_mut() {
-                    *last_child = self.extendr(&last_child, values).await?;
+                    *last_child = self.extendr(&last_child, from).await?;
                 }
                 Ok(self
-                    .create_branch(children, index.level, values)
+                    .create_branch(children, index.level, from)
                     .await?
                     .into())
             }
@@ -570,9 +644,9 @@ where
     fn extendr<'a, V: Serialize + Debug + 'a>(
         &'a self,
         node: &'a Index<T::Seq>,
-        values: &'a mut std::iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
+        from: &'a mut std::iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
     ) -> LocalBoxFuture<'a, Result<Index<T::Seq>>> {
-        self.extend(node, values).boxed_local()
+        self.extend(node, from).boxed_local()
     }
 
     async fn get<V: DeserializeOwned>(
@@ -681,12 +755,18 @@ where
     async fn dump(&self, index: &Index<T::Seq>, prefix: &str) -> Result<()> {
         match self.load_node(index).await? {
             NodeInfo::Leaf(index, _) => {
-                println!("{}Leaf({}, {})", prefix, index.data.count(), index.sealed);
+                println!(
+                    "{}Leaf({}, {}, {})",
+                    prefix,
+                    index.data.count(),
+                    index.sealed,
+                    index.value_bytes
+                );
             }
             NodeInfo::Branch(index, branch) => {
                 println!(
-                    "{}Branch({}, {} {:?})",
-                    prefix, index.count, index.sealed, index.data
+                    "{}Branch({}, {}, {}, {})",
+                    prefix, index.count, index.sealed, index.key_bytes, index.value_bytes,
                 );
                 let prefix = prefix.to_string() + "  ";
                 for x in branch.children.iter() {

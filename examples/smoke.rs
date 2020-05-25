@@ -97,14 +97,18 @@ impl Semigroup for Value {
 
 struct DnfQuery(Vec<Value>);
 
-impl Query<TT> for DnfQuery {
-    type IndexIterator = std::vec::IntoIter<bool>;
+impl DnfQuery {
+
     fn intersects(&self, v: &Value) -> bool {
         self.0.iter().any(|x| x.intersects(v))
     }
     fn contains(&self, v: &Value) -> bool {
         self.0.iter().any(|x| x.contains(v))
     }
+}
+
+impl Query<TT> for DnfQuery {
+    type IndexIterator = std::vec::IntoIter<bool>;
     fn intersecting(&self, _: u64, x: &BranchIndex<ValueSeq>) -> Self::IndexIterator {
         let bools = x.items().map(|x| self.intersects(&x)).collect::<Vec<_>>();
         bools.into_iter()
