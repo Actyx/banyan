@@ -9,7 +9,7 @@ use std::fmt::Debug;
 use std::{
     fmt,
     marker::PhantomData,
-    sync::{Arc, RwLock},
+    sync::{Arc, RwLock}, iter::FromIterator,
 };
 use tracing::*;
 
@@ -137,31 +137,38 @@ impl<V: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static, T:
         }
     }
 
-    /// search along the first child for a sealed node
-    pub async fn sealed(&self) -> Result<Self> {
+    fn with_root(&self, root: Option<Index<T::Seq>>) -> Self {
+        Tree {
+            root,
+            forest: self.forest.clone(),
+            _t: PhantomData,
+        }
+    }
+
+    /// returns the part of the tree that is considered filled, basically everything up to the first gap
+    ///
+    /// a gap is a non-full leaf or a "level hole"
+    pub async fn filled(&self) -> Result<Self> {
         Ok(match &self.root {
-            Some(index) => {
-                Tree {
-                    root: self.forest.sealed(index).await?,
-                    forest: self.forest.clone(),
-                    _t: PhantomData,
-                }
-            },
-            None => Tree::empty(self.forest.clone()),
+            Some(index) => self.with_root(self.forest.filled(index).await?),
+            None => self.with_root(None),
         })
     }
 
-    // pub fn balance(&self) -> Result<Self> {
-    //     if let Some(root) = self.root {
-    //         if let Some(sealed) = self.forest.sealed(root).await? {
+    pub async fn collect_from<B: FromIterator<(T::Key, V)>>(&self, offset: u64) -> Result<B> {
+        let query = OffsetQuery::new(offset);
+        let items: Vec<Result<(T::Key, V)>> = self.stream_filtered(&query)
+            .map_ok(|(_, k, v)| (k, v))
+            .collect::<Vec<_>>().await;
+        items.into_iter().collect::<Result<_>>()
+    }
 
-    //         } else {
-
-    //         }
-    //     } else {
-    //         self.clone()
-    //     }
-    // }
+    pub async fn balance(&self) -> Result<Self> {
+        let mut filled = self.filled().await?;
+        let remainder: Vec<_> = self.collect_from(filled.count()).await?;
+        filled.extend(remainder).await?;
+        Ok(filled)
+    }
 
     /// append a single element
     pub async fn push(&mut self, key: &T::Key, value: &V) -> Result<()> {
@@ -180,8 +187,8 @@ impl<V: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static, T:
     }
 
     /// extend the node with the given iterator of key/value pairs
-    pub async fn extend(&mut self, from: impl Iterator<Item = (T::Key, V)>) -> Result<()> {
-        let mut from = from.peekable();
+    pub async fn extend(&mut self, from: impl IntoIterator<Item = (T::Key, V)>) -> Result<()> {
+        let mut from = from.into_iter().peekable();
         let root = if let Some(root) = &self.root {
             root.clone()
         } else {
@@ -194,8 +201,9 @@ impl<V: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static, T:
     /// extend the node with the given iterator of key/value pairs
     pub async fn extend_unbalanced(
         &mut self,
-        mut from: impl Iterator<Item = (T::Key, V)>,
+        from: impl IntoIterator<Item = (T::Key, V)>,
     ) -> Result<()> {
+        let mut from = from.into_iter();
         let mut tree = Tree::empty(self.forest.clone());
         tree.extend(from.by_ref()).await?;
         self.root = match (self.root.clone(), tree.root) {
@@ -813,12 +821,12 @@ where
         Ok(())
     }
 
-    async fn sealed(&self, index: &Index<T::Seq>) -> Result<Option<Index<T::Seq>>> {
+    async fn filled(&self, index: &Index<T::Seq>) -> Result<Option<Index<T::Seq>>> {
         if index.sealed() {
             Ok(Some(index.clone()))
         } else if let NodeInfo::Branch(_, branch) = self.load_node(index).await? {
             if let Some(child) = branch.children.first() {
-                self.sealedr(child).await
+                self.filledr(child).await
             } else {
                 Ok(None)
             }
@@ -827,8 +835,8 @@ where
         }
     }
     
-    fn sealedr<'a>(&'a self, index: &'a Index<T::Seq>) -> LocalBoxFuture<'a, Result<Option<Index<T::Seq>>>> {
-        self.sealed(index).boxed_local()
+    fn filledr<'a>(&'a self, index: &'a Index<T::Seq>) -> LocalBoxFuture<'a, Result<Option<Index<T::Seq>>>> {
+        self.filled(index).boxed_local()
     }
 
     /// creates a new forest

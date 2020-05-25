@@ -3,7 +3,7 @@ use clap::{App, Arg, SubCommand};
 use futures::prelude::*;
 use maplit::btreeset;
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeSet, str::FromStr, sync::Arc};
+use std::{collections::{BTreeMap, BTreeSet}, str::FromStr, sync::Arc};
 use tracing::Level;
 use tracing_subscriber;
 
@@ -25,6 +25,12 @@ impl TreeTypes for TT {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialOrd, PartialEq, Ord, Eq)]
 struct Tag(Arc<str>);
+
+impl Tag {
+    pub fn new(text: &str) -> Self {
+        Self(text.into())
+    }
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct Tags(BTreeSet<Tag>);
@@ -246,6 +252,22 @@ fn app() -> clap::App<'static, 'static> {
         )
 }
 
+struct Tagger(BTreeMap<&'static str, Tag>);
+
+impl Tagger {
+    pub fn new() -> Self {
+        Self(BTreeMap::new())
+    }
+
+    pub fn tag(&mut self, name: &'static str) -> Tag {
+        self.0.entry(name).or_insert_with(|| Tag::new(name)).clone()
+    }
+
+    pub fn tags(&mut self, names: &[&'static str]) -> Tags {
+        Tags(names.into_iter().map(|name| self.tag(name)).collect::<BTreeSet<_>>())
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     // a builder for `FmtSubscriber`.
@@ -256,24 +278,18 @@ async fn main() -> Result<()> {
         // completes the builder and sets the constructed `Subscriber` as the default.
         .init();
 
-    let tfizzbuzz = Tags::single("fizzbuzz");
-    let tfizz = Tags::single("fizz");
-    let tbuzz = Tags::single("buzz");
-    let tcompany = Tags::single("com.somecompany.somenamespace.someapp.sometype");
-    let tschema = Tags::single("org.schema.registry.someothertype");
-    let tadapter = Tags::single("factory.provider.interface.adapter");
-    let tlong = Tags::single("we.like.long.identifiers.because.they.seem.professional");
-    let tags_from_offset = |i: u64| -> Tags {
+    let mut tagger = Tagger::new();
+    let mut tags_from_offset = |i: u64| -> Tags {
         let fizz = i % 3 == 0;
         let buzz = i % 5 == 0;
         if fizz && buzz {
-            tfizzbuzz.clone()
+            tagger.tags(&["fizzbuzz"])
         } else if fizz {
-            tfizz.clone()
+            tagger.tags(&["fizz"])
         } else if buzz {
-            tbuzz.clone()
+            tagger.tags(&["buzz"])
         } else {
-            tlong.clone()
+            tagger.tags(&["we.like.long.identifiers.because.they.seem.professional"])
         }
     };
 
@@ -315,7 +331,7 @@ async fn main() -> Result<()> {
         let forest = Arc::new(Forest::new(store, Config::default()));
         let mut tree = Tree::<TT, String>::empty(forest);
         let mut offset: u64 = 0;
-        let k = 1u64;
+        let k = 4u64;
         for c in 0..k {
             let v = (0..n)
                 .map(|_| {
@@ -330,31 +346,24 @@ async fn main() -> Result<()> {
                     result
                 })
                 .collect::<Vec<_>>();
-                tree.extend_unbalanced(v.into_iter()).await?;
+                tree.extend_unbalanced(v).await?;
             println!("--- dump {} ---", c);
             println!("{:?}", tree);
         }
         tree.dump().await?;
         println!("{:?}", tree);
         let query = DnfQuery(vec![
-            Value::filter_tags(tfizz),
-            Value::filter_tags(tbuzz)
+            Value::filter_tags(tagger.tags(&["fizz"])),
+            Value::filter_tags(tagger.tags(&["buzz"]))
         ]);
-        let sealed = tree.sealed().await?;
-        println!("sealed {}/{}", sealed.count(), tree.count());
-        let mut stream = sealed.stream().enumerate();
-        while let Some((i, v)) = stream.next().await {
-            if i % 1000 == 0 {
-                println!("{:?}", v);
-            }
-        }
-        let query = OffsetQuery::new(sealed.count());
-        let mut stream = tree.stream_filtered(&query).enumerate();
-        while let Some((i, v)) = stream.next().await {
-            if i % 1000 == 0 {
-                println!("{:?}", v);
-            }
-        }
+        let filled = tree.filled().await?;
+        println!("sealed {}/{}", filled.count(), tree.count());
+        tree.dump().await?;
+        println!("calling balance!");
+        let tree = tree.balance().await?;
+        let filled = tree.filled().await?;
+        println!("sealed {}/{}", filled.count(), tree.count());
+        tree.dump().await?;
     } else {
         app().print_long_help()?;
     }
