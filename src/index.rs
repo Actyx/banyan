@@ -116,7 +116,8 @@ pub struct LeafIndex<T> {
     pub sealed: bool,
     // link to the block
     pub cid: Cid,
-    //
+    /// index data. This is a sequence of keys with the same number of elements as
+    /// the data block the cid points to.
     pub data: T,
 }
 

@@ -144,6 +144,7 @@ impl<V: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static, T:
         Ok(())
     }
 
+    /// extend the node with the given iterator of key/value pairs
     pub async fn extend(
         &mut self,
         mut from: std::iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
@@ -308,7 +309,7 @@ where
         let cbor = serialize_compressed(&children, self.config.zstd_level)?;
         let cid = self.store.put(&cbor, cid::Codec::DagCBOR).await?;
         let count = keys.len() as u64;
-        let sealed = self.branch_sealed(0, &children, level);
+        let sealed = self.branch_sealed(&children, level);
         let data: T::Seq = compactseq_create(keys.into_iter())?;
         let index = BranchIndex {
             level,
@@ -349,15 +350,25 @@ where
     }
 
     /// predicate to determine if a leaf is sealed, based on the config
-    fn branch_sealed(&self, bytes: u64, items: &[Index<T::Seq>], level: u32) -> bool {
+    fn branch_sealed(&self, items: &[Index<T::Seq>], level: u32) -> bool {
         // a branch with less than 2 children is never considered sealed.
         // if we ever get this a branch that is too large despite having just 1 child,
         // we should just panic.
         if let Some(last_child) = items.last() {
-            items.len() > 1
-                && (last_child.sealed() && last_child.level() >= level - 1)
-                && ((bytes >= self.config.max_branch_size)
-                    || items.len() as u64 >= self.config.max_branch_count)
+            // must have at least 2 children
+            if items.len() < 2 {
+                return false;
+            }
+            // all children must be sealed
+            if items.iter().any(|x| !x.sealed()) {
+                return false;
+            }
+            // all children must be one level below us
+            if items.iter().any(|x| x.level() != level - 1) {
+                return false;
+            }
+            //
+            items.len() as u64 >= self.config.max_branch_count
         } else {
             false
         }
@@ -383,7 +394,7 @@ where
             level,
             count,
             data,
-            sealed: self.branch_sealed(bytes.len() as u64, &children, level),
+            sealed: self.branch_sealed(&children, level),
         }
         .into();
         Ok(result)
@@ -507,7 +518,7 @@ where
                 let ipld = serialize_compressed(&branch.children, self.config.zstd_level)?;
                 let cid = self.store.put(&ipld, cid::Codec::DagCBOR).await?;
                 index.count += 1;
-                index.sealed = self.branch_sealed(ipld.len() as u64, &branch.children, index.level);
+                index.sealed = self.branch_sealed(&branch.children, index.level);
                 index.cid = cid;
                 Ok(self.cache_branch(index, branch).into())
             }
