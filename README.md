@@ -13,7 +13,7 @@ Banyan trees are the trees with the widest canopy. They also sprout new roots, w
 - fat leafs, containing as much data as possible and being roughly the same size
 - low depth, fat branches
 - quick traversal, filtering and random access
-- ~cheap append~
+- ~cheap append~ (possible, but would require more complex interaction with block store)
 - no insert/splice
 - possibility for removal
 
@@ -21,19 +21,19 @@ Banyan trees are the trees with the widest canopy. They also sprout new roots, w
 
 The tree should have a structure that is fully determined by the content, unlike e.g. a balanced tree which has a memory of its history.
 
-It should support append.
+It should support append and bulk append.
 
 ![](https://i.imgur.com/CJdliPU.jpg)
 
 # Node structure
 
-A node is split into two parts. An index part that is 
+A node is split into two parts. An index part that lives in the parent for quick access, and a value part that is linked from the parent.
 
 ![](https://i.imgur.com/ZZHqMRS.jpg)
 
 # Leaf builder
 
-Leafs are the biggest things. The builder incrementally encodes, compresses and encrypts data. The state of a builder should *at any time* be able to be persisted. The storage format should be also incremental (adding stuff at the end does not require changes at the start)
+Leafs are the biggest things. The builder incrementally encodes and compresses data. The state of a builder should *at any time* be able to be persisted. The storage format should be also incremental (adding stuff at the end does not require changes at the start)
 
 ![](https://i.imgur.com/NTlQTBv.jpg)
 
