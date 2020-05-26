@@ -24,7 +24,7 @@ pub trait TreeTypes {
     type Seq: CompactSeq<Item = Self::Key> + Serialize + DeserializeOwned + Clone + Debug;
 }
 
-/// A number of trees that are grouped together, sharing common caches and settings
+/// A number of trees that are grouped together, sharing common key type, caches, and config
 ///
 /// They not necessarily share the same values. Trees with different value types can be grouped together.
 pub struct Forest<T: TreeTypes> {

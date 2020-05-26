@@ -35,6 +35,7 @@ impl std::fmt::Debug for ZstdArray {
     }
 }
 
+/// An reference of zstd compressed data from either a [ZstdArray](struct.ZstdArray.html) or a [ZstdArrayBuilder](struct.ZstdArrayBuilder.html)
 pub struct ZstdArrayRef<'a> {
     data: &'a [u8],
 }
@@ -176,6 +177,9 @@ impl<'a> ZstdArrayRef<'a> {
 //     }
 // }
 
+/// a builder for a [ZstdArray](struct.ZstdArray.html).
+///
+/// The self-contained result of the builder is available as a [ZstdArrayRef](struct.ZstdArrayRef.html) at any time.
 pub struct ZstdArrayBuilder {
     encoder: zstd::stream::write::Encoder<Vec<u8>>,
 }
@@ -217,7 +221,9 @@ impl ZstdArrayBuilder {
     }
 
     /// Writes some data and makes sure the zstd encoder state is flushed.
-    //
+    ///
+    /// Flushing closes a zstd frame, so pushing individual, small items has some overhead
+    /// comparing to adding multiple items.
     pub fn push_bytes(mut self, value: &[u8]) -> Result<Self> {
         self.encoder.write_all(value)?;
         self.encoder.flush()?;
@@ -225,7 +231,9 @@ impl ZstdArrayBuilder {
     }
 
     /// Writes some data and makes sure the zstd encoder state is flushed.
-    //
+    ///
+    /// Flushing closes a zstd frame, so pushing individual, small items has some overhead
+    /// comparing to adding multiple items.
     pub fn push<T: Serialize>(mut self, value: &T) -> Result<Self> {
         serde_cbor::to_writer(&mut self.encoder, value)?;
         self.encoder.flush()?;

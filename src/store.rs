@@ -1,4 +1,4 @@
-//! ipfs block stores
+//! the interface to a content-addressed store, and a memory implementation for testing
 use crate::ipfs::Cid;
 use anyhow::{anyhow, Result};
 use futures::{future::BoxFuture, prelude::*};
