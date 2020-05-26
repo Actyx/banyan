@@ -8,8 +8,9 @@ use serde::{de::DeserializeOwned, Serialize};
 use std::fmt::Debug;
 use std::{
     fmt,
+    iter::FromIterator,
     marker::PhantomData,
-    sync::{Arc, RwLock}, iter::FromIterator,
+    sync::{Arc, RwLock},
 };
 use tracing::*;
 
@@ -157,9 +158,11 @@ impl<V: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static, T:
 
     pub async fn collect_from<B: FromIterator<(T::Key, V)>>(&self, offset: u64) -> Result<B> {
         let query = OffsetQuery::new(offset);
-        let items: Vec<Result<(T::Key, V)>> = self.stream_filtered(&query)
+        let items: Vec<Result<(T::Key, V)>> = self
+            .stream_filtered(&query)
             .map_ok(|(_, k, v)| (k, v))
-            .collect::<Vec<_>>().await;
+            .collect::<Vec<_>>()
+            .await;
         items.into_iter().collect::<Result<_>>()
     }
 
@@ -216,7 +219,7 @@ impl<V: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static, T:
                         .await?
                         .into(),
                 )
-            },
+            }
             (None, tree) => tree,
             (tree, None) => tree,
         };
@@ -275,7 +278,7 @@ impl OffsetQuery {
 }
 
 impl<T: TreeTypes> Query<T> for OffsetQuery {
-    type IndexIterator = Box<dyn std::iter::Iterator<Item=bool>>;
+    type IndexIterator = Box<dyn std::iter::Iterator<Item = bool>>;
     fn containing(&self, offset: u64, x: &LeafIndex<T::Seq>) -> Self::IndexIterator {
         info!("OffsetQuery::containing {}", offset);
         let from = self.from;
@@ -834,8 +837,11 @@ where
             Ok(None)
         }
     }
-    
-    fn filledr<'a>(&'a self, index: &'a Index<T::Seq>) -> LocalBoxFuture<'a, Result<Option<Index<T::Seq>>>> {
+
+    fn filledr<'a>(
+        &'a self,
+        index: &'a Index<T::Seq>,
+    ) -> LocalBoxFuture<'a, Result<Option<Index<T::Seq>>>> {
         self.filled(index).boxed_local()
     }
 

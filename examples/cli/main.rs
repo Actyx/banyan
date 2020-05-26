@@ -3,7 +3,11 @@ use clap::{App, Arg, SubCommand};
 use futures::prelude::*;
 use maplit::btreeset;
 use serde::{Deserialize, Serialize};
-use std::{collections::{BTreeMap, BTreeSet}, str::FromStr, sync::Arc};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    str::FromStr,
+    sync::Arc,
+};
 use tracing::Level;
 use tracing_subscriber;
 
@@ -19,8 +23,8 @@ pub type Result<T> = anyhow::Result<T>;
 struct TT {}
 
 impl TreeTypes for TT {
-    type Key = Value;
-    type Seq = ValueSeq;
+    type Key = Key;
+    type Seq = KeySeq;
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialOrd, PartialEq, Ord, Eq)]
@@ -45,14 +49,14 @@ impl Tags {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-struct Value {
+struct Key {
     min_lamport: u64,
     min_time: u64,
     max_time: u64,
     tags: Tags,
 }
 
-impl Value {
+impl Key {
     fn single(lamport: u64, time: u64, tags: Tags) -> Self {
         Self {
             min_lamport: lamport,
@@ -80,7 +84,7 @@ impl Value {
         }
     }
 
-    fn intersects(&self, that: &Value) -> bool {
+    fn intersects(&self, that: &Key) -> bool {
         if self.max_time < that.min_time {
             return false;
         }
@@ -93,7 +97,7 @@ impl Value {
         true
     }
 
-    fn contains(&self, that: &Value) -> bool {
+    fn contains(&self, that: &Key) -> bool {
         if that.min_time < self.min_time {
             return false;
         }
@@ -107,8 +111,8 @@ impl Value {
     }
 }
 
-impl Semigroup for Value {
-    fn combine(&mut self, b: &Value) {
+impl Semigroup for Key {
+    fn combine(&mut self, b: &Self) {
         self.min_lamport = self.min_lamport.min(b.min_lamport);
         self.min_time = self.min_time.min(b.min_time);
         self.max_time = self.max_time.max(b.max_time);
@@ -116,39 +120,39 @@ impl Semigroup for Value {
     }
 }
 
-struct DnfQuery(Vec<Value>);
+struct DnfQuery(Vec<Key>);
 
 impl DnfQuery {
-    fn intersects(&self, v: &Value) -> bool {
+    fn intersects(&self, v: &Key) -> bool {
         self.0.iter().any(|x| x.intersects(v))
     }
-    fn contains(&self, v: &Value) -> bool {
+    fn contains(&self, v: &Key) -> bool {
         self.0.iter().any(|x| x.contains(v))
     }
 }
 
 impl Query<TT> for DnfQuery {
     type IndexIterator = std::vec::IntoIter<bool>;
-    fn intersecting(&self, _: u64, x: &BranchIndex<ValueSeq>) -> Self::IndexIterator {
+    fn intersecting(&self, _: u64, x: &BranchIndex<KeySeq>) -> Self::IndexIterator {
         let bools = x.items().map(|x| self.intersects(&x)).collect::<Vec<_>>();
         bools.into_iter()
     }
-    fn containing(&self, _: u64, x: &LeafIndex<ValueSeq>) -> Self::IndexIterator {
+    fn containing(&self, _: u64, x: &LeafIndex<KeySeq>) -> Self::IndexIterator {
         let bools = x.items().map(|x| self.contains(&x)).collect::<Vec<_>>();
         bools.into_iter()
     }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-struct ValueSeq {
+struct KeySeq {
     min_lamport: Vec<u64>,
     min_time: Vec<u64>,
     max_time: Vec<u64>,
     tags: Vec<Tags>,
 }
 
-impl CompactSeq for ValueSeq {
-    type Item = Value;
+impl CompactSeq for KeySeq {
+    type Item = Key;
 
     fn empty() -> Self {
         Self {
@@ -159,7 +163,7 @@ impl CompactSeq for ValueSeq {
         }
     }
 
-    fn single(value: &Value) -> Self {
+    fn single(value: &Key) -> Self {
         Self {
             min_lamport: vec![value.min_lamport],
             min_time: vec![value.min_time],
@@ -168,14 +172,14 @@ impl CompactSeq for ValueSeq {
         }
     }
 
-    fn push(&mut self, value: &Value) {
+    fn push(&mut self, value: &Key) {
         self.min_lamport.push(value.min_lamport);
         self.min_time.push(value.min_time);
         self.max_time.push(value.max_time);
         self.tags.push(value.tags.clone());
     }
 
-    fn extend(&mut self, value: &Value) {
+    fn extend(&mut self, value: &Key) {
         let min_lamport = self.min_lamport.last_mut().unwrap();
         let min_time = self.min_time.last_mut().unwrap();
         let max_time = self.max_time.last_mut().unwrap();
@@ -186,7 +190,7 @@ impl CompactSeq for ValueSeq {
         tags.0.extend(value.tags.0.iter().cloned());
     }
 
-    fn get(&self, index: u64) -> Option<Value> {
+    fn get(&self, index: u64) -> Option<Key> {
         let index = index as usize;
         if let (Some(min_lamport), Some(min_time), Some(max_time), Some(tags)) = (
             self.min_lamport.get(index),
@@ -194,7 +198,7 @@ impl CompactSeq for ValueSeq {
             self.max_time.get(index),
             self.tags.get(index),
         ) {
-            Some(Value {
+            Some(Key {
                 min_lamport: *min_lamport,
                 min_time: *min_time,
                 max_time: *max_time,
@@ -209,7 +213,7 @@ impl CompactSeq for ValueSeq {
         self.tags.len() as u64
     }
 
-    fn summarize(&self) -> Value {
+    fn summarize(&self) -> Key {
         let mut result = self.get(0).unwrap();
         for i in 1..self.tags.len() as u64 {
             result.combine(&self.get(i).unwrap());
@@ -242,14 +246,41 @@ fn app() -> clap::App<'static, 'static> {
             ),
         )
         .subcommand(
-            SubCommand::with_name("build").about("Build a tree").arg(
-                Arg::with_name("count")
-                    .long("count")
-                    .required(true)
-                    .takes_value(true)
-                    .help("The number of values"),
-            ),
+            SubCommand::with_name("build")
+                .about("Build a tree")
+                .arg(
+                    Arg::with_name("count")
+                        .long("count")
+                        .required(true)
+                        .takes_value(true)
+                        .help("The number of values per batch"),
+                )
+                .arg(
+                    Arg::with_name("batches")
+                        .long("batches")
+                        .takes_value(true)
+                        .default_value("1")
+                        .help("The number of batches"),
+                )
+                .arg(
+                    Arg::with_name("unbalanced")
+                        .long("unbalanced")
+                        .takes_value(false)
+                        .help("Do not balance while building"),
+                ),
         )
+        .subcommand(
+            SubCommand::with_name("balance")
+                .about("Balance a tree")
+                .arg(
+                    Arg::with_name("root")
+                        .long("root")
+                        .required(true)
+                        .takes_value(true)
+                        .help("The root hash to use"),
+                ),
+        )
+        .subcommand(SubCommand::with_name("demo").about("Do some stuff"))
 }
 
 struct Tagger(BTreeMap<&'static str, Tag>);
@@ -264,7 +295,12 @@ impl Tagger {
     }
 
     pub fn tags(&mut self, names: &[&'static str]) -> Tags {
-        Tags(names.into_iter().map(|name| self.tag(name)).collect::<BTreeSet<_>>())
+        Tags(
+            names
+                .into_iter()
+                .map(|name| self.tag(name))
+                .collect::<BTreeSet<_>>(),
+        )
     }
 }
 
@@ -279,6 +315,7 @@ async fn main() -> Result<()> {
         .init();
 
     let mut tagger = Tagger::new();
+    // function to add some arbitrary tags to test out tag querying and compression
     let mut tags_from_offset = |i: u64| -> Tags {
         let fizz = i % 3 == 0;
         let buzz = i % 5 == 0;
@@ -320,52 +357,59 @@ async fn main() -> Result<()> {
         }
         return Ok(());
     } else if let Some(matches) = matches.subcommand_matches("build") {
-        let n: u64 = matches
+        let count: u64 = matches
             .value_of("count")
             .ok_or(anyhow!("required arg count not provided"))?
             .parse()?;
-        println!("{:?}", matches);
-        println!("building a tree");
-        // let store = TestStore::new();
+        let batches: u64 = matches
+            .value_of("batches")
+            .ok_or(anyhow!("required arg count not provided"))?
+            .parse()?;
+        let unbalanced = matches.is_present("unbalanced");
+        println!(
+            "building a tree with {} batches of {} values, unbalanced: {}",
+            batches, count, unbalanced
+        );
         let store = Arc::new(IpfsStore::new());
         let forest = Arc::new(Forest::new(store, Config::default()));
         let mut tree = Tree::<TT, String>::empty(forest);
         let mut offset: u64 = 0;
-        let k = 4u64;
-        for c in 0..k {
-            let v = (0..n)
+        for _ in 0..batches {
+            let v = (0..count)
                 .map(|_| {
                     if offset % 1000 == 0 {
                         println!("{}", offset);
                     }
                     let result = (
-                        Value::single(offset, offset, tags_from_offset(offset)),
+                        Key::single(offset, offset, tags_from_offset(offset)),
                         offset.to_string(),
                     );
                     offset += 1;
                     result
                 })
                 .collect::<Vec<_>>();
+            if unbalanced {
                 tree.extend_unbalanced(v).await?;
-            println!("--- dump {} ---", c);
-            println!("{:?}", tree);
+            } else {
+                tree.extend(v).await?;
+            }
         }
         tree.dump().await?;
         println!("{:?}", tree);
-        let query = DnfQuery(vec![
-            Value::filter_tags(tagger.tags(&["fizz"])),
-            Value::filter_tags(tagger.tags(&["buzz"]))
-        ]);
-        let filled = tree.filled().await?;
-        println!("sealed {}/{}", filled.count(), tree.count());
+    } else if let Some(matches) = matches.subcommand_matches("balance") {
+        let root = Cid::from_str(
+            matches
+                .value_of("root")
+                .ok_or(anyhow!("root must be provided"))?,
+        )?;
+        let tree = Tree::<TT, serde_cbor::Value>::new(root, forest).await?;
         tree.dump().await?;
-        println!("calling balance!");
         let tree = tree.balance().await?;
-        let filled = tree.filled().await?;
-        println!("sealed {}/{}", filled.count(), tree.count());
         tree.dump().await?;
+        println!("{:?}", tree);
     } else {
         app().print_long_help()?;
+        println!();
     }
     Ok(())
 }

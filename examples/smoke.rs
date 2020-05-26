@@ -98,7 +98,6 @@ impl Semigroup for Value {
 struct DnfQuery(Vec<Value>);
 
 impl DnfQuery {
-
     fn intersects(&self, v: &Value) -> bool {
         self.0.iter().any(|x| x.intersects(v))
     }
