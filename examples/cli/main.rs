@@ -13,8 +13,8 @@ use tracing_subscriber;
 
 mod ipfs;
 
-use czaa::index::*;
-use czaa::{ipfs::Cid, store::MemStore, tree::*};
+use banyan::index::*;
+use banyan::{ipfs::Cid, store::MemStore, tree::*};
 use ipfs::IpfsStore;
 
 pub type Error = anyhow::Error;

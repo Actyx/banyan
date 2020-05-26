@@ -1,8 +1,8 @@
 //! helper methods to work with ipfs/ipld
 use anyhow::anyhow;
 use anyhow::Result;
-use czaa::ipfs::Cid;
-use czaa::store::Store;
+use banyan::ipfs::Cid;
+use banyan::store::Store;
 use futures::{future::BoxFuture, prelude::*};
 use reqwest::multipart::Part;
 use serde::Deserialize;

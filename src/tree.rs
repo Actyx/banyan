@@ -350,7 +350,6 @@ where
         builder: ZstdArrayBuilder,
         from: &mut std::iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
     ) -> Result<LeafIndex<T::Seq>> {
-        info!("create_leaf {}", builder.raw().len());
         assert!(from.peek().is_some());
         let builder = builder.fill(
             || {

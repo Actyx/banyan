@@ -3,9 +3,9 @@ use maplit::btreeset;
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeSet, sync::Arc};
 
-use czaa::index::*;
-use czaa::store::MemStore;
-use czaa::tree::*;
+use banyan::index::*;
+use banyan::store::MemStore;
+use banyan::tree::*;
 
 pub type Error = anyhow::Error;
 pub type Result<T> = anyhow::Result<T>;
@@ -247,6 +247,6 @@ async fn main() -> Result<()> {
 
     println!("{:?}", tree);
 
-    czaa::flat_tree::test();
+    banyan::flat_tree::test();
     Ok(())
 }

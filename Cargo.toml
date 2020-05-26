@@ -1,5 +1,5 @@
 [package]
-name = "czaa"
+name = "banyan"
 version = "0.1.0"
 authors = ["Rüdiger Klaehn <rklaehn@gmail.com>"]
 edition = "2018"
