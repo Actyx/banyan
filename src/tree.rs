@@ -46,14 +46,13 @@ pub struct Tree<T: TreeTypes, V> {
 
 /// A query
 ///
-/// Queries work on value sequences instead of individual values for efficiency. Methods that work on individual
-/// values are just provided for consistency checks.
+/// Queries work on compact value sequences instead of individual values for efficiency.
 pub trait Query<T: TreeTypes> {
     /// the iterator type
     type IndexIterator: Iterator<Item = bool>;
-    /// an iterator returning x.count() elements, where each value is a bool indicating if the query does match
+    /// an iterator returning `x.data.count()` elements, where each value is a bool indicating if the query *does* match
     fn containing(&self, offset: u64, x: &LeafIndex<T::Seq>) -> Self::IndexIterator;
-    /// an iterator returning x.count() elements, where each value is a bool indicating if the query can match
+    /// an iterator returning `x.data.count()` elements, where each value is a bool indicating if the query *can* match
     fn intersecting(&self, offset: u64, x: &BranchIndex<T::Seq>) -> Self::IndexIterator;
 }
 
@@ -92,11 +91,20 @@ impl<T: TreeTypes, V> fmt::Debug for Tree<T, V> {
         match &self.root {
             Some(root) => write!(
                 f,
-                "Tree {} {} {}",
+                "Tree(root={},key_bytes={},value_bytes={})",
                 root.cid(),
                 root.key_bytes(),
                 root.value_bytes()
             ),
+            None => write!(f, "empty tree"),
+        }
+    }
+}
+
+impl<T: TreeTypes, V> fmt::Display for Tree<T, V> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.root {
+            Some(root) => write!(f, "{}", root.cid(),),
             None => write!(f, "empty tree"),
         }
     }
@@ -267,7 +275,7 @@ impl<V: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static, T:
     }
 }
 
-pub struct OffsetQuery {
+pub(crate) struct OffsetQuery {
     from: u64,
 }
 
@@ -373,7 +381,7 @@ where
             data,
         };
         info!(
-            "leaf created {} {} {}",
+            "leaf created count={} bytes={} sealed={}",
             index.data.count(),
             index.value_bytes,
             index.sealed
@@ -427,6 +435,13 @@ where
             key_bytes,
             value_bytes,
         };
+        info!(
+            "branch created count={} value_bytes={} key_bytes={} sealed={}",
+            index.data.count(),
+            index.value_bytes,
+            index.key_bytes,
+            index.sealed
+        );
         Ok(index)
     }
 
@@ -802,17 +817,17 @@ where
         match self.load_node(index).await? {
             NodeInfo::Leaf(index, _) => {
                 println!(
-                    "{}Leaf({}, {}, {})",
+                    "{}Leaf(count={}, key_bytes={}, sealed={})",
                     prefix,
                     index.data.count(),
+                    index.value_bytes,
                     index.sealed,
-                    index.value_bytes
                 );
             }
             NodeInfo::Branch(index, branch) => {
                 println!(
-                    "{}Branch({}, {}, {}, {})",
-                    prefix, index.count, index.sealed, index.key_bytes, index.value_bytes,
+                    "{}Branch(count={}, key_bytes={}, value_bytes={}, sealed={})",
+                    prefix, index.count, index.key_bytes, index.value_bytes, index.sealed,
                 );
                 let prefix = prefix.to_string() + "  ";
                 for x in branch.children.iter() {

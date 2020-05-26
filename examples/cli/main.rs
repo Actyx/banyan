@@ -223,27 +223,25 @@ impl CompactSeq for KeySeq {
 }
 
 fn app() -> clap::App<'static, 'static> {
+    let root_arg = || {
+        Arg::with_name("root")
+            .required(true)
+            .takes_value(true)
+            .help("The root hash to use")
+    };
     App::new("banyan-cli")
         .version("0.1")
         .author("Rüdiger Klaehn")
         .about("CLI to work with large banyan trees on ipfs")
         .subcommand(
-            SubCommand::with_name("dump").about("Dump a tree").arg(
-                Arg::with_name("root")
-                    .long("root")
-                    .required(true)
-                    .takes_value(true)
-                    .help("The root hash to use"),
-            ),
+            SubCommand::with_name("dump")
+                .about("Dump a tree")
+                .arg(root_arg()),
         )
         .subcommand(
-            SubCommand::with_name("stream").about("Stream a tree").arg(
-                Arg::with_name("root")
-                    .long("root")
-                    .required(true)
-                    .takes_value(true)
-                    .help("The root hash to use"),
-            ),
+            SubCommand::with_name("stream")
+                .about("Stream a tree")
+                .arg(root_arg()),
         )
         .subcommand(
             SubCommand::with_name("build")
@@ -272,13 +270,7 @@ fn app() -> clap::App<'static, 'static> {
         .subcommand(
             SubCommand::with_name("filter")
                 .about("Stream a tree, filtered")
-                .arg(
-                    Arg::with_name("root")
-                        .long("root")
-                        .required(true)
-                        .takes_value(true)
-                        .help("The root hash to use"),
-                )
+                .arg(root_arg())
                 .arg(
                     Arg::with_name("tag")
                         .long("tag")
@@ -291,13 +283,7 @@ fn app() -> clap::App<'static, 'static> {
         .subcommand(
             SubCommand::with_name("balance")
                 .about("Balance a tree")
-                .arg(
-                    Arg::with_name("root")
-                        .long("root")
-                        .required(true)
-                        .takes_value(true)
-                        .help("The root hash to use"),
-                ),
+                .arg(root_arg()),
         )
         .subcommand(SubCommand::with_name("demo").about("Do some stuff"))
 }
@@ -415,6 +401,7 @@ async fn main() -> Result<()> {
         }
         tree.dump().await?;
         println!("{:?}", tree);
+        println!("{}", tree);
     } else if let Some(matches) = matches.subcommand_matches("balance") {
         let root = Cid::from_str(
             matches
@@ -432,8 +419,11 @@ async fn main() -> Result<()> {
                 .value_of("root")
                 .ok_or(anyhow!("root must be provided"))?,
         )?;
-        let tags = matches.values_of("tag").ok_or(anyhow!("at least one tag must be provided"))?
-            .map(|tag| Key::filter_tags(Tags(btreeset!{Tag::new(tag)}))).collect::<Vec<_>>();
+        let tags = matches
+            .values_of("tag")
+            .ok_or(anyhow!("at least one tag must be provided"))?
+            .map(|tag| Key::filter_tags(Tags(btreeset! {Tag::new(tag)})))
+            .collect::<Vec<_>>();
         let query = DnfQuery(tags);
         let tree = Tree::<TT, serde_cbor::Value>::new(root, forest).await?;
         tree.dump().await?;

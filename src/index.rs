@@ -8,9 +8,8 @@ use std::{convert::From, sync::Arc};
 
 /// trait for items that can be combined in an associative way
 ///
-/// Currently all examples I can think of are also commutative, so it would be an abelian semigroup.
+/// Currently all examples I can think of are also commutative, so it would be an [abelian semigroup](https://mathworld.wolfram.com/AbelianSemigroup.html).
 /// But I am not sure we need to require that as of now.
-/// https://mathworld.wolfram.com/AbelianSemigroup.html
 pub trait Semigroup {
     fn combine(&mut self, b: &Self);
 }
@@ -77,9 +76,11 @@ pub fn compactseq_select_items<'a, T: CompactSeq>(
 /// A trivial implementation of a CompactSeq as just a Seq.
 ///
 /// This is useful mostly as a reference impl and for testing.
+#[cfg(test)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SimpleCompactSeq<T>(Vec<T>);
 
+#[cfg(test)]
 impl<T: Serialize + DeserializeOwned + Semigroup + Clone> CompactSeq for SimpleCompactSeq<T> {
     type Item = T;
     fn empty() -> Self {
@@ -391,7 +392,7 @@ impl Leaf {
     }
 }
 
-pub enum NodeInfo<'a, T> {
+pub(crate) enum NodeInfo<'a, T> {
     Branch(&'a BranchIndex<T>, Branch<T>),
     Leaf(&'a LeafIndex<T>, Leaf),
 }
