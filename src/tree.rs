@@ -58,10 +58,17 @@ pub trait Query<T: TreeTypes> {
 
 /// Configuration for a forest. Includes settings for when a node is considered full
 pub struct Config {
-    max_leaf_size: u64,
-    max_leaf_count: u64,
-    max_branch_count: u64,
-    zstd_level: i32,
+    /// maximum number of values in a leaf
+    pub max_leaf_count: u64,
+    /// maximum number of children in a branch
+    pub max_branch_count: u64,
+    /// zstd level to use for compression
+    pub zstd_level: i32,
+    /// rough maximum compressed bytes of a leaf. If a node has more bytes than this, it is considered full.
+    ///
+    /// note that this might overshoot due to the fact that the zstd encoder has internal state, and it is not possible
+    /// to flush after each value without losing compression efficiency. The overshoot is bounded though.
+    pub max_leaf_size: u64,
 }
 
 impl Config {
