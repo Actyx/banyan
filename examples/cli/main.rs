@@ -270,6 +270,25 @@ fn app() -> clap::App<'static, 'static> {
                 ),
         )
         .subcommand(
+            SubCommand::with_name("filter")
+                .about("Stream a tree, filtered")
+                .arg(
+                    Arg::with_name("root")
+                        .long("root")
+                        .required(true)
+                        .takes_value(true)
+                        .help("The root hash to use"),
+                )
+                .arg(
+                    Arg::with_name("tag")
+                        .long("tag")
+                        .required(true)
+                        .multiple(true)
+                        .takes_value(true)
+                        .help("Tags to filter"),
+                ),
+        )
+        .subcommand(
             SubCommand::with_name("balance")
                 .about("Balance a tree")
                 .arg(
@@ -407,6 +426,23 @@ async fn main() -> Result<()> {
         let tree = tree.balance().await?;
         tree.dump().await?;
         println!("{:?}", tree);
+    } else if let Some(matches) = matches.subcommand_matches("filter") {
+        let root = Cid::from_str(
+            matches
+                .value_of("root")
+                .ok_or(anyhow!("root must be provided"))?,
+        )?;
+        let tags = matches.values_of("tag").ok_or(anyhow!("at least one tag must be provided"))?
+            .map(|tag| Key::filter_tags(Tags(btreeset!{Tag::new(tag)}))).collect::<Vec<_>>();
+        let query = DnfQuery(tags);
+        let tree = Tree::<TT, serde_cbor::Value>::new(root, forest).await?;
+        tree.dump().await?;
+        let mut stream = tree.stream_filtered(&query).enumerate();
+        while let Some((i, Ok(v))) = stream.next().await {
+            if i % 1000 == 0 {
+                println!("{:?}", v);
+            }
+        }
     } else {
         app().print_long_help()?;
         println!();
