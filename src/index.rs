@@ -356,7 +356,7 @@ impl Leaf {
     pub fn builder(self, level: i32) -> Result<ZstdArrayBuilder> {
         match self {
             Leaf::Writable(x) => Ok(x),
-            Leaf::Readonly(x) => ZstdArrayBuilder::init(x.as_ref().raw(), level),
+            Leaf::Readonly(x) => ZstdArrayBuilder::init(x.as_ref().compressed(), level),
         }
     }
 

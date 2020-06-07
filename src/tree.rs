@@ -348,11 +348,11 @@ where
         value: &V,
     ) -> Result<LeafIndex<T::Seq>> {
         let leaf = Leaf::single(value, self.config.zstd_level)?;
-        let cid = self.store.put(leaf.as_ref().raw(), cid::Codec::Raw).await?;
+        let cid = self.store.put(leaf.as_ref().compressed(), cid::Codec::Raw).await?;
         let index = LeafIndex {
             cid,
-            value_bytes: leaf.as_ref().raw().len() as u64,
-            sealed: self.leaf_sealed(leaf.as_ref().raw().len() as u64, 1),
+            value_bytes: leaf.as_ref().compressed().len() as u64,
+            sealed: self.leaf_sealed(leaf.as_ref().compressed().len() as u64, 1),
             data: T::Seq::single(key),
         };
         Ok(self.cache_leaf(index, leaf))
@@ -380,11 +380,11 @@ where
             self.config.max_leaf_size,
         )?;
         let leaf = Leaf::Writable(builder);
-        let cid = self.store.put(leaf.as_ref().raw(), cid::Codec::Raw).await?;
+        let cid = self.store.put(leaf.as_ref().compressed(), cid::Codec::Raw).await?;
         let index = LeafIndex {
             cid,
-            value_bytes: leaf.as_ref().raw().len() as u64,
-            sealed: self.leaf_sealed(leaf.as_ref().raw().len() as u64, data.count()),
+            value_bytes: leaf.as_ref().compressed().len() as u64,
+            sealed: self.leaf_sealed(leaf.as_ref().compressed().len() as u64, data.count()),
             data,
         };
         info!(
@@ -624,8 +624,8 @@ where
                 // update the index data
                 index.data.push(key);
                 index.sealed =
-                    self.leaf_sealed(leaf.as_ref().raw().len() as u64, index.data.count());
-                index.cid = self.store.put(leaf.as_ref().raw(), cid::Codec::Raw).await?;
+                    self.leaf_sealed(leaf.as_ref().compressed().len() as u64, index.data.count());
+                index.cid = self.store.put(leaf.as_ref().compressed(), cid::Codec::Raw).await?;
                 Ok(self.cache_leaf(index, leaf).into())
             }
             NodeInfo::Branch(index, mut branch) => {
@@ -759,7 +759,7 @@ where
                 NodeInfo::Leaf(index, node) => {
                     info!("streaming leaf {}", index.data.count());
                     let keys = index.items();
-                    info!("raw compressed data {}", node.as_ref().raw().len());
+                    info!("raw compressed data {}", node.as_ref().compressed().len());
                     let elems = node.as_ref().items()?;
                     let pairs = keys.zip(elems).collect::<Vec<_>>();
                     stream::iter(pairs).map(|x| Ok(x)).left_stream()

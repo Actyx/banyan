@@ -247,6 +247,5 @@ async fn main() -> Result<()> {
 
     println!("{:?}", tree);
 
-    banyan::flat_tree::test();
     Ok(())
 }

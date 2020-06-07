@@ -46,13 +46,13 @@ impl<'a> ZstdArrayRef<'a> {
     }
 
     /// Get the compressed data
-    pub fn raw(&self) -> &'a [u8] {
+    pub fn compressed(&self) -> &'a [u8] {
         self.data
     }
 
     #[allow(dead_code)]
     fn decompress_into_broken(&self, mut uncompressed: Vec<u8>) -> Result<Vec<u8>> {
-        let data = self.raw();
+        let data = self.compressed();
         let mut c = Cursor::new(data);
         while c.position() < data.len() as u64 {
             let mut reader = zstd::stream::read::Decoder::new(c.by_ref())?.single_frame();
@@ -102,7 +102,7 @@ impl<'a> ZstdArrayRef<'a> {
     }
 
     pub fn items<T: DeserializeOwned>(&self) -> Result<Vec<T>> {
-        info!("compressed length {}", self.raw().len());
+        info!("compressed length {}", self.compressed().len());
         let uncompressed = self.decompress_into(Vec::new())?;
         info!("uncompressed length {}", uncompressed.len());
         let mut result = Vec::new();
@@ -208,12 +208,12 @@ impl ZstdArrayBuilder {
         ZstdArrayRef::new(self.encoder.get_ref().as_ref())
     }
 
-    pub fn raw(&self) -> &[u8] {
-        self.as_ref().raw()
+    pub fn compressed(&self) -> &[u8] {
+        self.as_ref().compressed()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.raw().is_empty()
+        self.compressed().is_empty()
     }
 
     pub fn items<T: DeserializeOwned>(&self) -> Result<Vec<T>> {
@@ -249,7 +249,7 @@ impl ZstdArrayBuilder {
         mut from: impl FnMut() -> Option<T>,
         compressed_size: u64,
     ) -> Result<Self> {
-        while (self.raw().len() as u64) < compressed_size {
+        while (self.compressed().len() as u64) < compressed_size {
             if let Some(value) = from() {
                 serde_cbor::to_writer(&mut self.encoder, &value)?;
             } else {
@@ -274,8 +274,8 @@ mod tests {
             expected.push(i);
             println!(
                 "xxx {} {}",
-                w.as_ref().raw().len(),
-                hex::encode(w.as_ref().raw())
+                w.as_ref().compressed().len(),
+                hex::encode(w.as_ref().compressed())
             );
             let items: Vec<u64> = w.as_ref().items()?;
             assert_eq!(items, expected);
@@ -290,7 +290,7 @@ mod tests {
         for i in 0u64..100 {
             w = w.push(&i)?;
             expected.push(i);
-            w = ZstdArrayBuilder::init(w.as_ref().raw(), 10)?;
+            w = ZstdArrayBuilder::init(w.as_ref().compressed(), 10)?;
             let items: Vec<u64> = w.as_ref().items()?;
             assert_eq!(items, expected);
         }
