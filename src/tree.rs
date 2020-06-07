@@ -189,19 +189,8 @@ impl<V: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static, T:
     }
 
     /// append a single element
-    pub async fn push(&mut self, key: &T::Key, value: &V) -> Result<()> {
-        self.root = Some(match &self.root {
-            Some(index) => {
-                if !index.sealed() {
-                    self.forest.push(index, key, value).await?
-                } else {
-                    let index = self.forest.single_branch(index.clone()).await?.into();
-                    self.forest.push(&index, key, value).await?
-                }
-            }
-            None => self.forest.single_leaf(key, value).await?.into(),
-        });
-        Ok(())
+    pub async fn push(&mut self, key: T::Key, value: V) -> Result<()> {
+        self.extend(vec![(key, value)]).await
     }
 
     /// extend the node with the given iterator of key/value pairs
@@ -599,78 +588,6 @@ where
             .unwrap()
             .put(index.cid.clone(), node);
         index
-    }
-
-    /// Push a single item to the end of the tree
-    ///
-    /// note: you could make this more efficient by passing in a mut &Index, but then
-    /// you would have to be really careful to do all modification after anything that
-    /// can fail, otherwise you might end up with an inconsistent state.
-    ///
-    /// The functional way of threading the index through the call and returning it is
-    /// easier to get correct.
-    async fn push<V: Serialize + Debug>(
-        &self,
-        index: &Index<T::Seq>,
-        key: &T::Key,
-        value: &V,
-    ) -> Result<Index<T::Seq>> {
-        // calling push0 for a sealed node makes no sense and should not happen!
-        assert!(!index.sealed());
-        match self.load_node_write(index).await? {
-            NodeInfo::Leaf(index, mut leaf) => {
-                leaf = leaf.push(&value, self.config.zstd_level)?;
-                let mut index = index.clone();
-                // update the index data
-                index.data.push(key);
-                index.sealed =
-                    self.leaf_sealed(leaf.as_ref().compressed().len() as u64, index.data.count());
-                index.cid = self.store.put(leaf.as_ref().compressed(), cid::Codec::Raw).await?;
-                Ok(self.cache_leaf(index, leaf).into())
-            }
-            NodeInfo::Branch(index, mut branch) => {
-                let child_index = branch.last_child();
-                let mut index = index.clone();
-                if !child_index.sealed() {
-                    // there is room in the child. Just push it down and update us
-                    index.data.extend(&key);
-                    *branch.last_child_mut() = self.pushr(child_index, key, value).await?;
-                } else if child_index.level() < index.level - 1 {
-                    // there is room for another tree node. Create a new one and push down to it
-                    index.data.extend(&key);
-                    let child_index = self.single_branch(child_index.clone()).await?;
-                    *branch.last_child_mut() = self.pushr(&child_index.into(), key, value).await?;
-                } else {
-                    // all our children are full, we need to append
-                    let child_index = self.single_leaf(key, &value).await?;
-                    // add new index element with child summary
-                    index.data.push(&child_index.data.summarize());
-                    // add actual new child
-                    branch.children.push(child_index.into());
-                }
-                let ipld = serialize_compressed(&branch.children, self.config.zstd_level)?;
-                let cid = self.store.put(&ipld, cid::Codec::DagCBOR).await?;
-                index.count += 1;
-                index.sealed = self.branch_sealed(&branch.children, index.level);
-                index.cid = cid;
-                Ok(self.cache_branch(index, branch).into())
-            }
-        }
-    }
-
-    /// helper to avoid compiler error when doing recursive call from async fn
-    ///
-    /// If you call push0().boxed_local() directly in push0, you get this error:
-    /// recursion in an `async fn` requires boxing a recursive `async fn` must be rewritten to return a boxed `dyn Future`
-    ///
-    /// in any case, it is nice to have everything explicitly spelled out.
-    fn pushr<'a, V: Serialize + Debug>(
-        &'a self,
-        node: &'a Index<T::Seq>,
-        key: &'a T::Key,
-        value: &'a V,
-    ) -> LocalBoxFuture<'a, Result<Index<T::Seq>>> {
-        self.push(node, key, value).boxed_local()
     }
 
     async fn extend<V: Serialize + Debug>(
