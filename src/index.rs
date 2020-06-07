@@ -76,11 +76,9 @@ pub fn compactseq_select_items<'a, T: CompactSeq>(
 /// A trivial implementation of a CompactSeq as just a Seq.
 ///
 /// This is useful mostly as a reference impl and for testing.
-#[cfg(test)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SimpleCompactSeq<T>(Vec<T>);
 
-#[cfg(test)]
 impl<T: Serialize + DeserializeOwned + Semigroup + Clone> CompactSeq for SimpleCompactSeq<T> {
     type Item = T;
     fn empty() -> Self {

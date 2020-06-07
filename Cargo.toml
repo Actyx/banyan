@@ -22,9 +22,10 @@ derive_more = "0.99.5"
 anyhow = "1.0.31"
 
 [dev-dependencies]
-quickcheck = "0.9.2"
 hex = "0.4.2"
 tokio = { version = "0.2.20", features = ["full"] }
 reqwest = { version = "0.10.4", features = ["json"] }
 clap = "2.33.1"
 tracing-subscriber = "0.2.5"
+quickcheck = "0.9.2"
+quickcheck_async = "0.1.1"

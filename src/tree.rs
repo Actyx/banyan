@@ -196,6 +196,10 @@ impl<V: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static, T:
     /// extend the node with the given iterator of key/value pairs
     pub async fn extend(&mut self, from: impl IntoIterator<Item = (T::Key, V)>) -> Result<()> {
         let mut from = from.into_iter().peekable();
+        if from.peek().is_none() {
+            // nothing to do
+            return Ok(());
+        }
         let root = if let Some(root) = &self.root {
             root.clone()
         } else {
@@ -337,7 +341,10 @@ where
         value: &V,
     ) -> Result<LeafIndex<T::Seq>> {
         let leaf = Leaf::single(value, self.config.zstd_level)?;
-        let cid = self.store.put(leaf.as_ref().compressed(), cid::Codec::Raw).await?;
+        let cid = self
+            .store
+            .put(leaf.as_ref().compressed(), cid::Codec::Raw)
+            .await?;
         let index = LeafIndex {
             cid,
             value_bytes: leaf.as_ref().compressed().len() as u64,
@@ -369,7 +376,10 @@ where
             self.config.max_leaf_size,
         )?;
         let leaf = Leaf::Writable(builder);
-        let cid = self.store.put(leaf.as_ref().compressed(), cid::Codec::Raw).await?;
+        let cid = self
+            .store
+            .put(leaf.as_ref().compressed(), cid::Codec::Raw)
+            .await?;
         let index = LeafIndex {
             cid,
             value_bytes: leaf.as_ref().compressed().len() as u64,
