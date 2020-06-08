@@ -7,6 +7,8 @@ use banyan::index::*;
 use banyan::store::MemStore;
 use banyan::tree::*;
 
+use bitvec::prelude::BitVec;
+
 pub type Error = anyhow::Error;
 pub type Result<T> = anyhow::Result<T>;
 
@@ -107,14 +109,13 @@ impl DnfQuery {
 }
 
 impl Query<TT> for DnfQuery {
-    type IndexIterator = std::vec::IntoIter<bool>;
-    fn intersecting(&self, _: u64, x: &BranchIndex<ValueSeq>) -> Self::IndexIterator {
-        let bools = x.items().map(|x| self.intersects(&x)).collect::<Vec<_>>();
-        bools.into_iter()
+    fn intersecting(&self, _: u64, x: &BranchIndex<ValueSeq>) -> BitVec {
+        let bools = x.items().map(|x| self.intersects(&x));
+        bools.collect()
     }
-    fn containing(&self, _: u64, x: &LeafIndex<ValueSeq>) -> Self::IndexIterator {
-        let bools = x.items().map(|x| self.contains(&x)).collect::<Vec<_>>();
-        bools.into_iter()
+    fn containing(&self, _: u64, x: &LeafIndex<ValueSeq>) -> BitVec {
+        let bools = x.items().map(|x| self.contains(&x));
+        bools.collect()
     }
 }
 

@@ -20,6 +20,7 @@ lru = "0.4.3"
 maplit = "1.0.2"
 derive_more = "0.99.5"
 anyhow = "1.0.31"
+bitvec = "0.17.4"
 
 [dev-dependencies]
 hex = "0.4.2"

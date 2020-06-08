@@ -14,8 +14,10 @@ use tracing_subscriber;
 mod ipfs;
 
 use banyan::index::*;
-use banyan::{ipfs::Cid, store::MemStore, tree::*};
+use banyan::{ipfs::Cid, tree::*};
 use ipfs::IpfsStore;
+
+use bitvec::prelude::*;
 
 pub type Error = anyhow::Error;
 pub type Result<T> = anyhow::Result<T>;
@@ -132,14 +134,11 @@ impl DnfQuery {
 }
 
 impl Query<TT> for DnfQuery {
-    type IndexIterator = std::vec::IntoIter<bool>;
-    fn intersecting(&self, _: u64, x: &BranchIndex<KeySeq>) -> Self::IndexIterator {
-        let bools = x.items().map(|x| self.intersects(&x)).collect::<Vec<_>>();
-        bools.into_iter()
+    fn intersecting(&self, _: u64, x: &BranchIndex<KeySeq>) -> BitVec {
+        x.items().map(|x| self.intersects(&x)).collect()
     }
-    fn containing(&self, _: u64, x: &LeafIndex<KeySeq>) -> Self::IndexIterator {
-        let bools = x.items().map(|x| self.contains(&x)).collect::<Vec<_>>();
-        bools.into_iter()
+    fn containing(&self, _: u64, x: &LeafIndex<KeySeq>) -> BitVec {
+        x.items().map(|x| self.contains(&x)).collect()
     }
 }
 

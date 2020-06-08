@@ -5,6 +5,7 @@ use anyhow::{anyhow, Result};
 use derive_more::From;
 use serde::{de::DeserializeOwned, Deserialize, Deserializer, Serialize, Serializer};
 use std::{convert::From, sync::Arc};
+use bitvec::prelude::*;
 
 /// trait for items that can be combined in an associative way
 ///
@@ -34,26 +35,37 @@ pub trait CompactSeq: Serialize + DeserializeOwned {
     fn get(&self, index: u64) -> Option<Self::Item>;
     /// combines all elements with the semigroup op
     fn summarize(&self) -> Self::Item;
-}
 
-pub fn compactseq_create<'a, T: CompactSeq>(mut items: impl Iterator<Item = T::Item>) -> Result<T> {
-    let mut result = T::single(
-        &items
-            .next()
-            .ok_or(anyhow!("iterator must have at least one item"))?,
-    );
-    for item in items {
-        result.push(&item);
+    fn new(mut items: impl Iterator<Item = Self::Item>) -> Result<Self> {
+        let mut result = Self::single(
+            &items
+                .next()
+                .ok_or(anyhow!("iterator must have at least one item"))?,
+        );
+        for item in items {
+            result.push(&item);
+        }
+        Ok(result)
     }
-    Ok(result)
-}
 
-/// utility function to get all items for a compactseq.
-///
-/// This can not be a trait method because it returns an unnameable type, and therefore requires impl Trait,
-/// which is not available within traits.
-pub fn compactseq_items<'a, T: CompactSeq>(value: &'a T) -> impl Iterator<Item = T::Item> + 'a {
-    (0..value.count()).map(move |i| value.get(i).unwrap())
+    /// utility function to get all items for a compactseq.
+    fn to_vec(&self) -> Vec<Self::Item> {
+        (0..self.count()).map(move |i| self.get(i).unwrap()).collect()
+    }
+
+    /// utility function to select some items for a compactseq.
+    fn select(
+        &self,
+        bits: &BitVec,
+    ) -> Vec<(u64, Self::Item)> {
+        (0..self.count()).filter_map(move |i| {
+            if bits[i as usize] {
+                Some((i, self.get(i).unwrap()))
+            } else {
+                None
+            }
+        }).collect()
+    }
 }
 
 /// utility function to select some items for a compactseq.
@@ -123,14 +135,11 @@ pub struct LeafIndex<T> {
 }
 
 impl<T: CompactSeq> LeafIndex<T> {
-    pub fn items<'a>(&'a self) -> impl Iterator<Item = T::Item> + 'a {
-        compactseq_items(&self.data)
+    pub fn items(&self) -> impl Iterator<Item = T::Item> {
+        self.data.to_vec().into_iter()
     }
-    pub fn select<'a>(
-        &'a self,
-        it: impl Iterator<Item = bool> + 'a,
-    ) -> impl Iterator<Item = (u64, T::Item)> + 'a {
-        compactseq_select_items(&self.data, it)
+    pub fn select(&self, bits: &BitVec) -> impl Iterator<Item = (u64, T::Item)> {
+        self.data.select(bits).into_iter()
     }
 }
 
@@ -155,7 +164,7 @@ pub struct BranchIndex<T> {
 
 impl<T: CompactSeq> BranchIndex<T> {
     pub fn items<'a>(&'a self) -> impl Iterator<Item = T::Item> + 'a {
-        compactseq_items(&self.data)
+        self.data.to_vec().into_iter()
     }
 }
 

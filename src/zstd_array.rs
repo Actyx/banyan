@@ -13,6 +13,7 @@ use zstd::stream::{
     raw::{Decoder as ZDecoder, Operation, OutBuffer},
     write::Encoder,
 };
+use bitvec::prelude::*;
 
 /// An array of zstd compressed data
 pub struct ZstdArray {
@@ -138,19 +139,21 @@ impl<'a> ZstdArrayRef<'a> {
     /// Other items will be skipped when deserializing, saving some unnecessary work.
     pub fn select<T: DeserializeOwned>(
         &self,
-        mut take: impl Iterator<Item = bool>,
+        take: &BitVec,
     ) -> Result<Vec<T>> {
         let uncompressed = self.decompress_into(Vec::new())?;
         let mut result: Vec<T> = Vec::new();
         let mut r = Cursor::new(&uncompressed);
+        let mut i: usize = 0;
         while r.position() < uncompressed.len() as u64 {
-            if let Some(p) = take.next() {
+            if i < take.len() {
                 let mut deserializer = serde_cbor::Deserializer::from_reader(r.by_ref());
-                if p {
+                if take[i] {
                     result.push(T::deserialize(&mut deserializer)?);
                 } else {
                     IgnoredAny::deserialize(&mut deserializer)?;
                 }
+                i += 1;
             } else {
                 break;
             }

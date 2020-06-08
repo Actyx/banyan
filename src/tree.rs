@@ -12,6 +12,7 @@ use std::{
     marker::PhantomData,
     sync::{Arc, RwLock},
 };
+use bitvec::prelude::*;
 use tracing::*;
 
 /// Trees can be parametrized with the key type and the sequence type
@@ -48,12 +49,10 @@ pub struct Tree<T: TreeTypes, V> {
 ///
 /// Queries work on compact value sequences instead of individual values for efficiency.
 pub trait Query<T: TreeTypes> {
-    /// the iterator type
-    type IndexIterator: Iterator<Item = bool>;
     /// an iterator returning `x.data.count()` elements, where each value is a bool indicating if the query *does* match
-    fn containing(&self, offset: u64, x: &LeafIndex<T::Seq>) -> Self::IndexIterator;
+    fn containing(&self, offset: u64, x: &LeafIndex<T::Seq>) -> BitVec;
     /// an iterator returning `x.data.count()` elements, where each value is a bool indicating if the query *can* match
-    fn intersecting(&self, offset: u64, x: &BranchIndex<T::Seq>) -> Self::IndexIterator;
+    fn intersecting(&self, offset: u64, x: &BranchIndex<T::Seq>) -> BitVec;
 }
 
 /// Configuration for a forest. Includes settings for when a node is considered full
@@ -286,16 +285,15 @@ impl OffsetQuery {
 }
 
 impl<T: TreeTypes> Query<T> for OffsetQuery {
-    type IndexIterator = Box<dyn std::iter::Iterator<Item = bool>>;
-    fn containing(&self, offset: u64, x: &LeafIndex<T::Seq>) -> Self::IndexIterator {
+    fn containing(&self, offset: u64, x: &LeafIndex<T::Seq>) -> BitVec {
         info!("OffsetQuery::containing {}", offset);
         let from = self.from;
-        Box::new((0..x.data.count()).map(move |o| o + offset >= from))
+        (0..x.data.count()).map(|o| o + offset >= from).collect()
     }
-    fn intersecting(&self, offset: u64, x: &BranchIndex<T::Seq>) -> Self::IndexIterator {
+    fn intersecting(&self, offset: u64, x: &BranchIndex<T::Seq>) -> BitVec {
         info!("OffsetQuery::intersecting {}", offset);
         // TODO
-        Box::new(std::iter::repeat(true).take(x.data.count() as usize))
+        BitVec::repeat(true, x.data.count() as usize)
     }
 }
 
@@ -332,26 +330,6 @@ where
             Some(leaf) => Ok(leaf),
             None => self.load_leaf(index).await,
         }
-    }
-
-    /// Creates a tree containing a single item, and returns the index of that tree
-    async fn single_leaf<V: Serialize + Debug>(
-        &self,
-        key: &T::Key,
-        value: &V,
-    ) -> Result<LeafIndex<T::Seq>> {
-        let leaf = Leaf::single(value, self.config.zstd_level)?;
-        let cid = self
-            .store
-            .put(leaf.as_ref().compressed(), cid::Codec::Raw)
-            .await?;
-        let index = LeafIndex {
-            cid,
-            value_bytes: leaf.as_ref().compressed().len() as u64,
-            sealed: self.leaf_sealed(leaf.as_ref().compressed().len() as u64, 1),
-            data: T::Seq::single(key),
-        };
-        Ok(self.cache_leaf(index, leaf))
     }
 
     /// Creates a leaf from a sequence that either contains all items from the sequence, or is full
@@ -401,7 +379,7 @@ where
         from: &mut std::iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
     ) -> Result<Index<T::Seq>> {
         let mut node = self.extend(&node, from).await?;
-        while from.peek().is_some() {
+        while from.peek().is_some() || node.level() == 0 {
             let level = node.level() + 1;
             node = self.create_branch(vec![node], level, from).await?.into();
         }
@@ -431,7 +409,7 @@ where
         let value_bytes = children.iter().map(|x| x.value_bytes()).sum();
         let key_bytes = children.iter().map(|x| x.key_bytes()).sum::<u64>() + cbor.len() as u64;
         let sealed = self.branch_sealed(&children, level);
-        let data: T::Seq = compactseq_create(keys.into_iter())?;
+        let data: T::Seq = T::Seq::new(keys.into_iter())?;
         let index = BranchIndex {
             level,
             count,
@@ -516,7 +494,7 @@ where
         let level = children.iter().map(|x| x.level()).max().unwrap() + 1;
         let value_bytes = children.iter().map(|x| x.value_bytes()).sum();
         let key_bytes = children.iter().map(|x| x.key_bytes()).sum::<u64>() + (bytes.len() as u64);
-        let data = compactseq_create(children.iter().map(|x| x.data().summarize()))?;
+        let data = T::Seq::new(children.iter().map(|x| x.data().summarize()))?;
         let result = BranchIndex {
             cid,
             level,
@@ -536,24 +514,6 @@ where
             Some(branch) => Ok(branch),
             None => self.load_branch(index).await,
         }
-    }
-
-    /// creates a branch containing a single item
-    async fn single_branch(&self, value: Index<T::Seq>) -> Result<BranchIndex<T::Seq>> {
-        let t = [value];
-        let cbor = serialize_compressed(&t, self.config.zstd_level)?;
-        let value = &t[0];
-        let cid = self.store.put(&cbor, cid::Codec::DagCBOR).await?;
-        let index = BranchIndex {
-            level: value.level() + 1,
-            count: value.count(),
-            value_bytes: value.value_bytes(),
-            key_bytes: value.key_bytes() + cbor.len() as u64,
-            sealed: false,
-            cid,
-            data: T::Seq::single(&value.data().summarize()),
-        };
-        Ok(index)
     }
 
     /// load a node, returning a structure containing the index and value for convenient matching
@@ -713,9 +673,9 @@ where
         let s = async move {
             Ok(match self.load_node(&index).await? {
                 NodeInfo::Leaf(index, node) => {
-                    let matching = query.containing(offset, index).collect::<Vec<_>>();
-                    let keys = index.select(matching.iter().cloned());
-                    let elems: Vec<V> = node.as_ref().select(matching.iter().cloned())?;
+                    let matching = query.containing(offset, index);
+                    let keys = index.select(&matching);
+                    let elems: Vec<V> = node.as_ref().select(&matching)?;
                     let pairs = keys
                         .zip(elems)
                         .map(|((o, k), v)| (o + offset, k, v))
@@ -725,7 +685,7 @@ where
                 NodeInfo::Branch(index, node) => {
                     let matching = query.intersecting(offset, index);
                     let offsets = zip_with_offset(node.children.into_iter(), offset);
-                    let children = matching
+                    let children = matching.into_iter()
                         .zip(offsets)
                         .filter_map(|(m, c)| if m { Some(c) } else { None });
                     stream::iter(children)
