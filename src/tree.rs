@@ -20,7 +20,7 @@ use tracing::*;
 /// There might be more types in the future, so all of them are grouped in this trait.
 pub trait TreeTypes {
     /// key type. This also doubles as the type for a combination (union) of keys
-    type Key: Semigroup + Debug;
+    type Key: Semigroup + Debug + Eq;
     /// compact sequence type to be used for indices
     type Seq: CompactSeq<Item = Self::Key> + Serialize + DeserializeOwned + Clone + Debug;
 }
@@ -168,6 +168,25 @@ impl<V: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static, T:
             Some(index) => self.with_root(self.forest.filled(index).await?),
             None => self.with_root(None),
         })
+    }
+
+    pub async fn check_invariants(&self) -> Result<Vec<String>> {
+        let mut msgs = Vec::new();
+        if let Some(root) = &self.root {
+            self.forest.check_invariants(&root, &mut msgs).await?;
+        }
+        Ok(msgs)
+    }
+
+    pub async fn assert_invariants(&self) -> Result<()> {
+        let msgs = self.check_invariants().await?;
+        if !msgs.is_empty() {
+            for msg in msgs {
+                error!("Invariant failed: {}", msg);
+            }
+            panic!("assert_invariants failed");
+        }
+        Ok(())
     }
 
     pub async fn collect_from<B: FromIterator<(T::Key, V)>>(&self, offset: u64) -> Result<B> {
@@ -547,19 +566,6 @@ where
         index
     }
 
-    /// store a branch in the cache, and return it wrapped into a generic index
-    fn cache_branch(
-        &self,
-        index: BranchIndex<T::Seq>,
-        node: Branch<T::Seq>,
-    ) -> BranchIndex<T::Seq> {
-        self.branch_cache
-            .write()
-            .unwrap()
-            .put(index.cid.clone(), node);
-        index
-    }
-
     async fn extend<V: Serialize + Debug>(
         &self,
         index: &Index<T::Seq>,
@@ -748,6 +754,39 @@ where
         } else {
             Ok(None)
         }
+    }
+
+    async fn check_invariants(&self, index: &Index<T::Seq>, msgs: &mut Vec<String>) -> Result<()> {
+        macro_rules! check {
+            ($expression:expr) => {
+                if !$expression {
+                    let text = stringify!($expression);
+                    msgs.push(format!("{}", text));
+                }
+            };
+        }
+        match self.load_node(index).await? {
+            NodeInfo::Leaf(index, leaf) => {
+                let value_count = leaf.as_ref().count()?;
+                check!(value_count == index.keys.count());
+                let leaf_sealed = self.leaf_sealed(index.value_bytes, index.keys.count());
+                check!(index.sealed == leaf_sealed);
+            }
+            NodeInfo::Branch(index, branch) => {
+                let child_count = branch.children.len() as u64;
+                check!(child_count == index.summaries.count());
+                for child in &branch.children {
+                    check!(child.level() < index.level);
+                }
+                for (child, summary) in branch.children.iter().zip(index.summaries()) {
+                    let child_summary = child.data().summarize();
+                    check!(child_summary == summary);
+                }
+                let branch_sealed = self.branch_sealed(&branch.children, index.level);
+                check!(index.sealed == branch_sealed);
+            }
+        };
+        Ok(())
     }
 
     fn filledr<'a>(

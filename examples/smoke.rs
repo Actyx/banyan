@@ -22,7 +22,7 @@ impl TreeTypes for TT {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialOrd, PartialEq, Ord, Eq)]
 struct Tag(String);
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 struct Tags(BTreeSet<Tag>);
 
 impl Tags {
@@ -34,7 +34,7 @@ impl Tags {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 struct Value {
     min_lamport: u64,
     min_time: u64,

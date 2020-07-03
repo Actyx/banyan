@@ -43,6 +43,7 @@ async fn create_test_tree(
     let forest = Arc::new(Forest::<TT>::new(store, Config::debug()));
     let mut tree = Tree::<TT, u64>::empty(forest);
     tree.extend(xs).await?;
+    tree.assert_invariants().await?;
     Ok(tree)
 }
 

@@ -115,6 +115,10 @@ impl<'a> ZstdArrayRef<'a> {
         Ok(result)
     }
 
+    pub fn count(&self) -> Result<u64> {
+        Ok(self.items::<serde::de::IgnoredAny>()?.len() as u64)
+    }
+
     /// select the items marked by the iterator and deserialize them into a vec.
     ///
     /// Other items will be skipped when deserializing, saving some unnecessary work.

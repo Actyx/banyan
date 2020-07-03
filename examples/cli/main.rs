@@ -38,7 +38,7 @@ impl Tag {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 struct Tags(BTreeSet<Tag>);
 
 impl Tags {
@@ -50,7 +50,7 @@ impl Tags {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 struct Key {
     min_lamport: u64,
     min_time: u64,
