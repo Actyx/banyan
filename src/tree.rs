@@ -789,6 +789,33 @@ where
         Ok(())
     }
 
+    async fn is_balanced(&self, index: &Index<T::Seq>) -> Result<bool> {
+        Ok(match self.load_node(index).await? {
+            NodeInfo::Leaf(_, _) => true,
+            NodeInfo::Branch(index, branch) => {
+                if index.sealed {
+                    true
+                } else {
+                    if let Some((last, rest)) = branch.children.split_last() {
+                        // for the first n-1 children, they must all be sealed and at 1 level below
+                        let first_ok = rest
+                            .iter()
+                            .all(|child| child.sealed() && child.level() == index.level - 1);
+                        // for the last child, it can be at any level below, and does not have to be sealed, but it must itself be balanced
+                        let last_ok = self.is_balancedr(last).await?;
+                        first_ok && last_ok
+                    } else {
+                        true
+                    }
+                }
+            }
+        })
+    }
+
+    fn is_balancedr<'a>(&'a self, index: &'a Index<T::Seq>) -> LocalBoxFuture<'a, Result<bool>> {
+        self.is_balanced(index).boxed_local()
+    }
+
     fn filledr<'a>(
         &'a self,
         index: &'a Index<T::Seq>,
