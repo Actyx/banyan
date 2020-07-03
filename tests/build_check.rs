@@ -1,6 +1,6 @@
 use banyan::index::{Semigroup, SimpleCompactSeq};
 use banyan::store::MemStore;
-use banyan::tree::{Config, Forest, Tree, TreeTypes, Query};
+use banyan::tree::{Config, Forest, Query, Tree, TreeTypes};
 use futures::prelude::*;
 use quickcheck::{Arbitrary, Gen, TestResult};
 use serde::{Deserialize, Serialize};

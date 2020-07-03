@@ -135,10 +135,10 @@ impl DnfQuery {
 
 impl Query<TT> for DnfQuery {
     fn intersecting(&self, _: u64, x: &BranchIndex<KeySeq>) -> BitVec {
-        x.items().map(|x| self.intersects(&x)).collect()
+        x.summaries().map(|x| self.intersects(&x)).collect()
     }
     fn containing(&self, _: u64, x: &LeafIndex<KeySeq>) -> BitVec {
-        x.items().map(|x| self.contains(&x)).collect()
+        x.keys().map(|x| self.contains(&x)).collect()
     }
 }
 

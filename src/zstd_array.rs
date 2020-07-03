@@ -1,5 +1,6 @@
 //! This module provides some utilities to work with zstd compressed arrays of cbor values
 use anyhow::Result;
+use bitvec::prelude::*;
 use serde::{
     de::{DeserializeOwned, IgnoredAny},
     Deserialize, Serialize,
@@ -13,7 +14,6 @@ use zstd::stream::{
     raw::{Decoder as ZDecoder, Operation, OutBuffer},
     write::Encoder,
 };
-use bitvec::prelude::*;
 
 /// An array of zstd compressed data
 pub struct ZstdArray {
@@ -137,10 +137,7 @@ impl<'a> ZstdArrayRef<'a> {
     /// select the items marked by the iterator and deserialize them into a vec.
     ///
     /// Other items will be skipped when deserializing, saving some unnecessary work.
-    pub fn select<T: DeserializeOwned>(
-        &self,
-        take: &BitVec,
-    ) -> Result<Vec<T>> {
+    pub fn select<T: DeserializeOwned>(&self, take: &BitVec) -> Result<Vec<T>> {
         let uncompressed = self.decompress_into(Vec::new())?;
         let mut result: Vec<T> = Vec::new();
         let mut r = Cursor::new(&uncompressed);

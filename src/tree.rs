@@ -2,6 +2,7 @@ use super::index::*;
 use crate::ipfs::Cid;
 use crate::{store::ArcStore, zstd_array::ZstdArrayBuilder};
 use anyhow::{anyhow, Result};
+use bitvec::prelude::*;
 use future::LocalBoxFuture;
 use futures::{prelude::*, stream::LocalBoxStream};
 use serde::{de::DeserializeOwned, Serialize};
@@ -12,7 +13,6 @@ use std::{
     marker::PhantomData,
     sync::{Arc, RwLock},
 };
-use bitvec::prelude::*;
 use tracing::*;
 
 /// Trees can be parametrized with the key type and the sequence type
@@ -288,12 +288,12 @@ impl<T: TreeTypes> Query<T> for OffsetQuery {
     fn containing(&self, offset: u64, x: &LeafIndex<T::Seq>) -> BitVec {
         info!("OffsetQuery::containing {}", offset);
         let from = self.from;
-        (0..x.data.count()).map(|o| o + offset >= from).collect()
+        (0..x.keys.count()).map(|o| o + offset >= from).collect()
     }
     fn intersecting(&self, offset: u64, x: &BranchIndex<T::Seq>) -> BitVec {
         info!("OffsetQuery::intersecting {}", offset);
         // TODO
-        BitVec::repeat(true, x.data.count() as usize)
+        BitVec::repeat(true, x.summaries.count() as usize)
     }
 }
 
@@ -335,16 +335,16 @@ where
     /// Creates a leaf from a sequence that either contains all items from the sequence, or is full
     async fn create_leaf<V: Serialize + Debug>(
         &self,
-        mut data: T::Seq,
+        mut keys: T::Seq,
         builder: ZstdArrayBuilder,
         from: &mut std::iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
     ) -> Result<LeafIndex<T::Seq>> {
         assert!(from.peek().is_some());
         let builder = builder.fill(
             || {
-                if data.count() < self.config.max_leaf_count {
+                if keys.count() < self.config.max_leaf_count {
                     from.next().map(|(k, v)| {
-                        data.push(&k);
+                        keys.push(&k);
                         v
                     })
                 } else {
@@ -361,12 +361,12 @@ where
         let index = LeafIndex {
             cid,
             value_bytes: leaf.as_ref().compressed().len() as u64,
-            sealed: self.leaf_sealed(leaf.as_ref().compressed().len() as u64, data.count()),
-            data,
+            sealed: self.leaf_sealed(leaf.as_ref().compressed().len() as u64, keys.count()),
+            keys,
         };
         info!(
             "leaf created count={} bytes={} sealed={}",
-            index.data.count(),
+            index.keys.count(),
             index.value_bytes,
             index.sealed
         );
@@ -393,14 +393,14 @@ where
         from: &mut std::iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
     ) -> Result<BranchIndex<T::Seq>> {
         assert!(children.iter().all(|child| child.level() <= level - 1));
-        let mut keys = children
+        let mut summaries = children
             .iter()
             .map(|child| child.data().summarize())
             .collect::<Vec<_>>();
         while from.peek().is_some() && ((children.len() as u64) <= self.config.max_branch_count) {
             let child = self.fill_noder(level - 1, from).await?;
             let summary = child.data().summarize();
-            keys.push(summary);
+            summaries.push(summary);
             children.push(child);
         }
         let cbor = serialize_compressed(&children, self.config.zstd_level)?;
@@ -409,19 +409,19 @@ where
         let value_bytes = children.iter().map(|x| x.value_bytes()).sum();
         let key_bytes = children.iter().map(|x| x.key_bytes()).sum::<u64>() + cbor.len() as u64;
         let sealed = self.branch_sealed(&children, level);
-        let data: T::Seq = T::Seq::new(keys.into_iter())?;
+        let summaries: T::Seq = T::Seq::new(summaries.into_iter())?;
         let index = BranchIndex {
             level,
             count,
             sealed,
             cid,
-            data,
+            summaries,
             key_bytes,
             value_bytes,
         };
         info!(
             "branch created count={} value_bytes={} key_bytes={} sealed={}",
-            index.data.count(),
+            index.summaries.count(),
             index.value_bytes,
             index.key_bytes,
             index.sealed
@@ -494,12 +494,12 @@ where
         let level = children.iter().map(|x| x.level()).max().unwrap() + 1;
         let value_bytes = children.iter().map(|x| x.value_bytes()).sum();
         let key_bytes = children.iter().map(|x| x.key_bytes()).sum::<u64>() + (bytes.len() as u64);
-        let data = T::Seq::new(children.iter().map(|x| x.data().summarize()))?;
+        let summaries = T::Seq::new(children.iter().map(|x| x.data().summarize()))?;
         let result = BranchIndex {
             cid,
             level,
             count,
-            data,
+            summaries,
             sealed: self.branch_sealed(&children, level),
             value_bytes,
             key_bytes,
@@ -578,7 +578,7 @@ where
         match self.load_node_write(index).await? {
             NodeInfo::Leaf(index, leaf) => {
                 info!("extending existing leaf");
-                let data = index.data.clone();
+                let data = index.keys.clone();
                 let builder = leaf.builder(self.config.zstd_level)?;
                 Ok(self.create_leaf(data, builder, from).await?.into())
             }
@@ -623,7 +623,7 @@ where
             }
             NodeInfo::Leaf(index, node) => {
                 let v = node.child_at::<V>(offset)?;
-                let k = index.data.get(offset).unwrap();
+                let k = index.keys.get(offset).unwrap();
                 Ok((k, v))
             }
         }
@@ -644,8 +644,8 @@ where
         let s = async move {
             Ok(match self.load_node(&index).await? {
                 NodeInfo::Leaf(index, node) => {
-                    info!("streaming leaf {}", index.data.count());
-                    let keys = index.items();
+                    info!("streaming leaf {}", index.keys.count());
+                    let keys = index.keys();
                     info!("raw compressed data {}", node.as_ref().compressed().len());
                     let elems = node.as_ref().items()?;
                     let pairs = keys.zip(elems).collect::<Vec<_>>();
@@ -674,7 +674,7 @@ where
             Ok(match self.load_node(&index).await? {
                 NodeInfo::Leaf(index, node) => {
                     let matching = query.containing(offset, index);
-                    let keys = index.select(&matching);
+                    let keys = index.select_keys(&matching);
                     let elems: Vec<V> = node.as_ref().select(&matching)?;
                     let pairs = keys
                         .zip(elems)
@@ -685,9 +685,13 @@ where
                 NodeInfo::Branch(index, node) => {
                     let matching = query.intersecting(offset, index);
                     let offsets = zip_with_offset(node.children.into_iter(), offset);
-                    let children = matching.into_iter()
-                        .zip(offsets)
-                        .filter_map(|(m, c)| if m { Some(c) } else { None });
+                    let children = matching.into_iter().zip(offsets).filter_map(|(m, c)| {
+                        if m {
+                            Some(c)
+                        } else {
+                            None
+                        }
+                    });
                     stream::iter(children)
                         .map(move |(child, offset)| self.stream_filtered(offset, query, child))
                         .flatten()
@@ -713,7 +717,7 @@ where
                 println!(
                     "{}Leaf(count={}, key_bytes={}, sealed={})",
                     prefix,
-                    index.data.count(),
+                    index.keys.count(),
                     index.value_bytes,
                     index.sealed,
                 );

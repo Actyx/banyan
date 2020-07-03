@@ -110,11 +110,11 @@ impl DnfQuery {
 
 impl Query<TT> for DnfQuery {
     fn intersecting(&self, _: u64, x: &BranchIndex<ValueSeq>) -> BitVec {
-        let bools = x.items().map(|x| self.intersects(&x));
+        let bools = x.summaries().map(|x| self.intersects(&x));
         bools.collect()
     }
     fn containing(&self, _: u64, x: &LeafIndex<ValueSeq>) -> BitVec {
-        let bools = x.items().map(|x| self.contains(&x));
+        let bools = x.keys().map(|x| self.contains(&x));
         bools.collect()
     }
 }

@@ -2,10 +2,10 @@
 use super::ipfs::Cid;
 use super::zstd_array::ZstdArrayBuilder;
 use anyhow::{anyhow, Result};
+use bitvec::prelude::*;
 use derive_more::From;
 use serde::{de::DeserializeOwned, Deserialize, Deserializer, Serialize, Serializer};
 use std::{convert::From, sync::Arc};
-use bitvec::prelude::*;
 
 /// trait for items that can be combined in an associative way
 ///
@@ -50,39 +50,23 @@ pub trait CompactSeq: Serialize + DeserializeOwned {
 
     /// utility function to get all items for a compactseq.
     fn to_vec(&self) -> Vec<Self::Item> {
-        (0..self.count()).map(move |i| self.get(i).unwrap()).collect()
+        (0..self.count())
+            .map(move |i| self.get(i).unwrap())
+            .collect()
     }
 
     /// utility function to select some items for a compactseq.
-    fn select(
-        &self,
-        bits: &BitVec,
-    ) -> Vec<(u64, Self::Item)> {
-        (0..self.count()).filter_map(move |i| {
-            if bits[i as usize] {
-                Some((i, self.get(i).unwrap()))
-            } else {
-                None
-            }
-        }).collect()
+    fn select(&self, bits: &BitVec) -> Vec<(u64, Self::Item)> {
+        (0..self.count())
+            .filter_map(move |i| {
+                if bits[i as usize] {
+                    Some((i, self.get(i).unwrap()))
+                } else {
+                    None
+                }
+            })
+            .collect()
     }
-}
-
-/// utility function to select some items for a compactseq.
-///
-/// This can not be a trait method because it returns an unnameable type, and therefore requires impl Trait,
-/// which is not available within traits.
-pub fn compactseq_select_items<'a, T: CompactSeq>(
-    value: &'a T,
-    it: impl Iterator<Item = bool> + 'a,
-) -> impl Iterator<Item = (u64, T::Item)> + 'a {
-    (0..value.count()).zip(it).filter_map(move |(i, take)| {
-        if take {
-            Some((i, value.get(i).unwrap()))
-        } else {
-            None
-        }
-    })
 }
 
 /// A trivial implementation of a CompactSeq as just a Seq.
@@ -127,19 +111,18 @@ pub struct LeafIndex<T> {
     pub sealed: bool,
     // link to the block
     pub cid: Cid,
-    /// index data. This is a sequence of keys with the same number of elements as
-    /// the data block the cid points to.
-    pub data: T,
+    /// A sequence of keys with the same number of values as the data block the cid points to.
+    pub keys: T,
     // serialized size of the data
     pub value_bytes: u64,
 }
 
 impl<T: CompactSeq> LeafIndex<T> {
-    pub fn items(&self) -> impl Iterator<Item = T::Item> {
-        self.data.to_vec().into_iter()
+    pub fn keys(&self) -> impl Iterator<Item = T::Item> {
+        self.keys.to_vec().into_iter()
     }
-    pub fn select(&self, bits: &BitVec) -> impl Iterator<Item = (u64, T::Item)> {
-        self.data.select(bits).into_iter()
+    pub fn select_keys(&self, bits: &BitVec) -> impl Iterator<Item = (u64, T::Item)> {
+        self.keys.select(bits).into_iter()
     }
 }
 
@@ -155,7 +138,7 @@ pub struct BranchIndex<T> {
     // link to the branch node
     pub cid: Cid,
     // extra data
-    pub data: T,
+    pub summaries: T,
     // serialized size of the children
     pub value_bytes: u64,
     // serialized size of the data
@@ -163,8 +146,8 @@ pub struct BranchIndex<T> {
 }
 
 impl<T: CompactSeq> BranchIndex<T> {
-    pub fn items<'a>(&'a self) -> impl Iterator<Item = T::Item> + 'a {
-        self.data.to_vec().into_iter()
+    pub fn summaries<'a>(&'a self) -> impl Iterator<Item = T::Item> + 'a {
+        self.summaries.to_vec().into_iter()
     }
 }
 
@@ -191,7 +174,7 @@ impl<'a, T> From<&'a Index<T>> for IndexW<'a, T> {
                 sealed: i.sealed,
                 value_bytes: i.value_bytes,
                 cid: &i.cid,
-                data: &i.data,
+                data: &i.summaries,
                 count: Some(i.count),
                 level: Some(i.level),
                 key_bytes: Some(i.key_bytes),
@@ -200,7 +183,7 @@ impl<'a, T> From<&'a Index<T>> for IndexW<'a, T> {
                 sealed: i.sealed,
                 value_bytes: i.value_bytes,
                 cid: &i.cid,
-                data: &i.data,
+                data: &i.keys,
                 count: None,
                 level: None,
                 key_bytes: None,
@@ -232,7 +215,7 @@ impl<T> From<IndexR<T>> for Index<T> {
         if let (Some(level), Some(count), Some(key_bytes)) = (v.level, v.count, v.key_bytes) {
             BranchIndex {
                 cid: v.cid,
-                data: v.data,
+                summaries: v.data,
                 sealed: v.sealed,
                 value_bytes: v.value_bytes,
                 key_bytes,
@@ -243,7 +226,7 @@ impl<T> From<IndexR<T>> for Index<T> {
         } else {
             LeafIndex {
                 cid: v.cid,
-                data: v.data,
+                keys: v.data,
                 sealed: v.sealed,
                 value_bytes: v.value_bytes,
             }
@@ -277,8 +260,8 @@ impl<'de, T: DeserializeOwned> Deserialize<'de> for Index<T> {
 impl<T: CompactSeq> Index<T> {
     pub fn data(&self) -> &T {
         match self {
-            Index::Leaf(x) => &x.data,
-            Index::Branch(x) => &x.data,
+            Index::Leaf(x) => &x.keys,
+            Index::Branch(x) => &x.summaries,
         }
     }
 
@@ -290,7 +273,7 @@ impl<T: CompactSeq> Index<T> {
     }
     pub fn count(&self) -> u64 {
         match self {
-            Index::Leaf(x) => x.data.count(),
+            Index::Leaf(x) => x.keys.count(),
             Index::Branch(x) => x.count,
         }
     }
@@ -431,7 +414,7 @@ impl<'a, T> From<&'a Index<T>> for IndexWC<'a, T> {
         match value {
             Index::Branch(i) => Self {
                 sealed: i.sealed,
-                data: &i.data,
+                data: &i.summaries,
                 value_bytes: i.value_bytes,
                 count: Some(i.count),
                 level: Some(i.level),
@@ -439,7 +422,7 @@ impl<'a, T> From<&'a Index<T>> for IndexWC<'a, T> {
             },
             Index::Leaf(i) => Self {
                 sealed: i.sealed,
-                data: &i.data,
+                data: &i.keys,
                 value_bytes: i.value_bytes,
                 count: None,
                 level: None,
@@ -471,7 +454,7 @@ impl<T> IndexRC<T> {
             (self.level, self.count, self.key_bytes)
         {
             BranchIndex {
-                data: self.data,
+                summaries: self.data,
                 sealed: self.sealed,
                 value_bytes: self.value_bytes,
                 key_bytes,
@@ -482,7 +465,7 @@ impl<T> IndexRC<T> {
             .into()
         } else {
             LeafIndex {
-                data: self.data,
+                keys: self.data,
                 sealed: self.sealed,
                 value_bytes: self.value_bytes,
                 cid,
