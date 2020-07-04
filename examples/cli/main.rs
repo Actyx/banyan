@@ -394,8 +394,10 @@ async fn main() -> Result<()> {
                 .collect::<Vec<_>>();
             if unbalanced {
                 tree.extend_unbalanced(v).await?;
+                tree.assert_invariants().await?;
             } else {
                 tree.extend(v).await?;
+                tree.assert_invariants().await?;
             }
         }
         tree.dump().await?;
@@ -409,7 +411,9 @@ async fn main() -> Result<()> {
         )?;
         let tree = Tree::<TT, serde_cbor::Value>::new(root, forest).await?;
         tree.dump().await?;
-        let tree = tree.balance().await?;
+        let tree = tree.pack().await?;
+        tree.assert_invariants().await?;
+        assert!(tree.is_packed().await?);
         tree.dump().await?;
         println!("{:?}", tree);
     } else if let Some(matches) = matches.subcommand_matches("filter") {

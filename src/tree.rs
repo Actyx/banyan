@@ -173,9 +173,20 @@ impl<V: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static, T:
     pub async fn check_invariants(&self) -> Result<Vec<String>> {
         let mut msgs = Vec::new();
         if let Some(root) = &self.root {
+            if root.level() == 0 {
+                msgs.push("tree should not have a leaf as direct child.".into());
+            }
             self.forest.check_invariants(&root, &mut msgs).await?;
         }
         Ok(msgs)
+    }
+
+    pub async fn is_packed(&self) -> Result<bool> {
+        if let Some(root) = &self.root {
+            self.forest.is_packed(&root).await
+        } else {
+            Ok(true)
+        }
     }
 
     pub async fn assert_invariants(&self) -> Result<()> {
@@ -199,7 +210,8 @@ impl<V: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static, T:
         items.into_iter().collect::<Result<_>>()
     }
 
-    pub async fn balance(&self) -> Result<Self> {
+    /// packs the tree to the left
+    pub async fn pack(&self) -> Result<Self> {
         let mut filled = self.filled().await?;
         let remainder: Vec<_> = self.collect_from(filled.count()).await?;
         filled.extend(remainder).await?;
@@ -789,31 +801,32 @@ where
         Ok(())
     }
 
-    async fn is_balanced(&self, index: &Index<T::Seq>) -> Result<bool> {
-        Ok(match self.load_node(index).await? {
-            NodeInfo::Leaf(_, _) => true,
-            NodeInfo::Branch(index, branch) => {
-                if index.sealed {
-                    true
+    async fn is_packed(&self, index: &Index<T::Seq>) -> Result<bool> {
+        if let NodeInfo::Branch(index, branch) = self.load_node(index).await? {
+            Ok(if index.sealed {
+                // sealed nodes, for themselves, are packed
+                true
+            } else {
+                if let Some((last, rest)) = branch.children.split_last() {
+                    // for the first n-1 children, they must all be sealed and at exactly 1 level below
+                    let first_ok = rest
+                        .iter()
+                        .all(|child| child.sealed() && child.level() == index.level - 1);
+                    // for the last child, it can be at any level below, and does not have to be sealed, but it must itself be balanced
+                    let last_ok = self.is_packedr(last).await?;
+                    first_ok && last_ok
                 } else {
-                    if let Some((last, rest)) = branch.children.split_last() {
-                        // for the first n-1 children, they must all be sealed and at 1 level below
-                        let first_ok = rest
-                            .iter()
-                            .all(|child| child.sealed() && child.level() == index.level - 1);
-                        // for the last child, it can be at any level below, and does not have to be sealed, but it must itself be balanced
-                        let last_ok = self.is_balancedr(last).await?;
-                        first_ok && last_ok
-                    } else {
-                        true
-                    }
+                    // this should not happen, but a branch with no children can be considered packed
+                    true
                 }
-            }
-        })
+            })
+        } else {
+            Ok(true)
+        }
     }
 
-    fn is_balancedr<'a>(&'a self, index: &'a Index<T::Seq>) -> LocalBoxFuture<'a, Result<bool>> {
-        self.is_balanced(index).boxed_local()
+    fn is_packedr<'a>(&'a self, index: &'a Index<T::Seq>) -> LocalBoxFuture<'a, Result<bool>> {
+        self.is_packed(index).boxed_local()
     }
 
     fn filledr<'a>(
