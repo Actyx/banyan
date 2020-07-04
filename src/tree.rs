@@ -97,7 +97,7 @@ impl<T: TreeTypes, V> fmt::Debug for Tree<T, V> {
         match &self.root {
             Some(root) => write!(
                 f,
-                "Tree(root={},key_bytes={},value_bytes={})",
+                "Tree(root={:?},key_bytes={},value_bytes={})",
                 root.cid(),
                 root.key_bytes(),
                 root.value_bytes()
@@ -110,7 +110,7 @@ impl<T: TreeTypes, V> fmt::Debug for Tree<T, V> {
 impl<T: TreeTypes, V> fmt::Display for Tree<T, V> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.root {
-            Some(root) => write!(f, "{}", root.cid(),),
+            Some(root) => write!(f, "{:?}", root.cid(),),
             None => write!(f, "empty tree"),
         }
     }
@@ -294,6 +294,20 @@ impl<V: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static, T:
         }
     }
 
+    /// forget all data except the one matching the query
+    ///
+    /// this is done as best effort and will not be precise. E.g. if a chunk of data contains
+    /// just a tiny bit that needs to be retained, it will not be forgotten.
+    ///
+    /// from this follows that this is not a suitable method if you want to ensure that the
+    /// non-matching data is completely gone.
+    pub async fn forget_except<'a, Q: Query<T>>(
+        &'a self,
+        query: &'a Q,
+    ) -> Result<()>  {
+        Ok(())
+    }
+
     /// true for an empty tree
     pub fn is_empty(&self) -> bool {
         self.count() == 0
@@ -351,15 +365,23 @@ where
     }
 
     /// load a leaf given a leaf index
-    async fn load_leaf(&self, index: &LeafIndex<T::Seq>) -> Result<Leaf> {
-        Ok(Leaf::new(self.store.get(&index.cid).await?))
+    async fn load_leaf(&self, index: &LeafIndex<T::Seq>) -> Result<Option<Leaf>> {
+        Ok(if let Some(cid) = &index.cid {
+            Some(Leaf::new(self.store.get(cid).await?))
+        } else {
+            None
+        })
     }
 
     /// load a leaf from a cache
-    async fn load_leaf_cached(&self, index: &LeafIndex<T::Seq>) -> Result<Leaf> {
-        match self.leaf_cache.write().unwrap().pop(&index.cid) {
-            Some(leaf) => Ok(leaf),
-            None => self.load_leaf(index).await,
+    async fn load_leaf_cached(&self, index: &LeafIndex<T::Seq>) -> Result<Option<Leaf>> {
+        if let Some(cid) = &index.cid {
+            match self.leaf_cache.write().unwrap().pop(cid) {
+                Some(leaf) => Ok(Some(leaf)),
+                None => self.load_leaf(index).await,
+            }
+        } else {
+            Ok(None)
         }
     }
 
@@ -390,7 +412,7 @@ where
             .put(leaf.as_ref().compressed(), cid::Codec::Raw)
             .await?;
         let index = LeafIndex {
-            cid,
+            cid: Some(cid),
             value_bytes: leaf.as_ref().compressed().len() as u64,
             sealed: self.leaf_sealed(leaf.as_ref().compressed().len() as u64, keys.count()),
             keys,
@@ -445,7 +467,7 @@ where
             level,
             count,
             sealed,
-            cid,
+            cid: Some(cid),
             summaries,
             key_bytes,
             value_bytes,
@@ -510,11 +532,15 @@ where
     }
 
     /// load a branch given a branch index
-    async fn load_branch(&self, index: &BranchIndex<T::Seq>) -> Result<Branch<T::Seq>> {
-        let bytes = self.store.get(&index.cid).await?;
-        let children: Vec<_> = deserialize_compressed(&bytes)?;
-        // let children = CborZstdArrayRef::new(bytes.as_ref()).items()?;
-        Ok(Branch::<T::Seq>::new(children))
+    async fn load_branch(&self, index: &BranchIndex<T::Seq>) -> Result<Option<Branch<T::Seq>>> {
+        Ok(if let Some(cid) = &index.cid {
+            let bytes = self.store.get(&cid).await?;
+            let children: Vec<_> = deserialize_compressed(&bytes)?;
+            // let children = CborZstdArrayRef::new(bytes.as_ref()).items()?;
+            Some(Branch::<T::Seq>::new(children))
+        } else {
+            None
+        })
     }
 
     async fn load_branch_from_cid(&self, cid: Cid) -> Result<Index<T::Seq>> {
@@ -527,7 +553,7 @@ where
         let key_bytes = children.iter().map(|x| x.key_bytes()).sum::<u64>() + (bytes.len() as u64);
         let summaries = T::Seq::new(children.iter().map(|x| x.data().summarize()))?;
         let result = BranchIndex {
-            cid,
+            cid: Some(cid),
             level,
             count,
             summaries,
@@ -540,10 +566,17 @@ where
     }
 
     /// load a branch given a branch index, from the cache
-    async fn load_branch_cached(&self, index: &BranchIndex<T::Seq>) -> Result<Branch<T::Seq>> {
-        match self.branch_cache.write().unwrap().pop(&index.cid) {
-            Some(branch) => Ok(branch),
-            None => self.load_branch(index).await,
+    async fn load_branch_cached(
+        &self,
+        index: &BranchIndex<T::Seq>,
+    ) -> Result<Option<Branch<T::Seq>>> {
+        if let Some(cid) = &index.cid {
+            match self.branch_cache.write().unwrap().pop(cid) {
+                Some(branch) => Ok(Some(branch)),
+                None => self.load_branch(index).await,
+            }
+        } else {
+            Ok(None)
         }
     }
 
@@ -556,25 +589,48 @@ where
     /// Branch nodes are expensive to decode, so they will always be cached even for reading.
     async fn load_node_write<'a>(&self, index: &'a Index<T::Seq>) -> Result<NodeInfo<'a, T::Seq>> {
         Ok(match index {
-            Index::Branch(index) => NodeInfo::Branch(index, self.load_branch_cached(index).await?),
-            Index::Leaf(index) => NodeInfo::Leaf(index, self.load_leaf_cached(index).await?),
+            Index::Branch(index) => {
+                if let Some(branch) = self.load_branch_cached(index).await? {
+                    NodeInfo::Branch(index, branch)
+                } else {
+                    NodeInfo::PurgedBranch(index)
+                }
+            }
+            Index::Leaf(index) => {
+                if let Some(leaf) = self.load_leaf_cached(index).await? {
+                    NodeInfo::Leaf(index, leaf)
+                } else {
+                    NodeInfo::PurgedLeaf(index)
+                }
+            }
         })
     }
 
     /// load a node, returning a structure containing the index and value for convenient matching
     async fn load_node<'a>(&self, index: &'a Index<T::Seq>) -> Result<NodeInfo<'a, T::Seq>> {
         Ok(match index {
-            Index::Branch(index) => NodeInfo::Branch(index, self.load_branch_cached(index).await?),
-            Index::Leaf(index) => NodeInfo::Leaf(index, self.load_leaf(index).await?),
+            Index::Branch(index) => {
+                if let Some(branch) = self.load_branch_cached(index).await? {
+                    NodeInfo::Branch(index, branch)
+                } else {
+                    NodeInfo::PurgedBranch(index)
+                }
+            }
+            Index::Leaf(index) => {
+                if let Some(leaf) = self.load_leaf(index).await? {
+                    NodeInfo::Leaf(index, leaf)
+                } else {
+                    NodeInfo::PurgedLeaf(index)
+                }
+            }
         })
     }
 
     /// store a leaf in the cache, and return it wrapped into a generic index
     fn cache_leaf(&self, index: LeafIndex<T::Seq>, node: Leaf) -> LeafIndex<T::Seq> {
-        self.leaf_cache
-            .write()
-            .unwrap()
-            .put(index.cid.clone(), node);
+        if let Some(cid) = &index.cid {
+            self.leaf_cache.write().unwrap().put(cid.clone(), node);
+        }
         index
     }
 
@@ -611,6 +667,7 @@ where
                     .await?
                     .into())
             }
+            NodeInfo::PurgedBranch(_) | NodeInfo::PurgedLeaf(_) => Ok(index.clone()),
         }
     }
 
@@ -644,6 +701,9 @@ where
                 let k = index.keys.get(offset).unwrap();
                 Ok((k, v))
             }
+            NodeInfo::PurgedBranch(_) | NodeInfo::PurgedLeaf(_) => {
+                Err(anyhow!("item at index no longer available: {}", offset).into())
+            }
         }
     }
 
@@ -667,7 +727,10 @@ where
                     info!("raw compressed data {}", node.as_ref().compressed().len());
                     let elems = node.as_ref().items()?;
                     let pairs = keys.zip(elems).collect::<Vec<_>>();
-                    stream::iter(pairs).map(|x| Ok(x)).left_stream()
+                    stream::iter(pairs)
+                        .map(|x| Ok(x))
+                        .left_stream()
+                        .left_stream()
                 }
                 NodeInfo::Branch(_, node) => {
                     info!("streaming branch {} {}", index.level(), node.children.len());
@@ -675,7 +738,9 @@ where
                         .map(move |child| self.stream(child))
                         .flatten()
                         .right_stream()
+                        .left_stream()
                 }
+                NodeInfo::PurgedBranch(_) | NodeInfo::PurgedLeaf(_) => stream::empty().right_stream(),
             })
         }
         .try_flatten_stream();
@@ -698,7 +763,10 @@ where
                         .zip(elems)
                         .map(|((o, k), v)| (o + offset, k, v))
                         .collect::<Vec<_>>();
-                    stream::iter(pairs).map(|x| Ok(x)).left_stream()
+                    stream::iter(pairs)
+                        .map(|x| Ok(x))
+                        .left_stream()
+                        .left_stream()
                 }
                 NodeInfo::Branch(index, node) => {
                     let matching = query.intersecting(offset, index);
@@ -714,7 +782,9 @@ where
                         .map(move |(child, offset)| self.stream_filtered(offset, query, child))
                         .flatten()
                         .right_stream()
+                        .left_stream()
                 }
+                NodeInfo::PurgedBranch(_) | NodeInfo::PurgedLeaf(_) => stream::empty().right_stream(),
             })
         }
         .try_flatten_stream();
@@ -749,6 +819,21 @@ where
                 for x in branch.children.iter() {
                     self.dumpr(x, &prefix).await?;
                 }
+            }
+            NodeInfo::PurgedBranch(index) => {
+                println!(
+                    "{}PurgedBranch(count={}, key_bytes={}, value_bytes={}, sealed={})",
+                    prefix, index.count, index.key_bytes, index.value_bytes, index.sealed,
+                );
+            }
+            NodeInfo::PurgedLeaf(index) => {
+                println!(
+                    "{}PurgedLeaf(count={}, key_bytes={}, sealed={})",
+                    prefix,
+                    index.keys.count(),
+                    index.value_bytes,
+                    index.sealed,
+                );
             }
         };
         Ok(())
@@ -796,6 +881,12 @@ where
                 }
                 let branch_sealed = self.branch_sealed(&branch.children, index.level);
                 check!(index.sealed == branch_sealed);
+            }
+            NodeInfo::PurgedBranch(_) => {
+                // not possible to check invariants since the data to compare to is gone
+            }
+            NodeInfo::PurgedLeaf(_) => {
+                // not possible to check invariants since the data to compare to is gone
             }
         };
         Ok(())
