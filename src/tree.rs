@@ -302,12 +302,26 @@ impl<V: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static, T:
     /// from this follows that this is not a suitable method if you want to ensure that the
     /// non-matching data is completely gone.
     ///
-    /// note that offsets will not be affected by this!
+    /// note that offsets will not be affected by this. Also, unsealed nodes will not be forgotten
+    /// even if they do not match the query.
     pub async fn forget_except<'a, Q: Query<T>>(&'a mut self, query: &'a Q) -> Result<()> {
-        if let Some(tree) = &self.root {
-            self.root = Some(self.forest.forget_except(0, query, tree).await?);
+        if let Some(index) = &self.root {
+            self.root = Some(self.forest.forget_except(0, query, index).await?);
         }
         Ok(())
+    }
+
+    /// repair a tree by purging parts of the tree that can not be resolved.
+    ///
+    /// produces a report of links that could not be resolved.const
+    ///
+    /// TODO: figure out implications when forgetting non-sealed nodes
+    pub async fn repair<'a>(&mut self) -> Result<Vec<String>> {
+        let mut report = Vec::new();
+        if let Some(index) = &self.root {
+            self.root = Some(self.forest.repair(index, &mut report).await?);
+        }
+        Ok(report)
     }
 
     /// true for an empty tree
@@ -818,7 +832,8 @@ where
             Index::Branch(index) => {
                 let mut index = index.clone();
                 // only do the check unless we are already purged
-                if index.cid.is_some() && !query.intersecting(offset, &index).any() {
+                if index.cid.is_some() && index.sealed && !query.intersecting(offset, &index).any()
+                {
                     index.cid = None;
                 }
                 // this will only be executed unless we are already purged
@@ -844,7 +859,7 @@ where
             Index::Leaf(index) => {
                 let mut index = index.clone();
                 // only do the check unless we are already purged
-                if index.cid.is_some() && !query.containing(offset, &index).any() {
+                if index.cid.is_some() && index.sealed && !query.containing(offset, &index).any() {
                     index.cid = None
                 }
                 Ok(index.into())
@@ -862,12 +877,70 @@ where
         self.forget_except(offset, query, index).boxed_local()
     }
 
-    fn dumpr<'a>(
+    async fn repair(
+        &self,
+        index: &Index<T::Seq>,
+        report: &mut Vec<String>,
+    ) -> Result<Index<T::Seq>> {
+        match index {
+            Index::Branch(index) => {
+                let mut index = index.clone();
+                // important not to hit the cache here!
+                let branch = self.load_branch(&index).await;
+                match branch {
+                    Ok(Some(node)) => {
+                        let mut children = node.children.clone();
+                        let mut changed = false;
+                        for (i, child) in node.children.iter().enumerate() {
+                            let child1 = self.repairr(child, report).await?;
+                            if child1.cid().is_none() != child.cid().is_none() {
+                                children[i] = child1;
+                                changed = true;
+                            }
+                        }
+                        // rewrite the node and update the cid if children have changed
+                        if changed {
+                            let cbor = serialize_compressed(&children, self.config.zstd_level)?;
+                            index.cid = Some(self.store.put(&cbor, cid::Codec::DagCBOR).await?);
+                        }
+                    }
+                    Ok(None) => {
+                        // already purged, nothing to do
+                    }
+                    Err(cause) => {
+                        let cid_txt = index.cid.map(|x| x.to_string()).unwrap_or("".into());
+                        report.push(format!("forgetting branch {} due to {}", cid_txt, cause));
+                        if !index.sealed {
+                            report.push(format!("warning: forgetting unsealed branch!"));
+                        }
+                        index.cid = None;
+                    }
+                }
+                Ok(index.into())
+            }
+            Index::Leaf(index) => {
+                let mut index = index.clone();
+                // important not to hit the cache here!
+                if let Err(cause) = self.load_leaf(&index).await {
+                    let cid_txt = index.cid.map(|x| x.to_string()).unwrap_or("".into());
+                    report.push(format!("forgetting leaf {} due to {}", cid_txt, cause));
+                    if !index.sealed {
+                        report.push(format!("warning: forgetting unsealed leaf!"));
+                    }
+                    index.cid = None;
+                }
+                Ok(index.into())
+            }
+        }
+    }
+
+    // all these stubs could be replaced with https://docs.rs/async-recursion/
+    fn repairr<'a>(
         &'a self,
         index: &'a Index<T::Seq>,
-        prefix: &'a str,
-    ) -> LocalBoxFuture<'a, Result<()>> {
-        self.dump(index, prefix).boxed_local()
+        report: &'a mut Vec<String>,
+    ) -> LocalBoxFuture<'a, Result<Index<T::Seq>>> {
+        self.repair(index, report).boxed_local()
     }
 
     async fn dump(&self, index: &Index<T::Seq>, prefix: &str) -> Result<()> {
@@ -908,6 +981,14 @@ where
             }
         };
         Ok(())
+    }
+
+    fn dumpr<'a>(
+        &'a self,
+        index: &'a Index<T::Seq>,
+        prefix: &'a str,
+    ) -> LocalBoxFuture<'a, Result<()>> {
+        self.dump(index, prefix).boxed_local()
     }
 
     async fn filled(&self, index: &Index<T::Seq>) -> Result<Option<Index<T::Seq>>> {
