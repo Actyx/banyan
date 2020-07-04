@@ -294,6 +294,20 @@ impl<V: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static, T:
         }
     }
 
+    /// forget all data except the one matching the query
+    ///
+    /// this is done as best effort and will not be precise. E.g. if a chunk of data contains
+    /// just a tiny bit that needs to be retained, it will not be forgotten.
+    ///
+    /// from this follows that this is not a suitable method if you want to ensure that the
+    /// non-matching data is completely gone.
+    pub async fn forget_except<'a, Q: Query<T>>(
+        &'a self,
+        query: &'a Q,
+    ) -> Result<()>  {
+        Ok(())
+    }
+
     /// true for an empty tree
     pub fn is_empty(&self) -> bool {
         self.count() == 0
