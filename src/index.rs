@@ -110,7 +110,7 @@ pub struct LeafIndex<T> {
     // block is sealed
     pub sealed: bool,
     // link to the block
-    pub cid: Cid,
+    pub cid: Option<Cid>,
     /// A sequence of keys with the same number of values as the data block the cid points to.
     pub keys: T,
     // serialized size of the data
@@ -136,7 +136,7 @@ pub struct BranchIndex<T> {
     // block is sealed
     pub sealed: bool,
     // link to the branch node
-    pub cid: Cid,
+    pub cid: Option<Cid>,
     // extra data
     pub summaries: T,
     // serialized size of the children
@@ -160,7 +160,7 @@ struct IndexW<'a, T> {
     // block is sealed
     sealed: bool,
     // link to the branch node
-    cid: &'a Cid,
+    cid: Option<&'a Cid>,
     // extra data
     data: &'a T,
     value_bytes: u64,
@@ -173,7 +173,7 @@ impl<'a, T> From<&'a Index<T>> for IndexW<'a, T> {
             Index::Branch(i) => Self {
                 sealed: i.sealed,
                 value_bytes: i.value_bytes,
-                cid: &i.cid,
+                cid: i.cid.as_ref(),
                 data: &i.summaries,
                 count: Some(i.count),
                 level: Some(i.level),
@@ -182,7 +182,7 @@ impl<'a, T> From<&'a Index<T>> for IndexW<'a, T> {
             Index::Leaf(i) => Self {
                 sealed: i.sealed,
                 value_bytes: i.value_bytes,
-                cid: &i.cid,
+                cid: i.cid.as_ref(),
                 data: &i.keys,
                 count: None,
                 level: None,
@@ -203,7 +203,7 @@ struct IndexR<T> {
     // block is sealed
     sealed: bool,
     // link to the branch node
-    cid: Cid,
+    cid: Option<Cid>,
     // extra data
     data: T,
     // value bytes
@@ -265,7 +265,7 @@ impl<T: CompactSeq> Index<T> {
         }
     }
 
-    pub fn cid(&self) -> &Cid {
+    pub fn cid(&self) -> &Option<Cid> {
         match self {
             Index::Leaf(x) => &x.cid,
             Index::Branch(x) => &x.cid,
@@ -385,6 +385,7 @@ impl Leaf {
 pub(crate) enum NodeInfo<'a, T> {
     Branch(&'a BranchIndex<T>, Branch<T>),
     Leaf(&'a LeafIndex<T>, Leaf),
+    Purged,
 }
 
 impl Leaf {
@@ -449,7 +450,7 @@ struct IndexRC<T> {
 }
 
 impl<T> IndexRC<T> {
-    fn to_index(self, cid: Cid) -> Index<T> {
+    fn to_index(self, cids: &mut VecDeque<Cid>) -> Index<T> {
         if let (Some(level), Some(count), Some(key_bytes)) =
             (self.level, self.count, self.key_bytes)
         {
@@ -460,7 +461,7 @@ impl<T> IndexRC<T> {
                 key_bytes,
                 count,
                 level,
-                cid,
+                cid: cids.pop_front(),
             }
             .into()
         } else {
@@ -468,14 +469,17 @@ impl<T> IndexRC<T> {
                 keys: self.data,
                 sealed: self.sealed,
                 value_bytes: self.value_bytes,
-                cid,
+                cid: cids.pop_front(),
             }
             .into()
         }
     }
 }
 
-use std::io::{Cursor, Write};
+use std::{
+    collections::VecDeque,
+    io::{Cursor, Write},
+};
 
 const CBOR_ARRAY_START: u8 = (4 << 5) | 31;
 const CBOR_BREAK: u8 = 255;
@@ -489,7 +493,9 @@ pub fn serialize_compressed<T: Serialize + CompactSeq>(
     let mut writer = zstd::stream::write::Encoder::new(compressed.by_ref(), level)?;
     writer.write_all(&[CBOR_ARRAY_START])?;
     for item in items.iter() {
-        cids.push(item.cid());
+        if let Some(cid) = item.cid() {
+            cids.push(cid);
+        }
         serde_cbor::to_writer(writer.by_ref(), &IndexWC::from(item))?;
     }
     writer.write_all(&[CBOR_BREAK])?;
@@ -499,15 +505,14 @@ pub fn serialize_compressed<T: Serialize + CompactSeq>(
 }
 
 pub fn deserialize_compressed<T: DeserializeOwned>(ipld: &[u8]) -> Result<Vec<Index<T>>> {
-    let (cids, compressed): (Vec<Cid>, serde_cbor::Value) = serde_cbor::from_slice(ipld)?;
+    let (mut cids, compressed): (VecDeque<Cid>, serde_cbor::Value) = serde_cbor::from_slice(ipld)?;
     if let serde_cbor::Value::Bytes(compressed) = compressed {
         let reader = zstd::stream::read::Decoder::new(Cursor::new(compressed))?;
 
         let data: Vec<IndexRC<T>> = serde_cbor::from_reader(reader)?;
         let result = data
             .into_iter()
-            .zip(cids)
-            .map(|(data, cid)| data.to_index(cid))
+            .map(|data| data.to_index(&mut cids))
             .collect::<Vec<_>>();
         Ok(result)
     } else {
