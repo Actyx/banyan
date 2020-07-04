@@ -458,11 +458,7 @@ struct IndexRC<T> {
 
 impl<T> IndexRC<T> {
     fn to_index(self, cids: &mut VecDeque<Cid>) -> Index<T> {
-        let cid = if !self.purged {
-            cids.pop_front()
-        } else {
-            None
-        };
+        let cid = if !self.purged { cids.pop_front() } else { None };
         if let (Some(level), Some(count), Some(key_bytes)) =
             (self.level, self.count, self.key_bytes)
         {

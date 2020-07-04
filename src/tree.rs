@@ -267,7 +267,7 @@ impl<V: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static, T:
     /// element at index
     pub async fn get(&self, offset: u64) -> Result<Option<(T::Key, V)>> {
         Ok(match &self.root {
-            Some(index) => Some(self.forest.get(index, offset).await?),
+            Some(index) => self.forest.get(index, offset).await?,
             None => None,
         })
     }
@@ -301,10 +301,12 @@ impl<V: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static, T:
     ///
     /// from this follows that this is not a suitable method if you want to ensure that the
     /// non-matching data is completely gone.
-    pub async fn forget_except<'a, Q: Query<T>>(
-        &'a self,
-        query: &'a Q,
-    ) -> Result<()>  {
+    ///
+    /// note that offsets will not be affected by this!
+    pub async fn forget_except<'a, Q: Query<T>>(&'a mut self, query: &'a Q) -> Result<()> {
+        if let Some(tree) = &self.root {
+            self.root = Some(self.forest.forget_except(0, query, tree).await?);
+        }
         Ok(())
     }
 
@@ -347,6 +349,18 @@ fn zip_with_offset<'a, I: Iterator<Item = Index<T>> + 'a, T: CompactSeq + 'a>(
     value: I,
     offset: u64,
 ) -> impl Iterator<Item = (Index<T>, u64)> + 'a {
+    value.scan(offset, |offset, x| {
+        let o0 = *offset;
+        *offset += x.count();
+        Some((x, o0))
+    })
+}
+
+/// Utility method to zip a number of indices with an offset that is increased by each index value
+fn zip_with_offset_ref<'a, I: Iterator<Item = &'a Index<T>> + 'a, T: CompactSeq + 'a>(
+    value: I,
+    offset: u64,
+) -> impl Iterator<Item = (&'a Index<T>, u64)> + 'a {
     value.scan(offset, |offset, x| {
         let o0 = *offset;
         *offset += x.count();
@@ -683,7 +697,7 @@ where
         &self,
         index: &Index<T::Seq>,
         mut offset: u64,
-    ) -> Result<(T::Key, V)> {
+    ) -> Result<Option<(T::Key, V)>> {
         assert!(offset < index.count());
         match self.load_node(index).await? {
             NodeInfo::Branch(_, node) => {
@@ -699,11 +713,9 @@ where
             NodeInfo::Leaf(index, node) => {
                 let v = node.child_at::<V>(offset)?;
                 let k = index.keys.get(offset).unwrap();
-                Ok((k, v))
+                Ok(Some((k, v)))
             }
-            NodeInfo::PurgedBranch(_) | NodeInfo::PurgedLeaf(_) => {
-                Err(anyhow!("item at index no longer available: {}", offset).into())
-            }
+            NodeInfo::PurgedBranch(_) | NodeInfo::PurgedLeaf(_) => Ok(None),
         }
     }
 
@@ -711,7 +723,7 @@ where
         &'a self,
         node: &'a Index<T::Seq>,
         offset: u64,
-    ) -> LocalBoxFuture<'a, Result<(T::Key, V)>> {
+    ) -> LocalBoxFuture<'a, Result<Option<(T::Key, V)>>> {
         self.get(node, offset).boxed_local()
     }
 
@@ -740,7 +752,9 @@ where
                         .right_stream()
                         .left_stream()
                 }
-                NodeInfo::PurgedBranch(_) | NodeInfo::PurgedLeaf(_) => stream::empty().right_stream(),
+                NodeInfo::PurgedBranch(_) | NodeInfo::PurgedLeaf(_) => {
+                    stream::empty().right_stream()
+                }
             })
         }
         .try_flatten_stream();
@@ -772,6 +786,7 @@ where
                     let matching = query.intersecting(offset, index);
                     let offsets = zip_with_offset(node.children.into_iter(), offset);
                     let children = matching.into_iter().zip(offsets).filter_map(|(m, c)| {
+                        // use bool::then_some in case it gets stabilized
                         if m {
                             Some(c)
                         } else {
@@ -784,11 +799,67 @@ where
                         .right_stream()
                         .left_stream()
                 }
-                NodeInfo::PurgedBranch(_) | NodeInfo::PurgedLeaf(_) => stream::empty().right_stream(),
+                NodeInfo::PurgedBranch(_) | NodeInfo::PurgedLeaf(_) => {
+                    stream::empty().right_stream()
+                }
             })
         }
         .try_flatten_stream();
         Box::pin(s)
+    }
+
+    async fn forget_except<Q: Query<T>>(
+        &self,
+        offset: u64,
+        query: &Q,
+        index: &Index<T::Seq>,
+    ) -> Result<Index<T::Seq>> {
+        match index {
+            Index::Branch(index) => {
+                let mut index = index.clone();
+                // only do the check unless we are already purged
+                if index.cid.is_some() && !query.intersecting(offset, &index).any() {
+                    index.cid = None;
+                }
+                // this will only be executed unless we are already purged
+                if let Some(node) = self.load_branch(&index).await? {
+                    let mut children = node.children.clone();
+                    let mut changed = false;
+                    let offsets = zip_with_offset_ref(node.children.iter(), offset);
+                    for (i, (child, offset)) in offsets.enumerate() {
+                        let child1 = self.forget_exceptr(offset, query, child).await?;
+                        if child1.cid().is_none() != child.cid().is_none() {
+                            children[i] = child1;
+                            changed = true;
+                        }
+                    }
+                    // rewrite the node and update the cid if children have changed
+                    if changed {
+                        let cbor = serialize_compressed(&children, self.config.zstd_level)?;
+                        index.cid = Some(self.store.put(&cbor, cid::Codec::DagCBOR).await?);
+                    }
+                }
+                Ok(index.into())
+            }
+            Index::Leaf(index) => {
+                let mut index = index.clone();
+                // only do the check unless we are already purged
+                if index.cid.is_some() && !query.containing(offset, &index).any() {
+                    index.cid = None
+                }
+                Ok(index.into())
+            }
+        }
+    }
+
+    // all these stubs could be replaced with https://docs.rs/async-recursion/
+    fn forget_exceptr<'a, Q: Query<T>>(
+        &'a self,
+        offset: u64,
+        query: &'a Q,
+        index: &'a Index<T::Seq>,
+    ) -> LocalBoxFuture<'a, Result<Index<T::Seq>>> {
+        self.forget_except(offset, query, index).boxed_local()
     }
 
     fn dumpr<'a>(
