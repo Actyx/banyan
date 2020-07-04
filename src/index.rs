@@ -385,7 +385,8 @@ impl Leaf {
 pub(crate) enum NodeInfo<'a, T> {
     Branch(&'a BranchIndex<T>, Branch<T>),
     Leaf(&'a LeafIndex<T>, Leaf),
-    Purged,
+    PurgedBranch(&'a BranchIndex<T>),
+    PurgedLeaf(&'a LeafIndex<T>),
 }
 
 impl Leaf {
@@ -406,6 +407,8 @@ struct IndexWC<'a, T> {
     value_bytes: u64,
     // block is sealed
     sealed: bool,
+    // block is purged
+    purged: bool,
     // extra data
     data: &'a T,
 }
@@ -415,6 +418,7 @@ impl<'a, T> From<&'a Index<T>> for IndexWC<'a, T> {
         match value {
             Index::Branch(i) => Self {
                 sealed: i.sealed,
+                purged: i.cid.is_none(),
                 data: &i.summaries,
                 value_bytes: i.value_bytes,
                 count: Some(i.count),
@@ -423,6 +427,7 @@ impl<'a, T> From<&'a Index<T>> for IndexWC<'a, T> {
             },
             Index::Leaf(i) => Self {
                 sealed: i.sealed,
+                purged: i.cid.is_none(),
                 data: &i.keys,
                 value_bytes: i.value_bytes,
                 count: None,
@@ -437,6 +442,8 @@ impl<'a, T> From<&'a Index<T>> for IndexWC<'a, T> {
 struct IndexRC<T> {
     // block is sealed
     sealed: bool,
+    // block is purged
+    purged: bool,
     // extra data
     data: T,
     // number of events, for branches
@@ -451,6 +458,11 @@ struct IndexRC<T> {
 
 impl<T> IndexRC<T> {
     fn to_index(self, cids: &mut VecDeque<Cid>) -> Index<T> {
+        let cid = if !self.purged {
+            cids.pop_front()
+        } else {
+            None
+        };
         if let (Some(level), Some(count), Some(key_bytes)) =
             (self.level, self.count, self.key_bytes)
         {
@@ -461,7 +473,7 @@ impl<T> IndexRC<T> {
                 key_bytes,
                 count,
                 level,
-                cid: cids.pop_front(),
+                cid,
             }
             .into()
         } else {
@@ -469,7 +481,7 @@ impl<T> IndexRC<T> {
                 keys: self.data,
                 sealed: self.sealed,
                 value_bytes: self.value_bytes,
-                cid: cids.pop_front(),
+                cid,
             }
             .into()
         }

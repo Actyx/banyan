@@ -579,14 +579,14 @@ where
                 if let Some(branch) = self.load_branch_cached(index).await? {
                     NodeInfo::Branch(index, branch)
                 } else {
-                    NodeInfo::Purged
+                    NodeInfo::PurgedBranch(index)
                 }
             }
             Index::Leaf(index) => {
                 if let Some(leaf) = self.load_leaf_cached(index).await? {
                     NodeInfo::Leaf(index, leaf)
                 } else {
-                    NodeInfo::Purged
+                    NodeInfo::PurgedLeaf(index)
                 }
             }
         })
@@ -599,14 +599,14 @@ where
                 if let Some(branch) = self.load_branch_cached(index).await? {
                     NodeInfo::Branch(index, branch)
                 } else {
-                    NodeInfo::Purged
+                    NodeInfo::PurgedBranch(index)
                 }
             }
             Index::Leaf(index) => {
                 if let Some(leaf) = self.load_leaf(index).await? {
                     NodeInfo::Leaf(index, leaf)
                 } else {
-                    NodeInfo::Purged
+                    NodeInfo::PurgedLeaf(index)
                 }
             }
         })
@@ -653,7 +653,7 @@ where
                     .await?
                     .into())
             }
-            NodeInfo::Purged => Ok(index.clone()),
+            NodeInfo::PurgedBranch(_) | NodeInfo::PurgedLeaf(_) => Ok(index.clone()),
         }
     }
 
@@ -687,7 +687,7 @@ where
                 let k = index.keys.get(offset).unwrap();
                 Ok((k, v))
             }
-            NodeInfo::Purged => {
+            NodeInfo::PurgedBranch(_) | NodeInfo::PurgedLeaf(_) => {
                 Err(anyhow!("item at index no longer available: {}", offset).into())
             }
         }
@@ -726,7 +726,7 @@ where
                         .right_stream()
                         .left_stream()
                 }
-                NodeInfo::Purged => stream::empty().right_stream(),
+                NodeInfo::PurgedBranch(_) | NodeInfo::PurgedLeaf(_) => stream::empty().right_stream(),
             })
         }
         .try_flatten_stream();
@@ -770,7 +770,7 @@ where
                         .right_stream()
                         .left_stream()
                 }
-                NodeInfo::Purged => stream::empty().right_stream(),
+                NodeInfo::PurgedBranch(_) | NodeInfo::PurgedLeaf(_) => stream::empty().right_stream(),
             })
         }
         .try_flatten_stream();
@@ -806,8 +806,20 @@ where
                     self.dumpr(x, &prefix).await?;
                 }
             }
-            NodeInfo::Purged => {
-                println!("{}Purged", prefix);
+            NodeInfo::PurgedBranch(index) => {
+                println!(
+                    "{}PurgedBranch(count={}, key_bytes={}, value_bytes={}, sealed={})",
+                    prefix, index.count, index.key_bytes, index.value_bytes, index.sealed,
+                );
+            }
+            NodeInfo::PurgedLeaf(index) => {
+                println!(
+                    "{}PurgedLeaf(count={}, key_bytes={}, sealed={})",
+                    prefix,
+                    index.keys.count(),
+                    index.value_bytes,
+                    index.sealed,
+                );
             }
         };
         Ok(())
@@ -856,7 +868,12 @@ where
                 let branch_sealed = self.branch_sealed(&branch.children, index.level);
                 check!(index.sealed == branch_sealed);
             }
-            NodeInfo::Purged => {}
+            NodeInfo::PurgedBranch(_) => {
+                // not possible to check invariants since the data to compare to is gone
+            }
+            NodeInfo::PurgedLeaf(_) => {
+                // not possible to check invariants since the data to compare to is gone
+            }
         };
         Ok(())
     }
