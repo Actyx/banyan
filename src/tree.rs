@@ -42,6 +42,8 @@ pub struct Forest<T: TreeTypes> {
 pub struct Tree<T: TreeTypes, V> {
     root: Option<Index<T::Seq>>,
     forest: Arc<Forest<T>>,
+    key_key: salsa20::Key,
+    value_key: salsa20::Key,
     _t: PhantomData<V>,
 }
 
@@ -121,6 +123,8 @@ impl<V, T: TreeTypes> Clone for Tree<T, V> {
         Self {
             root: self.root.clone(),
             forest: self.forest.clone(),
+            key_key: self.key_key.clone(),
+            value_key: self.value_key.clone(),
             _t: PhantomData,
         }
     }
@@ -130,8 +134,13 @@ impl<V: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static, T:
     Tree<T, V>
 {
     pub async fn new(cid: Cid, forest: Arc<Forest<T>>) -> Result<Self> {
+        // todo: key management
+        let key_key = [0u8; 32].into();
+        let value_key = [0u8; 32].into();
         Ok(Self {
             root: Some(forest.load_branch_from_cid(cid).await?),
+            key_key,
+            value_key,
             forest,
             _t: PhantomData,
         })
@@ -139,6 +148,8 @@ impl<V: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static, T:
     pub fn empty(forest: Arc<Forest<T>>) -> Self {
         Self {
             root: None,
+            key_key: forest.random_key(),
+            value_key: forest.random_key(),
             forest,
             _t: PhantomData,
         }
@@ -156,6 +167,8 @@ impl<V: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static, T:
         Tree {
             root,
             forest: self.forest.clone(),
+            key_key: self.key_key.clone(),
+            value_key: self.value_key.clone(),
             _t: PhantomData,
         }
     }
@@ -520,7 +533,7 @@ where
             Ok(self
                 .create_leaf(
                     T::Seq::empty(),
-                    ZstdArrayBuilder::new(self.config.zstd_level)?,
+                    ZstdArrayBuilder::new(self.random_nonce(), self.config.zstd_level)?,
                     from,
                 )
                 .await?
@@ -606,6 +619,17 @@ where
         } else {
             Ok(None)
         }
+    }
+
+    fn random_key(&self) -> salsa20::Key {
+        // todo: not very random...
+        let slice = [0u8; 32];
+        slice.into()
+    }
+
+    fn random_nonce(&self) -> [u8; 24] {
+        // todo: not very random...
+        [0u8; 24]
     }
 
     /// load a node, returning a structure containing the index and value for convenient matching

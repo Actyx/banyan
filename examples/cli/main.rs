@@ -14,8 +14,8 @@ use tracing_subscriber;
 mod ipfs;
 
 use banyan::index::*;
-use banyan::{ipfs::Cid, tree::*};
 use banyan::tree::OffsetQuery;
+use banyan::{ipfs::Cid, tree::*};
 use ipfs::IpfsStore;
 
 use bitvec::prelude::*;

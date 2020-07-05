@@ -1,4 +1,5 @@
 //! This module provides some utilities to work with zstd compressed arrays of cbor values
+use anyhow::anyhow;
 use anyhow::Result;
 use bitvec::prelude::*;
 use serde::{
@@ -6,6 +7,7 @@ use serde::{
     Deserialize, Serialize,
 };
 use std::{
+    convert::TryInto,
     io::{prelude::*, Cursor, Write},
     sync::Arc,
 };
@@ -14,6 +16,8 @@ use zstd::stream::{
     raw::{Decoder as ZDecoder, Operation, OutBuffer},
     write::Encoder,
 };
+
+pub type Nonce = [u8; 24];
 
 /// An array of zstd compressed data
 pub struct ZstdArray {
@@ -42,8 +46,12 @@ pub struct ZstdArrayRef<'a> {
 }
 
 impl<'a> ZstdArrayRef<'a> {
-    pub fn new(data: &'a [u8]) -> Self {
-        Self { data }
+    pub fn new(data: &'a [u8]) -> Result<Self> {
+        if data.len() < 24 {
+            Err(anyhow!("yadda yadda yadda nonce"))
+        } else {
+            Ok(Self { data })
+        }
     }
 
     /// Get the compressed data
@@ -73,9 +81,10 @@ impl<'a> ZstdArrayRef<'a> {
 
     #[allow(dead_code)]
     fn decompress_into_lowlevel(&self, mut uncompressed: Vec<u8>) -> Result<Vec<u8>> {
+        let data = &self.data[24..];
         // let mut cipher = (self.mk_cipher)();
         // cipher.apply_keystream(&mut data);
-        let mut src = zstd::stream::raw::InBuffer::around(self.data);
+        let mut src = zstd::stream::raw::InBuffer::around(data);
         // todo: thread local buffers that grow dynamically
         let mut tmp = [0u8; 4096 * 100];
         let mut decompressor = ZDecoder::new()?;
@@ -196,20 +205,29 @@ impl std::fmt::Debug for ZstdArrayBuilder {
 
 impl ZstdArrayBuilder {
     pub fn init(data: &[u8], level: i32) -> Result<Self> {
-        let decompressed = ZstdArrayRef::new(data).decompress_into(Vec::new())?;
-        let res = Self::new(level)?;
-        let res = res.push_bytes(&decompressed)?;
-        Ok(res)
+        if data.len() >= 24 {
+            let decompressed = ZstdArrayRef::new(data)?.decompress_into(Vec::new())?;
+            let nonce = data[..24].try_into().unwrap();
+            let res = Self::new(nonce, level)?;
+            let res = res.push_bytes(&decompressed)?;
+            Ok(res)
+        } else {
+            Err(anyhow!("xsalsa20 nonce missing"))
+        }
     }
 
-    pub fn new(level: i32) -> std::io::Result<Self> {
+    pub fn new(nonce: Nonce, level: i32) -> std::io::Result<Self> {
+        let mut writer = Vec::new();
+        writer.extend_from_slice(nonce.as_ref());
         Ok(Self {
-            encoder: Encoder::new(Vec::new(), level)?,
+            encoder: Encoder::new(writer, level)?,
         })
     }
 
     pub fn as_ref<'a>(&'a self) -> ZstdArrayRef<'a> {
-        ZstdArrayRef::new(self.encoder.get_ref().as_ref())
+        ZstdArrayRef {
+            data: self.encoder.get_ref().as_ref(),
+        }
     }
 
     pub fn compressed(&self) -> &[u8] {
@@ -275,7 +293,8 @@ mod tests {
 
     #[test]
     fn incremental_build() -> Result<()> {
-        let mut w = ZstdArrayBuilder::new(10)?;
+        let nonce = [0u8; 24];
+        let mut w = ZstdArrayBuilder::new(nonce, 10)?;
         let mut expected: Vec<u64> = Vec::new();
         for i in 0u64..10 {
             w = w.push(&i)?;
@@ -293,7 +312,8 @@ mod tests {
 
     #[test]
     fn read_builder() -> Result<()> {
-        let mut w = ZstdArrayBuilder::new(10)?;
+        let nonce = [0u8; 24];
+        let mut w = ZstdArrayBuilder::new(nonce, 10)?;
         let mut expected: Vec<u64> = Vec::new();
         for i in 0u64..100 {
             w = w.push(&i)?;

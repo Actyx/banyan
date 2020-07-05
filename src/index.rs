@@ -1,6 +1,6 @@
 //! The index data structures for the tree
 use super::ipfs::Cid;
-use super::zstd_array::{ZstdArrayBuilder, ZstdArray, ZstdArrayRef};
+use super::zstd_array::{ZstdArray, ZstdArrayBuilder, ZstdArrayRef};
 use anyhow::{anyhow, Result};
 use bitvec::prelude::*;
 use derive_more::From;
@@ -250,8 +250,10 @@ impl Leaf {
     }
 
     /// Create a leaf containing a single item, with the given compression level
-    pub fn single<V: Serialize>(value: &V, level: i32) -> Result<Self> {
-        Ok(Leaf::from_builder(ZstdArrayBuilder::new(level)?.push(value)?)?)
+    pub fn single<V: Serialize>(nonce: Nonce, value: &V, level: i32) -> Result<Self> {
+        Ok(Leaf::from_builder(
+            ZstdArrayBuilder::new(nonce, level)?.push(value)?,
+        )?)
     }
 
     /// Push an item. The compression level will only be used if this leaf is in readonly mode, otherwise
@@ -262,9 +264,7 @@ impl Leaf {
         compressed_size: u64,
         level: i32,
     ) -> Result<Self> {
-        Leaf::from_builder(
-            self.builder(level)?.fill(from, compressed_size)?,
-        )
+        Leaf::from_builder(self.builder(level)?.fill(from, compressed_size)?)
     }
 
     pub fn as_ref(&self) -> ZstdArrayRef {
@@ -374,6 +374,7 @@ impl<T> IndexRC<T> {
     }
 }
 
+use crate::zstd_array::Nonce;
 use std::{
     collections::VecDeque,
     io::{Cursor, Write},
