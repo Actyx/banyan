@@ -609,32 +609,6 @@ where
     }
 
     /// load a node, returning a structure containing the index and value for convenient matching
-    ///
-    /// this is identical to load_node, except that it will also try to find leaf nodes in the cache.
-    /// readonly leaf nodes are too cheap to bother caching them, but writable leaf nodes are quite expensive and therefore
-    /// worthwhile to cache.
-    ///
-    /// Branch nodes are expensive to decode, so they will always be cached even for reading.
-    async fn load_node_write<'a>(&self, index: &'a Index<T::Seq>) -> Result<NodeInfo<'a, T::Seq>> {
-        Ok(match index {
-            Index::Branch(index) => {
-                if let Some(branch) = self.load_branch_cached(index).await? {
-                    NodeInfo::Branch(index, branch)
-                } else {
-                    NodeInfo::PurgedBranch(index)
-                }
-            }
-            Index::Leaf(index) => {
-                if let Some(leaf) = self.load_leaf_cached(index).await? {
-                    NodeInfo::Leaf(index, leaf)
-                } else {
-                    NodeInfo::PurgedLeaf(index)
-                }
-            }
-        })
-    }
-
-    /// load a node, returning a structure containing the index and value for convenient matching
     async fn load_node<'a>(&self, index: &'a Index<T::Seq>) -> Result<NodeInfo<'a, T::Seq>> {
         Ok(match index {
             Index::Branch(index) => {
@@ -677,7 +651,7 @@ where
         if index.sealed() || from.peek().is_none() {
             return Ok(index.clone());
         }
-        match self.load_node_write(index).await? {
+        match self.load_node(index).await? {
             NodeInfo::Leaf(index, leaf) => {
                 info!("extending existing leaf");
                 let data = index.keys.clone();

@@ -1,6 +1,6 @@
 //! The index data structures for the tree
 use super::ipfs::Cid;
-use super::zstd_array::ZstdArrayBuilder;
+use super::zstd_array::{ZstdArrayBuilder, ZstdArray, ZstdArrayRef};
 use anyhow::{anyhow, Result};
 use bitvec::prelude::*;
 use derive_more::From;
@@ -157,8 +157,6 @@ pub enum Index<T> {
     Leaf(LeafIndex<T>),
     Branch(BranchIndex<T>),
 }
-
-use crate::zstd_array::{ZstdArray, ZstdArrayRef};
 
 impl<T: CompactSeq> Index<T> {
     pub fn data(&self) -> &T {
