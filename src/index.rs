@@ -151,90 +151,6 @@ impl<T: CompactSeq> BranchIndex<T> {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
-struct IndexW<'a, T> {
-    // number of events
-    count: Option<u64>,
-    // level of the tree node
-    level: Option<u32>,
-    // block is sealed
-    sealed: bool,
-    // link to the branch node
-    cid: Option<&'a Cid>,
-    // extra data
-    data: &'a T,
-    value_bytes: u64,
-    key_bytes: Option<u64>,
-}
-
-impl<'a, T> From<&'a Index<T>> for IndexW<'a, T> {
-    fn from(value: &'a Index<T>) -> Self {
-        match value {
-            Index::Branch(i) => Self {
-                sealed: i.sealed,
-                value_bytes: i.value_bytes,
-                cid: i.cid.as_ref(),
-                data: &i.summaries,
-                count: Some(i.count),
-                level: Some(i.level),
-                key_bytes: Some(i.key_bytes),
-            },
-            Index::Leaf(i) => Self {
-                sealed: i.sealed,
-                value_bytes: i.value_bytes,
-                cid: i.cid.as_ref(),
-                data: &i.keys,
-                count: None,
-                level: None,
-                key_bytes: None,
-            },
-        }
-    }
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct IndexR<T> {
-    // number of events
-    count: Option<u64>,
-    // level of the tree node
-    level: Option<u32>,
-    // value bytes
-    key_bytes: Option<u64>,
-    // block is sealed
-    sealed: bool,
-    // link to the branch node
-    cid: Option<Cid>,
-    // extra data
-    data: T,
-    // value bytes
-    value_bytes: u64,
-}
-
-impl<T> From<IndexR<T>> for Index<T> {
-    fn from(v: IndexR<T>) -> Self {
-        if let (Some(level), Some(count), Some(key_bytes)) = (v.level, v.count, v.key_bytes) {
-            BranchIndex {
-                cid: v.cid,
-                summaries: v.data,
-                sealed: v.sealed,
-                value_bytes: v.value_bytes,
-                key_bytes,
-                count,
-                level,
-            }
-            .into()
-        } else {
-            LeafIndex {
-                cid: v.cid,
-                keys: v.data,
-                sealed: v.sealed,
-                value_bytes: v.value_bytes,
-            }
-            .into()
-        }
-    }
-}
-
 /// index
 #[derive(Debug, Clone, From)]
 pub enum Index<T> {
@@ -243,19 +159,6 @@ pub enum Index<T> {
 }
 
 use crate::zstd_array::{ZstdArray, ZstdArrayRef};
-use std::result;
-
-impl<T: Serialize> Serialize for Index<T> {
-    fn serialize<S: Serializer>(&self, serializer: S) -> result::Result<S::Ok, S::Error> {
-        IndexW::<T>::from(self).serialize(serializer)
-    }
-}
-
-impl<'de, T: DeserializeOwned> Deserialize<'de> for Index<T> {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> result::Result<Index<T>, D::Error> {
-        IndexR::<T>::deserialize(deserializer).map(Into::into)
-    }
-}
 
 impl<T: CompactSeq> Index<T> {
     pub fn data(&self) -> &T {

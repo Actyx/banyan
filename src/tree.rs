@@ -331,7 +331,7 @@ impl<V: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static, T:
 
     /// number of elements in the tree
     pub fn count(&self) -> u64 {
-        self.root.as_ref().map(|x| x.count()).unwrap_or(0)
+        self.root.as_ref().map(|x| x.count()).unwrap_or_default()
     }
 }
 
