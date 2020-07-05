@@ -75,26 +75,35 @@ pub struct Config {
     /// note that this might overshoot due to the fact that the zstd encoder has internal state, and it is not possible
     /// to flush after each value without losing compression efficiency. The overshoot is bounded though.
     pub target_leaf_size: u64,
+    /// salsa20 key to decrypt index nodes
+    pub index_key: salsa20::Key,
+    /// salsa20 key to decrypt value nodes
+    pub value_key: salsa20::Key,
 }
 
 impl Config {
+    /// config that will produce complex tree structures with few values
+    ///
+    /// keys are hardcoded to 0
     pub fn debug() -> Self {
         Self {
             target_leaf_size: 10000,
             max_leaf_count: 10,
             max_branch_count: 4,
             zstd_level: 10,
+            index_key: salsa20::Key::from([0u8; 32]),
+            value_key: salsa20::Key::from([0u8; 32]),
         }
     }
-}
-
-impl Default for Config {
-    fn default() -> Self {
+    /// reasonable default config from index key and value key
+    pub fn from_keys(index_key: salsa20::Key, value_key: salsa20::Key) -> Self {
         Self {
             target_leaf_size: 1 << 14,
             max_leaf_count: 1 << 14,
             max_branch_count: 32,
             zstd_level: 10,
+            index_key,
+            value_key,
         }
     }
 }
@@ -570,13 +579,8 @@ where
     /// load a branch given a branch index
     async fn load_branch(&self, index: &BranchIndex<T::Seq>) -> Result<Option<Branch<T::Seq>>> {
         Ok(if let Some(cid) = &index.cid {
-            let mut bytes = self.store.get(&cid).await?.to_vec();
-            if bytes.len() < 24 {
-                return Err(anyhow!("nonce missing"));
-            }
-            let (nonce, bytes) = bytes.split_at_mut(24);
-            XSalsa20::new(&self.index_key.into(), (&*nonce).into()).apply_keystream(bytes);
-            let children: Vec<_> = deserialize_compressed(&bytes)?;
+            let bytes = self.store.get(&cid).await?;
+            let children: Vec<_> = deserialize_compressed(&self.index_key, &bytes)?;
             // let children = CborZstdArrayRef::new(bytes.as_ref()).items()?;
             Some(Branch::<T::Seq>::new(children))
         } else {
@@ -587,7 +591,7 @@ where
     async fn load_branch_from_cid(&self, cid: Cid) -> Result<Index<T::Seq>> {
         assert_eq!(cid.codec(), cid::Codec::DagCBOR);
         let bytes = self.store.get(&cid).await?;
-        let children: Vec<Index<T::Seq>> = deserialize_compressed(&bytes)?;
+        let children: Vec<Index<T::Seq>> = deserialize_compressed(&self.index_key, &bytes)?;
         let count = children.iter().map(|x| x.count()).sum();
         let level = children.iter().map(|x| x.level()).max().unwrap() + 1;
         let value_bytes = children.iter().map(|x| x.value_bytes()).sum();
@@ -824,11 +828,14 @@ where
     }
 
     async fn persist_branch(&self, children: &Vec<Index<T::Seq>>) -> Result<(Cid, u64)> {
-        let mut cbor = Vec::with_capacity(24);
-        let nonce = self.random_nonce();
-        cbor.extend_from_slice(&nonce);
-        serialize_compressed(&children, self.config.zstd_level, &mut cbor)?;
-        XSalsa20::new(&self.index_key.into(), &nonce.into()).apply_keystream(&mut cbor[24..]);
+        let mut cbor = Vec::new();
+        serialize_compressed(
+            &self.index_key,
+            &self.random_nonce(),
+            &children,
+            self.config.zstd_level,
+            &mut cbor,
+        )?;
         Ok((
             self.store.put(&cbor, cid::Codec::DagCBOR).await?,
             cbor.len() as u64,
@@ -914,9 +921,8 @@ where
                         }
                         // rewrite the node and update the cid if children have changed
                         if changed {
-                            let mut cbor = Vec::new();
-                            serialize_compressed(&children, self.config.zstd_level, &mut cbor)?;
-                            index.cid = Some(self.store.put(&cbor, cid::Codec::DagCBOR).await?);
+                            let (cid, _) = self.persist_branch(&children).await?;
+                            index.cid = Some(cid);
                         }
                     }
                     Ok(None) => {
@@ -1098,8 +1104,8 @@ where
     pub fn new(store: ArcStore, config: Config) -> Self {
         let branch_cache = RwLock::new(lru::LruCache::<Cid, Branch<T::Seq>>::new(1000));
         let leaf_cache = RwLock::new(lru::LruCache::<Cid, Leaf>::new(1000));
-        let index_key = [0u8; 32].into();
-        let value_key = [0u8; 32].into();
+        let index_key = config.index_key;
+        let value_key = config.value_key;
         Self {
             store,
             config,

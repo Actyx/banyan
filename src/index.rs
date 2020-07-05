@@ -4,6 +4,10 @@ use super::zstd_array::{ZstdArray, ZstdArrayBuilder, ZstdArrayRef};
 use anyhow::{anyhow, Result};
 use bitvec::prelude::*;
 use derive_more::From;
+use salsa20::{
+    stream_cipher::{NewStreamCipher, SyncStreamCipher},
+    XSalsa20,
+};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{convert::From, sync::Arc};
 
@@ -383,12 +387,15 @@ const CBOR_ARRAY_START: u8 = (4 << 5) | 31;
 const CBOR_BREAK: u8 = 255;
 
 pub fn serialize_compressed<T: Serialize + CompactSeq>(
+    key: &salsa20::Key,
+    nonce: &salsa20::XNonce,
     items: &[Index<T>],
     level: i32,
     into: &mut Vec<u8>,
 ) -> Result<()> {
     let mut cids: Vec<&Cid> = Vec::new();
     let mut compressed: Vec<u8> = Vec::new();
+    compressed.extend_from_slice(&nonce);
     let mut writer = zstd::stream::write::Encoder::new(compressed.by_ref(), level)?;
     writer.write_all(&[CBOR_ARRAY_START])?;
     for item in items.iter() {
@@ -399,15 +406,24 @@ pub fn serialize_compressed<T: Serialize + CompactSeq>(
     }
     writer.write_all(&[CBOR_BREAK])?;
     writer.finish()?;
+    salsa20::XSalsa20::new(key, nonce).apply_keystream(&mut compressed[24..]);
     Ok(serde_cbor::to_writer(
         into,
         &(cids, serde_cbor::Value::Bytes(compressed)),
     )?)
 }
 
-pub fn deserialize_compressed<T: DeserializeOwned>(ipld: &[u8]) -> Result<Vec<Index<T>>> {
+pub fn deserialize_compressed<T: DeserializeOwned>(
+    key: &salsa20::Key,
+    ipld: &[u8],
+) -> Result<Vec<Index<T>>> {
     let (mut cids, compressed): (VecDeque<Cid>, serde_cbor::Value) = serde_cbor::from_slice(ipld)?;
-    if let serde_cbor::Value::Bytes(compressed) = compressed {
+    if let serde_cbor::Value::Bytes(mut compressed) = compressed {
+        if compressed.len() < 24 {
+            return Err(anyhow!("nonce missing"));
+        }
+        let (nonce, compressed) = compressed.split_at_mut(24);
+        XSalsa20::new(key, (&*nonce).into()).apply_keystream(compressed);
         let reader = zstd::stream::read::Decoder::new(Cursor::new(compressed))?;
 
         let data: Vec<IndexRC<T>> = serde_cbor::from_reader(reader)?;
