@@ -28,14 +28,6 @@ impl Arbitrary for Key {
     }
 }
 
-fn reverse<T: Clone>(xs: &[T]) -> Vec<T> {
-    let mut rev = vec![];
-    for x in xs {
-        rev.insert(0, x.clone())
-    }
-    rev
-}
-
 async fn create_test_tree(
     xs: impl IntoIterator<Item = (Key, u64)>,
 ) -> anyhow::Result<Tree<TT, u64>> {

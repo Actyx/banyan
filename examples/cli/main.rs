@@ -15,6 +15,7 @@ mod ipfs;
 
 use banyan::index::*;
 use banyan::{ipfs::Cid, tree::*};
+use banyan::tree::OffsetQuery;
 use ipfs::IpfsStore;
 
 use bitvec::prelude::*;
@@ -280,9 +281,26 @@ fn app() -> clap::App<'static, 'static> {
                 ),
         )
         .subcommand(
-            SubCommand::with_name("balance")
-                .about("Balance a tree")
+            SubCommand::with_name("pack")
+                .about("Pack a tree")
                 .arg(root_arg()),
+        )
+        .subcommand(
+            SubCommand::with_name("repair")
+                .about("Repair a tree")
+                .arg(root_arg()),
+        )
+        .subcommand(
+            SubCommand::with_name("forget")
+                .about("Forget data from a tree")
+                .arg(root_arg())
+                .arg(
+                    Arg::with_name("before")
+                        .long("before")
+                        .required(true)
+                        .takes_value(true)
+                        .help("The offset before which to forget data"),
+                ),
         )
         .subcommand(SubCommand::with_name("demo").about("Do some stuff"))
 }
@@ -403,7 +421,7 @@ async fn main() -> Result<()> {
         tree.dump().await?;
         println!("{:?}", tree);
         println!("{}", tree);
-    } else if let Some(matches) = matches.subcommand_matches("balance") {
+    } else if let Some(matches) = matches.subcommand_matches("pack") {
         let root = Cid::from_str(
             matches
                 .value_of("root")
@@ -436,6 +454,30 @@ async fn main() -> Result<()> {
                 println!("{:?}", v);
             }
         }
+    } else if let Some(matches) = matches.subcommand_matches("repair") {
+        let root = Cid::from_str(
+            matches
+                .value_of("root")
+                .ok_or(anyhow!("root must be provided"))?,
+        )?;
+        let mut tree = Tree::<TT, serde_cbor::Value>::new(root, forest).await?;
+        tree.repair().await?;
+        tree.dump().await?;
+        println!("{:?}", tree);
+    } else if let Some(matches) = matches.subcommand_matches("forget") {
+        let root = Cid::from_str(
+            matches
+                .value_of("root")
+                .ok_or(anyhow!("root must be provided"))?,
+        )?;
+        let offset: u64 = matches
+            .value_of("before")
+            .ok_or(anyhow!("required arg before not provided"))?
+            .parse()?;
+        let mut tree = Tree::<TT, serde_cbor::Value>::new(root, forest).await?;
+        tree.forget_except(&OffsetQuery::new(offset)).await?;
+        tree.dump().await?;
+        println!("{:?}", tree);
     } else {
         app().print_long_help()?;
         println!();

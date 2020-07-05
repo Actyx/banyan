@@ -335,7 +335,7 @@ impl<V: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static, T:
     }
 }
 
-pub(crate) struct OffsetQuery {
+pub struct OffsetQuery {
     from: u64,
 }
 
