@@ -250,9 +250,9 @@ impl Leaf {
     }
 
     /// Create a leaf containing a single item, with the given compression level
-    pub fn single<V: Serialize>(nonce: Nonce, value: &V, level: i32) -> Result<Self> {
+    pub fn single<V: Serialize>(value: &V, level: i32) -> Result<Self> {
         Ok(Leaf::from_builder(
-            ZstdArrayBuilder::new(nonce, level)?.push(value)?,
+            ZstdArrayBuilder::new(level)?.push(value)?,
         )?)
     }
 
@@ -374,7 +374,6 @@ impl<T> IndexRC<T> {
     }
 }
 
-use crate::zstd_array::Nonce;
 use std::{
     collections::VecDeque,
     io::{Cursor, Write},
@@ -386,7 +385,8 @@ const CBOR_BREAK: u8 = 255;
 pub fn serialize_compressed<T: Serialize + CompactSeq>(
     items: &[Index<T>],
     level: i32,
-) -> Result<Vec<u8>> {
+    into: &mut Vec<u8>,
+) -> Result<()> {
     let mut cids: Vec<&Cid> = Vec::new();
     let mut compressed: Vec<u8> = Vec::new();
     let mut writer = zstd::stream::write::Encoder::new(compressed.by_ref(), level)?;
@@ -399,8 +399,10 @@ pub fn serialize_compressed<T: Serialize + CompactSeq>(
     }
     writer.write_all(&[CBOR_BREAK])?;
     writer.finish()?;
-    let ipld = serde_cbor::to_vec(&(cids, serde_cbor::Value::Bytes(compressed)))?;
-    Ok(ipld)
+    Ok(serde_cbor::to_writer(
+        into,
+        &(cids, serde_cbor::Value::Bytes(compressed)),
+    )?)
 }
 
 pub fn deserialize_compressed<T: DeserializeOwned>(ipld: &[u8]) -> Result<Vec<Index<T>>> {

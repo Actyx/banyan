@@ -5,6 +5,11 @@ use anyhow::{anyhow, Result};
 use bitvec::prelude::*;
 use future::LocalBoxFuture;
 use futures::{prelude::*, stream::LocalBoxStream};
+use salsa20::{
+    stream_cipher,
+    stream_cipher::{NewStreamCipher, SyncStreamCipher},
+    Salsa20, XSalsa20,
+};
 use serde::{de::DeserializeOwned, Serialize};
 use std::fmt::Debug;
 use std::{
@@ -33,6 +38,8 @@ pub struct Forest<T: TreeTypes> {
     config: Config,
     branch_cache: RwLock<lru::LruCache<Cid, Branch<T::Seq>>>,
     leaf_cache: RwLock<lru::LruCache<Cid, Leaf>>,
+    index_key: salsa20::Key,
+    value_key: salsa20::Key,
     _tt: PhantomData<T>,
 }
 
@@ -42,8 +49,6 @@ pub struct Forest<T: TreeTypes> {
 pub struct Tree<T: TreeTypes, V> {
     root: Option<Index<T::Seq>>,
     forest: Arc<Forest<T>>,
-    key_key: salsa20::Key,
-    value_key: salsa20::Key,
     _t: PhantomData<V>,
 }
 
@@ -51,9 +56,9 @@ pub struct Tree<T: TreeTypes, V> {
 ///
 /// Queries work on compact value sequences instead of individual values for efficiency.
 pub trait Query<T: TreeTypes> {
-    /// an iterator returning `x.data.count()` elements, where each value is a bool indicating if the query *does* match
+    /// a bitvec with `x.data.count()` elements, where each value is a bool indicating if the query *does* match
     fn containing(&self, offset: u64, x: &LeafIndex<T::Seq>) -> BitVec;
-    /// an iterator returning `x.data.count()` elements, where each value is a bool indicating if the query *can* match
+    /// a bitvec with `x.data.count()` elements, where each value is a bool indicating if the query *can* match
     fn intersecting(&self, offset: u64, x: &BranchIndex<T::Seq>) -> BitVec;
 }
 
@@ -123,8 +128,6 @@ impl<V, T: TreeTypes> Clone for Tree<T, V> {
         Self {
             root: self.root.clone(),
             forest: self.forest.clone(),
-            key_key: self.key_key.clone(),
-            value_key: self.value_key.clone(),
             _t: PhantomData,
         }
     }
@@ -134,13 +137,8 @@ impl<V: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static, T:
     Tree<T, V>
 {
     pub async fn new(cid: Cid, forest: Arc<Forest<T>>) -> Result<Self> {
-        // todo: key management
-        let key_key = [0u8; 32].into();
-        let value_key = [0u8; 32].into();
         Ok(Self {
             root: Some(forest.load_branch_from_cid(cid).await?),
-            key_key,
-            value_key,
             forest,
             _t: PhantomData,
         })
@@ -148,8 +146,6 @@ impl<V: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static, T:
     pub fn empty(forest: Arc<Forest<T>>) -> Self {
         Self {
             root: None,
-            key_key: forest.random_key(),
-            value_key: forest.random_key(),
             forest,
             _t: PhantomData,
         }
@@ -167,8 +163,6 @@ impl<V: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static, T:
         Tree {
             root,
             forest: self.forest.clone(),
-            key_key: self.key_key.clone(),
-            value_key: self.value_key.clone(),
             _t: PhantomData,
         }
     }
@@ -408,25 +402,23 @@ where
     /// load a leaf given a leaf index
     async fn load_leaf(&self, index: &LeafIndex<T::Seq>) -> Result<Option<Leaf>> {
         Ok(if let Some(cid) = &index.cid {
-            Some(Leaf::new(self.store.get(cid).await?))
+            let data = &self.store.get(cid).await?;
+            if data.len() < 24 {
+                return Err(anyhow!("leaf data without nonce"));
+            }
+            let (nonce, data) = data.split_at(24);
+            let mut data = data.to_vec();
+            XSalsa20::new(&self.value_key.into(), nonce.into()).apply_keystream(&mut data);
+            // cipher.apply_keystream(data)
+            Some(Leaf::new(data.into()))
         } else {
             None
         })
     }
 
-    /// load a leaf from a cache
-    async fn load_leaf_cached(&self, index: &LeafIndex<T::Seq>) -> Result<Option<Leaf>> {
-        if let Some(cid) = &index.cid {
-            match self.leaf_cache.write().unwrap().pop(cid) {
-                Some(leaf) => Ok(Some(leaf)),
-                None => self.load_leaf(index).await,
-            }
-        } else {
-            Ok(None)
-        }
-    }
-
     /// Creates a leaf from a sequence that either contains all items from the sequence, or is full
+    ///
+    /// The result is the index of the leaf
     async fn create_leaf<V: Serialize + Debug>(
         &self,
         mut keys: T::Seq,
@@ -448,10 +440,14 @@ where
             self.config.target_leaf_size,
         )?;
         let leaf = Leaf::from_builder(builder)?;
-        let cid = self
-            .store
-            .put(leaf.as_ref().compressed(), cid::Codec::Raw)
-            .await?;
+        // encrypt leaf
+        let mut tmp: Vec<u8> = Vec::with_capacity(leaf.as_ref().compressed().len() + 24);
+        let nonce = self.random_nonce();
+        tmp.extend(nonce.as_slice());
+        tmp.extend(leaf.as_ref().compressed());
+        XSalsa20::new(&self.value_key.into(), &nonce.into()).apply_keystream(&mut tmp[24..]);
+        // store leaf
+        let cid = self.store.put(&tmp, cid::Codec::Raw).await?;
         let index = LeafIndex {
             cid: Some(cid),
             value_bytes: leaf.as_ref().compressed().len() as u64,
@@ -497,11 +493,10 @@ where
             summaries.push(summary);
             children.push(child);
         }
-        let cbor = serialize_compressed(&children, self.config.zstd_level)?;
-        let cid = self.store.put(&cbor, cid::Codec::DagCBOR).await?;
+        let (cid, encoded_children_len) = self.persist_branch(&children).await?;
         let count = children.iter().map(|x| x.count()).sum();
         let value_bytes = children.iter().map(|x| x.value_bytes()).sum();
-        let key_bytes = children.iter().map(|x| x.key_bytes()).sum::<u64>() + cbor.len() as u64;
+        let key_bytes = children.iter().map(|x| x.key_bytes()).sum::<u64>() + encoded_children_len;
         let sealed = self.branch_sealed(&children, level);
         let summaries: T::Seq = T::Seq::new(summaries.into_iter())?;
         let index = BranchIndex {
@@ -533,7 +528,7 @@ where
             Ok(self
                 .create_leaf(
                     T::Seq::empty(),
-                    ZstdArrayBuilder::new(self.random_nonce(), self.config.zstd_level)?,
+                    ZstdArrayBuilder::new(self.config.zstd_level)?,
                     from,
                 )
                 .await?
@@ -575,7 +570,12 @@ where
     /// load a branch given a branch index
     async fn load_branch(&self, index: &BranchIndex<T::Seq>) -> Result<Option<Branch<T::Seq>>> {
         Ok(if let Some(cid) = &index.cid {
-            let bytes = self.store.get(&cid).await?;
+            let mut bytes = self.store.get(&cid).await?.to_vec();
+            if bytes.len() < 24 {
+                return Err(anyhow!("nonce missing"));
+            }
+            let (nonce, bytes) = bytes.split_at_mut(24);
+            XSalsa20::new(&self.index_key.into(), (&*nonce).into()).apply_keystream(bytes);
             let children: Vec<_> = deserialize_compressed(&bytes)?;
             // let children = CborZstdArrayRef::new(bytes.as_ref()).items()?;
             Some(Branch::<T::Seq>::new(children))
@@ -627,9 +627,9 @@ where
         slice.into()
     }
 
-    fn random_nonce(&self) -> [u8; 24] {
+    fn random_nonce(&self) -> salsa20::XNonce {
         // todo: not very random...
-        [0u8; 24]
+        [0u8; 24].into()
     }
 
     /// load a node, returning a structure containing the index and value for convenient matching
@@ -820,6 +820,18 @@ where
         Box::pin(s)
     }
 
+    async fn persist_branch(&self, children: &Vec<Index<T::Seq>>) -> Result<(Cid, u64)> {
+        let mut cbor = Vec::with_capacity(24);
+        let nonce = self.random_nonce();
+        cbor.extend_from_slice(&nonce);
+        serialize_compressed(&children, self.config.zstd_level, &mut cbor)?;
+        XSalsa20::new(&self.index_key.into(), &nonce.into()).apply_keystream(&mut cbor[24..]);
+        Ok((
+            self.store.put(&cbor, cid::Codec::DagCBOR).await?,
+            cbor.len() as u64,
+        ))
+    }
+
     async fn forget_except<Q: Query<T>>(
         &self,
         offset: u64,
@@ -848,8 +860,9 @@ where
                     }
                     // rewrite the node and update the cid if children have changed
                     if changed {
-                        let cbor = serialize_compressed(&children, self.config.zstd_level)?;
-                        index.cid = Some(self.store.put(&cbor, cid::Codec::DagCBOR).await?);
+                        let (cid, _) = self.persist_branch(&children).await?;
+                        // todo: update size data
+                        index.cid = Some(cid);
                     }
                 }
                 Ok(index.into())
@@ -898,7 +911,8 @@ where
                         }
                         // rewrite the node and update the cid if children have changed
                         if changed {
-                            let cbor = serialize_compressed(&children, self.config.zstd_level)?;
+                            let mut cbor = Vec::new();
+                            serialize_compressed(&children, self.config.zstd_level, &mut cbor)?;
                             index.cid = Some(self.store.put(&cbor, cid::Codec::DagCBOR).await?);
                         }
                     }
@@ -1081,10 +1095,14 @@ where
     pub fn new(store: ArcStore, config: Config) -> Self {
         let branch_cache = RwLock::new(lru::LruCache::<Cid, Branch<T::Seq>>::new(1000));
         let leaf_cache = RwLock::new(lru::LruCache::<Cid, Leaf>::new(1000));
+        let index_key = [0u8; 32].into();
+        let value_key = [0u8; 32].into();
         Self {
             store,
             config,
             branch_cache,
+            index_key,
+            value_key,
             leaf_cache,
             _tt: PhantomData,
         }
