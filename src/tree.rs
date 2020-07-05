@@ -434,7 +434,7 @@ where
             },
             self.config.target_leaf_size,
         )?;
-        let leaf = Leaf::Writable(builder);
+        let leaf = Leaf::from_builder(builder)?;
         let cid = self
             .store
             .put(leaf.as_ref().compressed(), cid::Codec::Raw)

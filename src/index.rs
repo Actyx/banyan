@@ -4,7 +4,7 @@ use super::zstd_array::ZstdArrayBuilder;
 use anyhow::{anyhow, Result};
 use bitvec::prelude::*;
 use derive_more::From;
-use serde::{de::DeserializeOwned, Deserialize, Deserializer, Serialize, Serializer};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{convert::From, sync::Arc};
 
 /// trait for items that can be combined in an associative way
@@ -232,10 +232,7 @@ impl<T: Clone> Branch<T> {
 
 /// fully in memory representation of a leaf node
 #[derive(Debug)]
-pub enum Leaf {
-    Writable(ZstdArrayBuilder),
-    Readonly(ZstdArray),
-}
+pub struct Leaf(ZstdArray);
 
 impl Leaf {
     /// Create a leaf from data in readonly mode. Conversion to writeable will only happen on demand.
@@ -243,25 +240,20 @@ impl Leaf {
     /// Note that this does not provide any validation that the passed data is in fact zstd compressed cbor.    
     /// If you pass random data, you will only notice that something is wrong once you try to use it.
     pub fn new(data: Arc<[u8]>) -> Self {
-        Self::Readonly(ZstdArray::new(data))
+        Self(ZstdArray::new(data))
+    }
+
+    pub fn from_builder(builder: ZstdArrayBuilder) -> Result<Self> {
+        Ok(Self(builder.build()?))
     }
 
     pub fn builder(self, level: i32) -> Result<ZstdArrayBuilder> {
-        match self {
-            Leaf::Writable(x) => Ok(x),
-            Leaf::Readonly(x) => ZstdArrayBuilder::init(x.as_ref().compressed(), level),
-        }
+        ZstdArrayBuilder::init(self.0.as_ref().compressed(), level)
     }
 
     /// Create a leaf containing a single item, with the given compression level
     pub fn single<V: Serialize>(value: &V, level: i32) -> Result<Self> {
-        Ok(Leaf::Writable(ZstdArrayBuilder::new(level)?.push(value)?))
-    }
-
-    /// Push an item. The compression level will only be used if this leaf is in readonly mode, otherwise
-    /// the compression level of the builder will be used.
-    pub fn push<V: Serialize>(self, value: &V, level: i32) -> Result<Self> {
-        Ok(Leaf::Writable(self.builder(level)?.push(value)?))
+        Ok(Leaf::from_builder(ZstdArrayBuilder::new(level)?.push(value)?)?)
     }
 
     /// Push an item. The compression level will only be used if this leaf is in readonly mode, otherwise
@@ -272,16 +264,13 @@ impl Leaf {
         compressed_size: u64,
         level: i32,
     ) -> Result<Self> {
-        Ok(Leaf::Writable(
+        Leaf::from_builder(
             self.builder(level)?.fill(from, compressed_size)?,
-        ))
+        )
     }
 
     pub fn as_ref(&self) -> ZstdArrayRef {
-        match self {
-            Leaf::Writable(x) => x.as_ref(),
-            Leaf::Readonly(x) => x.as_ref(),
-        }
+        self.0.as_ref()
     }
 }
 
