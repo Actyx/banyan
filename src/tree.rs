@@ -67,13 +67,13 @@ pub struct Config {
     ///
     /// note that this might overshoot due to the fact that the zstd encoder has internal state, and it is not possible
     /// to flush after each value without losing compression efficiency. The overshoot is bounded though.
-    pub max_leaf_size: u64,
+    pub target_leaf_size: u64,
 }
 
 impl Config {
     pub fn debug() -> Self {
         Self {
-            max_leaf_size: 10000,
+            target_leaf_size: 10000,
             max_leaf_count: 10,
             max_branch_count: 4,
             zstd_level: 10,
@@ -84,7 +84,7 @@ impl Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            max_leaf_size: 1 << 14,
+            target_leaf_size: 1 << 14,
             max_leaf_count: 1 << 14,
             max_branch_count: 32,
             zstd_level: 10,
@@ -389,7 +389,7 @@ where
 {
     /// predicate to determine if a leaf is sealed, based on the config
     fn leaf_sealed(&self, bytes: u64, count: u64) -> bool {
-        bytes >= self.config.max_leaf_size || count >= self.config.max_leaf_count
+        bytes >= self.config.target_leaf_size || count >= self.config.max_leaf_count
     }
 
     /// load a leaf given a leaf index
@@ -432,7 +432,7 @@ where
                     None
                 }
             },
-            self.config.max_leaf_size,
+            self.config.target_leaf_size,
         )?;
         let leaf = Leaf::Writable(builder);
         let cid = self
