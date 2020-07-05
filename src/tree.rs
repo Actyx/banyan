@@ -5,10 +5,10 @@ use anyhow::{anyhow, Result};
 use bitvec::prelude::*;
 use future::LocalBoxFuture;
 use futures::{prelude::*, stream::LocalBoxStream};
+use rand::RngCore;
 use salsa20::{
-    stream_cipher,
     stream_cipher::{NewStreamCipher, SyncStreamCipher},
-    Salsa20, XSalsa20,
+    XSalsa20,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use std::fmt::Debug;
@@ -621,15 +621,18 @@ where
         }
     }
 
-    fn random_key(&self) -> salsa20::Key {
+    fn random_key() -> salsa20::Key {
         // todo: not very random...
-        let slice = [0u8; 32];
-        slice.into()
+        let mut key = [0u8; 32];
+        rand::thread_rng().fill_bytes(&mut key);
+        key.into()
     }
 
     fn random_nonce(&self) -> salsa20::XNonce {
         // todo: not very random...
-        [0u8; 24].into()
+        let mut nonce = [0u8; 24];
+        rand::thread_rng().fill_bytes(&mut nonce);
+        nonce.into()
     }
 
     /// load a node, returning a structure containing the index and value for convenient matching

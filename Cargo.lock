@@ -90,6 +90,7 @@ dependencies = [
  "multihash",
  "quickcheck",
  "quickcheck_async",
+ "rand",
  "reqwest",
  "salsa20",
  "serde",
