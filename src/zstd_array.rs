@@ -1,13 +1,14 @@
 //! This module provides some utilities to work with zstd compressed arrays of cbor values
 use anyhow::Result;
 use bitvec::prelude::*;
+use ref_cast::RefCast;
 use serde::{
     de::{DeserializeOwned, IgnoredAny},
     Deserialize, Serialize,
 };
 use std::{
-    borrow::Borrow,
     io::{prelude::*, Cursor, Write},
+    ops::Deref,
     sync::Arc,
 };
 use tracing::*;
@@ -21,35 +22,14 @@ pub struct ZstdArray {
     data: Arc<[u8]>,
 }
 
-impl ZstdArray {
-    pub fn new(data: Arc<[u8]>) -> Self {
-        Self { data }
-    }
+#[derive(RefCast)]
+#[repr(transparent)]
+pub struct ZstdArrayRef([u8]);
 
-    pub fn as_ref<'a>(&'a self) -> ZstdArrayRef<'a> {
-        ZstdArrayRef { data: &self.data }
-    }
-}
-
-impl std::fmt::Debug for ZstdArray {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "ZstdArray")
-    }
-}
-
-/// An reference of zstd compressed data from either a [ZstdArray](struct.ZstdArray.html) or a [ZstdArrayBuilder](struct.ZstdArrayBuilder.html)
-pub struct ZstdArrayRef<'a> {
-    data: &'a [u8],
-}
-
-impl<'a> ZstdArrayRef<'a> {
-    pub fn new(data: &'a [u8]) -> Self {
-        Self { data }
-    }
-
+impl ZstdArrayRef {
     /// Get the compressed data
-    pub fn compressed(&self) -> &'a [u8] {
-        self.data
+    pub fn compressed(&self) -> &[u8] {
+        &self.0
     }
 
     #[allow(dead_code)]
@@ -76,7 +56,7 @@ impl<'a> ZstdArrayRef<'a> {
     fn decompress_into_lowlevel(&self, mut uncompressed: Vec<u8>) -> Result<Vec<u8>> {
         // let mut cipher = (self.mk_cipher)();
         // cipher.apply_keystream(&mut data);
-        let mut src = zstd::stream::raw::InBuffer::around(self.data);
+        let mut src = zstd::stream::raw::InBuffer::around(&self.0);
         // todo: thread local buffers that grow dynamically
         let mut tmp = [0u8; 4096 * 100];
         let mut decompressor = ZDecoder::new()?;
@@ -99,7 +79,7 @@ impl<'a> ZstdArrayRef<'a> {
                 break;
             }
         }
-        info!("decompress {} {}", self.data.len(), uncompressed.len());
+        info!("decompress {} {}", self.0.len(), uncompressed.len());
         Ok(uncompressed)
     }
 
@@ -164,6 +144,34 @@ impl<'a> ZstdArrayRef<'a> {
     }
 }
 
+impl Deref for ZstdArray {
+    type Target = ZstdArrayRef;
+    fn deref(&self) -> &Self::Target {
+        ZstdArrayRef::ref_cast(&self.data)
+    }
+}
+
+impl Deref for ZstdArrayBuilder {
+    type Target = ZstdArrayRef;
+    fn deref(&self) -> &Self::Target {
+        ZstdArrayRef::ref_cast(&self.encoder.get_ref().as_ref())
+    }
+}
+
+impl ZstdArray {
+    pub fn new(data: Arc<[u8]>) -> Self {
+        Self { data }
+    }
+}
+
+impl std::fmt::Debug for ZstdArray {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ZstdArray")
+    }
+}
+
+/// An reference of zstd compressed data from either a [ZstdArray](struct.ZstdArray.html) or a [ZstdArrayBuilder](struct.ZstdArrayBuilder.html)
+
 // struct CborIterator<'a, T, P> {
 //     reader: Cursor<&'a [u8]>,
 //     take: P,
@@ -197,7 +205,7 @@ impl std::fmt::Debug for ZstdArrayBuilder {
 
 impl ZstdArrayBuilder {
     pub fn init(data: &[u8], level: i32) -> Result<Self> {
-        let decompressed = ZstdArrayRef::new(data).decompress_into(Vec::new())?;
+        let decompressed = ZstdArrayRef::ref_cast(data).decompress_into(Vec::new())?;
         let res = Self::new(level)?;
         let res = res.push_bytes(&decompressed)?;
         Ok(res)
@@ -209,20 +217,8 @@ impl ZstdArrayBuilder {
         })
     }
 
-    pub fn as_ref<'a>(&'a self) -> ZstdArrayRef<'a> {
-        ZstdArrayRef::new(self.encoder.get_ref().as_ref())
-    }
-
-    pub fn compressed(&self) -> &[u8] {
-        self.as_ref().compressed()
-    }
-
     pub fn is_empty(&self) -> bool {
         self.compressed().is_empty()
-    }
-
-    pub fn items<T: DeserializeOwned>(&self) -> Result<Vec<T>> {
-        self.as_ref().items()
     }
 
     /// Writes some data and makes sure the zstd encoder state is flushed.
@@ -283,10 +279,10 @@ mod tests {
             expected.push(i);
             println!(
                 "xxx {} {}",
-                w.as_ref().compressed().len(),
-                hex::encode(w.as_ref().compressed())
+                w.compressed().len(),
+                hex::encode(w.compressed())
             );
-            let items: Vec<u64> = w.as_ref().items()?;
+            let items: Vec<u64> = w.items()?;
             assert_eq!(items, expected);
         }
         Ok(())
@@ -299,8 +295,8 @@ mod tests {
         for i in 0u64..100 {
             w = w.push(&i)?;
             expected.push(i);
-            w = ZstdArrayBuilder::init(w.as_ref().compressed(), 10)?;
-            let items: Vec<u64> = w.as_ref().items()?;
+            w = ZstdArrayBuilder::init(w.compressed(), 10)?;
+            let items: Vec<u64> = w.items()?;
             assert_eq!(items, expected);
         }
         Ok(())

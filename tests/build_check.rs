@@ -46,8 +46,6 @@ async fn test<F: Future<Output = anyhow::Result<bool>>>(f: impl Fn() -> F) -> Te
     }
 }
 
-struct TrueQuery;
-
 #[quickcheck_async::tokio]
 async fn build_stream(xs: Vec<(Key, u64)>) -> quickcheck::TestResult {
     test(|| async {
