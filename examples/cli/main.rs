@@ -135,11 +135,19 @@ impl DnfQuery {
 }
 
 impl Query<TT> for DnfQuery {
-    fn intersecting(&self, _: u64, x: &BranchIndex<KeySeq>) -> BitVec {
-        x.summaries().map(|x| self.intersects(&x)).collect()
+    fn intersecting(&self, _: u64, x: &BranchIndex<KeySeq>, matching: &mut BitVec) {
+        for (i, s) in x.summaries().take(matching.len()).enumerate() {
+            if matching[i] {
+                matching.set(i, self.intersects(&s));
+            }
+        }
     }
-    fn containing(&self, _: u64, x: &LeafIndex<KeySeq>) -> BitVec {
-        x.keys().map(|x| self.contains(&x)).collect()
+    fn containing(&self, _: u64, x: &LeafIndex<KeySeq>, matching: &mut BitVec) {
+        for (i, s) in x.keys().take(matching.len()).enumerate() {
+            if matching[i] {
+                matching.set(i, self.contains(&s));
+            }
+        }
     }
 }
 
@@ -190,8 +198,7 @@ impl CompactSeq for KeySeq {
         tags.0.extend(value.tags.0.iter().cloned());
     }
 
-    fn get(&self, index: u64) -> Option<Key> {
-        let index = index as usize;
+    fn get(&self, index: usize) -> Option<Key> {
         if let (Some(min_lamport), Some(min_time), Some(max_time), Some(tags)) = (
             self.min_lamport.get(index),
             self.min_time.get(index),
@@ -215,7 +222,7 @@ impl CompactSeq for KeySeq {
 
     fn summarize(&self) -> Key {
         let mut result = self.get(0).unwrap();
-        for i in 1..self.tags.len() as u64 {
+        for i in 1..self.tags.len() {
             result.combine(&self.get(i).unwrap());
         }
         result

@@ -57,9 +57,9 @@ pub struct Tree<T: TreeTypes, V> {
 /// Queries work on compact value sequences instead of individual values for efficiency.
 pub trait Query<T: TreeTypes> {
     /// a bitvec with `x.data.count()` elements, where each value is a bool indicating if the query *does* match
-    fn containing(&self, offset: u64, x: &LeafIndex<T::Seq>) -> BitVec;
+    fn containing(&self, offset: u64, x: &LeafIndex<T::Seq>, res: &mut BitVec);
     /// a bitvec with `x.data.count()` elements, where each value is a bool indicating if the query *can* match
-    fn intersecting(&self, offset: u64, x: &BranchIndex<T::Seq>) -> BitVec;
+    fn intersecting(&self, offset: u64, x: &BranchIndex<T::Seq>, res: &mut BitVec);
 }
 
 /// Configuration for a forest. Includes settings for when a node is considered full
@@ -105,6 +105,13 @@ impl Config {
             index_key,
             value_key,
         }
+    }
+
+    pub fn random_key() -> salsa20::Key {
+        // todo: not very random...
+        let mut key = [0u8; 32];
+        rand::thread_rng().fill_bytes(&mut key);
+        key.into()
     }
 }
 
@@ -362,15 +369,19 @@ impl OffsetQuery {
 }
 
 impl<T: TreeTypes> Query<T> for OffsetQuery {
-    fn containing(&self, offset: u64, x: &LeafIndex<T::Seq>) -> BitVec {
+    fn containing(&self, offset: u64, x: &LeafIndex<T::Seq>, res: &mut BitVec) {
         info!("OffsetQuery::containing {}", offset);
         let from = self.from;
-        (0..x.keys.count()).map(|o| o + offset >= from).collect()
+        for i in 0..(x.keys.len()).min(res.len()) {
+            let o = i as u64;
+            if res[i] {
+                res.set(i, o + offset >= from)
+            }
+        }
     }
-    fn intersecting(&self, offset: u64, x: &BranchIndex<T::Seq>) -> BitVec {
+    fn intersecting(&self, offset: u64, _x: &BranchIndex<T::Seq>, _res: &mut BitVec) {
         info!("OffsetQuery::intersecting {}", offset);
-        // TODO
-        BitVec::repeat(true, x.summaries.count() as usize)
+        // TODO: implement
     }
 }
 
@@ -625,13 +636,6 @@ where
         }
     }
 
-    fn random_key() -> salsa20::Key {
-        // todo: not very random...
-        let mut key = [0u8; 32];
-        rand::thread_rng().fill_bytes(&mut key);
-        key.into()
-    }
-
     fn random_nonce(&self) -> salsa20::XNonce {
         // todo: not very random...
         let mut nonce = [0u8; 24];
@@ -731,7 +735,7 @@ where
             }
             NodeInfo::Leaf(index, node) => {
                 let v = node.child_at::<V>(offset)?;
-                let k = index.keys.get(offset).unwrap();
+                let k = index.keys.get(offset as usize).unwrap();
                 Ok(Some((k, v)))
             }
             NodeInfo::PurgedBranch(_) | NodeInfo::PurgedLeaf(_) => Ok(None),
@@ -758,10 +762,7 @@ where
                     info!("raw compressed data {}", node.as_ref().compressed().len());
                     let elems = node.as_ref().items()?;
                     let pairs = keys.zip(elems).collect::<Vec<_>>();
-                    stream::iter(pairs)
-                        .map(|x| Ok(x))
-                        .left_stream()
-                        .left_stream()
+                    stream::iter(pairs).map(Ok).left_stream().left_stream()
                 }
                 NodeInfo::Branch(_, node) => {
                     info!("streaming branch {} {}", index.level(), node.children.len());
@@ -789,20 +790,19 @@ where
         let s = async move {
             Ok(match self.load_node(&index).await? {
                 NodeInfo::Leaf(index, node) => {
-                    let matching = query.containing(offset, index);
+                    let mut matching = BitVec::repeat(true, index.keys.len());
+                    query.containing(offset, index, &mut matching);
                     let keys = index.select_keys(&matching);
                     let elems: Vec<V> = node.as_ref().select(&matching)?;
                     let pairs = keys
                         .zip(elems)
-                        .map(|((o, k), v)| (o + offset, k, v))
+                        .map(|((o, k), v)| ((o as u64) + offset, k, v))
                         .collect::<Vec<_>>();
-                    stream::iter(pairs)
-                        .map(|x| Ok(x))
-                        .left_stream()
-                        .left_stream()
+                    stream::iter(pairs).map(Ok).left_stream().left_stream()
                 }
                 NodeInfo::Branch(index, node) => {
-                    let matching = query.intersecting(offset, index);
+                    let mut matching = BitVec::repeat(true, index.summaries.len());
+                    query.intersecting(offset, index, &mut matching);
                     let offsets = zip_with_offset(node.children.into_iter(), offset);
                     let children = matching.into_iter().zip(offsets).filter_map(|(m, c)| {
                         // use bool::then_some in case it gets stabilized
@@ -827,7 +827,7 @@ where
         Box::pin(s)
     }
 
-    async fn persist_branch(&self, children: &Vec<Index<T::Seq>>) -> Result<(Cid, u64)> {
+    async fn persist_branch(&self, children: &[Index<T::Seq>]) -> Result<(Cid, u64)> {
         let mut cbor = Vec::new();
         serialize_compressed(
             &self.index_key,
@@ -852,8 +852,9 @@ where
             Index::Branch(index) => {
                 let mut index = index.clone();
                 // only do the check unless we are already purged
-                if index.cid.is_some() && index.sealed && !query.intersecting(offset, &index).any()
-                {
+                let mut matching = BitVec::repeat(true, index.summaries.len());
+                query.intersecting(offset, &index, &mut matching);
+                if index.cid.is_some() && index.sealed && !matching.any() {
                     index.cid = None;
                 }
                 // this will only be executed unless we are already purged
@@ -879,8 +880,10 @@ where
             }
             Index::Leaf(index) => {
                 let mut index = index.clone();
+                let mut matching = BitVec::repeat(true, index.keys.len());
+                query.containing(offset, &index, &mut matching);
                 // only do the check unless we are already purged
-                if index.cid.is_some() && index.sealed && !query.containing(offset, &index).any() {
+                if index.cid.is_some() && index.sealed && !matching.any() {
                     index.cid = None
                 }
                 Ok(index.into())

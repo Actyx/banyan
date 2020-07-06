@@ -35,8 +35,12 @@ pub trait CompactSeq: Serialize + DeserializeOwned {
     fn extend(&mut self, value: &Self::Item);
     /// number of elements
     fn count(&self) -> u64;
+    /// number of elements, as an usize, for convenience
+    fn len(&self) -> usize {
+        self.count() as usize
+    }
     /// get nth element. Guaranteed to succeed with Some for index < count.
-    fn get(&self, index: u64) -> Option<Self::Item>;
+    fn get(&self, index: usize) -> Option<Self::Item>;
     /// combines all elements with the semigroup op
     fn summarize(&self) -> Self::Item;
 
@@ -54,16 +58,14 @@ pub trait CompactSeq: Serialize + DeserializeOwned {
 
     /// utility function to get all items for a compactseq.
     fn to_vec(&self) -> Vec<Self::Item> {
-        (0..self.count())
-            .map(move |i| self.get(i).unwrap())
-            .collect()
+        (0..self.len()).map(move |i| self.get(i).unwrap()).collect()
     }
 
     /// utility function to select some items for a compactseq.
-    fn select(&self, bits: &BitVec) -> Vec<(u64, Self::Item)> {
-        (0..self.count())
+    fn select(&self, bits: &BitVec) -> Vec<(usize, Self::Item)> {
+        (0..self.len())
             .filter_map(move |i| {
-                if bits[i as usize] {
+                if bits[i] {
                     Some((i, self.get(i).unwrap()))
                 } else {
                     None
@@ -93,8 +95,8 @@ impl<T: Serialize + DeserializeOwned + Semigroup + Clone> CompactSeq for SimpleC
     fn extend(&mut self, item: &T) {
         self.0.last_mut().unwrap().combine(item);
     }
-    fn get(&self, index: u64) -> Option<T> {
-        self.0.get(index as usize).cloned()
+    fn get(&self, index: usize) -> Option<T> {
+        self.0.get(index).cloned()
     }
     fn count(&self) -> u64 {
         self.0.len() as u64
@@ -125,7 +127,7 @@ impl<T: CompactSeq> LeafIndex<T> {
     pub fn keys(&self) -> impl Iterator<Item = T::Item> {
         self.keys.to_vec().into_iter()
     }
-    pub fn select_keys(&self, bits: &BitVec) -> impl Iterator<Item = (u64, T::Item)> {
+    pub fn select_keys(&self, bits: &BitVec) -> impl Iterator<Item = (usize, T::Item)> {
         self.keys.select(bits).into_iter()
     }
 }

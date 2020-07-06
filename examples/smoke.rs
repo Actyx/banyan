@@ -109,13 +109,19 @@ impl DnfQuery {
 }
 
 impl Query<TT> for DnfQuery {
-    fn intersecting(&self, _: u64, x: &BranchIndex<ValueSeq>) -> BitVec {
-        let bools = x.summaries().map(|x| self.intersects(&x));
-        bools.collect()
+    fn intersecting(&self, _: u64, x: &BranchIndex<ValueSeq>, matching: &mut BitVec) {
+        for (i, s) in x.summaries().take(matching.len()).enumerate() {
+            if matching[i] {
+                matching.set(i, self.intersects(&s));
+            }
+        }
     }
-    fn containing(&self, _: u64, x: &LeafIndex<ValueSeq>) -> BitVec {
-        let bools = x.keys().map(|x| self.contains(&x));
-        bools.collect()
+    fn containing(&self, _: u64, x: &LeafIndex<ValueSeq>, matching: &mut BitVec) {
+        for (i, s) in x.keys().take(matching.len()).enumerate() {
+            if matching[i] {
+                matching.set(i, self.contains(&s));
+            }
+        }
     }
 }
 
@@ -166,8 +172,7 @@ impl CompactSeq for ValueSeq {
         tags.0.extend(value.tags.0.iter().cloned());
     }
 
-    fn get(&self, index: u64) -> Option<Value> {
-        let index = index as usize;
+    fn get(&self, index: usize) -> Option<Value> {
         if let (Some(min_lamport), Some(min_time), Some(max_time), Some(tags)) = (
             self.min_lamport.get(index),
             self.min_time.get(index),
@@ -191,7 +196,7 @@ impl CompactSeq for ValueSeq {
 
     fn summarize(&self) -> Value {
         let mut result = self.get(0).unwrap();
-        for i in 1..self.tags.len() as u64 {
+        for i in 1..self.tags.len() {
             result.combine(&self.get(i).unwrap());
         }
         result
