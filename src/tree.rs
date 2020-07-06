@@ -5,6 +5,11 @@ use anyhow::{anyhow, Result};
 use bitvec::prelude::*;
 use future::LocalBoxFuture;
 use futures::{prelude::*, stream::LocalBoxStream};
+use rand::RngCore;
+use salsa20::{
+    stream_cipher::{NewStreamCipher, SyncStreamCipher},
+    XSalsa20,
+};
 use serde::{de::DeserializeOwned, Serialize};
 use std::fmt::Debug;
 use std::{
@@ -33,6 +38,8 @@ pub struct Forest<T: TreeTypes> {
     config: Config,
     branch_cache: RwLock<lru::LruCache<Cid, Branch<T::Seq>>>,
     leaf_cache: RwLock<lru::LruCache<Cid, Leaf>>,
+    index_key: salsa20::Key,
+    value_key: salsa20::Key,
     _tt: PhantomData<T>,
 }
 
@@ -49,9 +56,9 @@ pub struct Tree<T: TreeTypes, V> {
 ///
 /// Queries work on compact value sequences instead of individual values for efficiency.
 pub trait Query<T: TreeTypes> {
-    /// an iterator returning `x.data.count()` elements, where each value is a bool indicating if the query *does* match
+    /// a bitvec with `x.data.count()` elements, where each value is a bool indicating if the query *does* match
     fn containing(&self, offset: u64, x: &LeafIndex<T::Seq>) -> BitVec;
-    /// an iterator returning `x.data.count()` elements, where each value is a bool indicating if the query *can* match
+    /// a bitvec with `x.data.count()` elements, where each value is a bool indicating if the query *can* match
     fn intersecting(&self, offset: u64, x: &BranchIndex<T::Seq>) -> BitVec;
 }
 
@@ -67,27 +74,36 @@ pub struct Config {
     ///
     /// note that this might overshoot due to the fact that the zstd encoder has internal state, and it is not possible
     /// to flush after each value without losing compression efficiency. The overshoot is bounded though.
-    pub max_leaf_size: u64,
+    pub target_leaf_size: u64,
+    /// salsa20 key to decrypt index nodes
+    pub index_key: salsa20::Key,
+    /// salsa20 key to decrypt value nodes
+    pub value_key: salsa20::Key,
 }
 
 impl Config {
+    /// config that will produce complex tree structures with few values
+    ///
+    /// keys are hardcoded to 0
     pub fn debug() -> Self {
         Self {
-            max_leaf_size: 10000,
+            target_leaf_size: 10000,
             max_leaf_count: 10,
             max_branch_count: 4,
             zstd_level: 10,
+            index_key: salsa20::Key::from([0u8; 32]),
+            value_key: salsa20::Key::from([0u8; 32]),
         }
     }
-}
-
-impl Default for Config {
-    fn default() -> Self {
+    /// reasonable default config from index key and value key
+    pub fn from_keys(index_key: salsa20::Key, value_key: salsa20::Key) -> Self {
         Self {
-            max_leaf_size: 1 << 14,
+            target_leaf_size: 1 << 14,
             max_leaf_count: 1 << 14,
             max_branch_count: 32,
             zstd_level: 10,
+            index_key,
+            value_key,
         }
     }
 }
@@ -331,7 +347,7 @@ impl<V: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static, T:
 
     /// number of elements in the tree
     pub fn count(&self) -> u64 {
-        self.root.as_ref().map(|x| x.count()).unwrap_or(0)
+        self.root.as_ref().map(|x| x.count()).unwrap_or_default()
     }
 }
 
@@ -389,31 +405,29 @@ where
 {
     /// predicate to determine if a leaf is sealed, based on the config
     fn leaf_sealed(&self, bytes: u64, count: u64) -> bool {
-        bytes >= self.config.max_leaf_size || count >= self.config.max_leaf_count
+        bytes >= self.config.target_leaf_size || count >= self.config.max_leaf_count
     }
 
     /// load a leaf given a leaf index
     async fn load_leaf(&self, index: &LeafIndex<T::Seq>) -> Result<Option<Leaf>> {
         Ok(if let Some(cid) = &index.cid {
-            Some(Leaf::new(self.store.get(cid).await?))
+            let data = &self.store.get(cid).await?;
+            if data.len() < 24 {
+                return Err(anyhow!("leaf data without nonce"));
+            }
+            let (nonce, data) = data.split_at(24);
+            let mut data = data.to_vec();
+            XSalsa20::new(&self.value_key.into(), nonce.into()).apply_keystream(&mut data);
+            // cipher.apply_keystream(data)
+            Some(Leaf::new(data.into()))
         } else {
             None
         })
     }
 
-    /// load a leaf from a cache
-    async fn load_leaf_cached(&self, index: &LeafIndex<T::Seq>) -> Result<Option<Leaf>> {
-        if let Some(cid) = &index.cid {
-            match self.leaf_cache.write().unwrap().pop(cid) {
-                Some(leaf) => Ok(Some(leaf)),
-                None => self.load_leaf(index).await,
-            }
-        } else {
-            Ok(None)
-        }
-    }
-
     /// Creates a leaf from a sequence that either contains all items from the sequence, or is full
+    ///
+    /// The result is the index of the leaf
     async fn create_leaf<V: Serialize + Debug>(
         &self,
         mut keys: T::Seq,
@@ -432,13 +446,17 @@ where
                     None
                 }
             },
-            self.config.max_leaf_size,
+            self.config.target_leaf_size,
         )?;
-        let leaf = Leaf::Writable(builder);
-        let cid = self
-            .store
-            .put(leaf.as_ref().compressed(), cid::Codec::Raw)
-            .await?;
+        let leaf = Leaf::from_builder(builder)?;
+        // encrypt leaf
+        let mut tmp: Vec<u8> = Vec::with_capacity(leaf.as_ref().compressed().len() + 24);
+        let nonce = self.random_nonce();
+        tmp.extend(nonce.as_slice());
+        tmp.extend(leaf.as_ref().compressed());
+        XSalsa20::new(&self.value_key.into(), &nonce.into()).apply_keystream(&mut tmp[24..]);
+        // store leaf
+        let cid = self.store.put(&tmp, cid::Codec::Raw).await?;
         let index = LeafIndex {
             cid: Some(cid),
             value_bytes: leaf.as_ref().compressed().len() as u64,
@@ -484,11 +502,10 @@ where
             summaries.push(summary);
             children.push(child);
         }
-        let cbor = serialize_compressed(&children, self.config.zstd_level)?;
-        let cid = self.store.put(&cbor, cid::Codec::DagCBOR).await?;
+        let (cid, encoded_children_len) = self.persist_branch(&children).await?;
         let count = children.iter().map(|x| x.count()).sum();
         let value_bytes = children.iter().map(|x| x.value_bytes()).sum();
-        let key_bytes = children.iter().map(|x| x.key_bytes()).sum::<u64>() + cbor.len() as u64;
+        let key_bytes = children.iter().map(|x| x.key_bytes()).sum::<u64>() + encoded_children_len;
         let sealed = self.branch_sealed(&children, level);
         let summaries: T::Seq = T::Seq::new(summaries.into_iter())?;
         let index = BranchIndex {
@@ -563,7 +580,7 @@ where
     async fn load_branch(&self, index: &BranchIndex<T::Seq>) -> Result<Option<Branch<T::Seq>>> {
         Ok(if let Some(cid) = &index.cid {
             let bytes = self.store.get(&cid).await?;
-            let children: Vec<_> = deserialize_compressed(&bytes)?;
+            let children: Vec<_> = deserialize_compressed(&self.index_key, &bytes)?;
             // let children = CborZstdArrayRef::new(bytes.as_ref()).items()?;
             Some(Branch::<T::Seq>::new(children))
         } else {
@@ -574,7 +591,7 @@ where
     async fn load_branch_from_cid(&self, cid: Cid) -> Result<Index<T::Seq>> {
         assert_eq!(cid.codec(), cid::Codec::DagCBOR);
         let bytes = self.store.get(&cid).await?;
-        let children: Vec<Index<T::Seq>> = deserialize_compressed(&bytes)?;
+        let children: Vec<Index<T::Seq>> = deserialize_compressed(&self.index_key, &bytes)?;
         let count = children.iter().map(|x| x.count()).sum();
         let level = children.iter().map(|x| x.level()).max().unwrap() + 1;
         let value_bytes = children.iter().map(|x| x.value_bytes()).sum();
@@ -608,30 +625,18 @@ where
         }
     }
 
-    /// load a node, returning a structure containing the index and value for convenient matching
-    ///
-    /// this is identical to load_node, except that it will also try to find leaf nodes in the cache.
-    /// readonly leaf nodes are too cheap to bother caching them, but writable leaf nodes are quite expensive and therefore
-    /// worthwhile to cache.
-    ///
-    /// Branch nodes are expensive to decode, so they will always be cached even for reading.
-    async fn load_node_write<'a>(&self, index: &'a Index<T::Seq>) -> Result<NodeInfo<'a, T::Seq>> {
-        Ok(match index {
-            Index::Branch(index) => {
-                if let Some(branch) = self.load_branch_cached(index).await? {
-                    NodeInfo::Branch(index, branch)
-                } else {
-                    NodeInfo::PurgedBranch(index)
-                }
-            }
-            Index::Leaf(index) => {
-                if let Some(leaf) = self.load_leaf_cached(index).await? {
-                    NodeInfo::Leaf(index, leaf)
-                } else {
-                    NodeInfo::PurgedLeaf(index)
-                }
-            }
-        })
+    fn random_key() -> salsa20::Key {
+        // todo: not very random...
+        let mut key = [0u8; 32];
+        rand::thread_rng().fill_bytes(&mut key);
+        key.into()
+    }
+
+    fn random_nonce(&self) -> salsa20::XNonce {
+        // todo: not very random...
+        let mut nonce = [0u8; 24];
+        rand::thread_rng().fill_bytes(&mut nonce);
+        nonce.into()
     }
 
     /// load a node, returning a structure containing the index and value for convenient matching
@@ -677,7 +682,7 @@ where
         if index.sealed() || from.peek().is_none() {
             return Ok(index.clone());
         }
-        match self.load_node_write(index).await? {
+        match self.load_node(index).await? {
             NodeInfo::Leaf(index, leaf) => {
                 info!("extending existing leaf");
                 let data = index.keys.clone();
@@ -822,6 +827,21 @@ where
         Box::pin(s)
     }
 
+    async fn persist_branch(&self, children: &Vec<Index<T::Seq>>) -> Result<(Cid, u64)> {
+        let mut cbor = Vec::new();
+        serialize_compressed(
+            &self.index_key,
+            &self.random_nonce(),
+            &children,
+            self.config.zstd_level,
+            &mut cbor,
+        )?;
+        Ok((
+            self.store.put(&cbor, cid::Codec::DagCBOR).await?,
+            cbor.len() as u64,
+        ))
+    }
+
     async fn forget_except<Q: Query<T>>(
         &self,
         offset: u64,
@@ -850,8 +870,9 @@ where
                     }
                     // rewrite the node and update the cid if children have changed
                     if changed {
-                        let cbor = serialize_compressed(&children, self.config.zstd_level)?;
-                        index.cid = Some(self.store.put(&cbor, cid::Codec::DagCBOR).await?);
+                        let (cid, _) = self.persist_branch(&children).await?;
+                        // todo: update size data
+                        index.cid = Some(cid);
                     }
                 }
                 Ok(index.into())
@@ -900,8 +921,8 @@ where
                         }
                         // rewrite the node and update the cid if children have changed
                         if changed {
-                            let cbor = serialize_compressed(&children, self.config.zstd_level)?;
-                            index.cid = Some(self.store.put(&cbor, cid::Codec::DagCBOR).await?);
+                            let (cid, _) = self.persist_branch(&children).await?;
+                            index.cid = Some(cid);
                         }
                     }
                     Ok(None) => {
@@ -1083,10 +1104,14 @@ where
     pub fn new(store: ArcStore, config: Config) -> Self {
         let branch_cache = RwLock::new(lru::LruCache::<Cid, Branch<T::Seq>>::new(1000));
         let leaf_cache = RwLock::new(lru::LruCache::<Cid, Leaf>::new(1000));
+        let index_key = config.index_key;
+        let value_key = config.value_key;
         Self {
             store,
             config,
             branch_cache,
+            index_key,
+            value_key,
             leaf_cache,
             _tt: PhantomData,
         }

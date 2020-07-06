@@ -14,8 +14,8 @@ use tracing_subscriber;
 mod ipfs;
 
 use banyan::index::*;
-use banyan::{ipfs::Cid, tree::*};
 use banyan::tree::OffsetQuery;
+use banyan::{ipfs::Cid, tree::*};
 use ipfs::IpfsStore;
 
 use bitvec::prelude::*;
@@ -229,10 +229,26 @@ fn app() -> clap::App<'static, 'static> {
             .takes_value(true)
             .help("The root hash to use")
     };
+    let index_pass_arg = || {
+        Arg::with_name("index_pass")
+            .long("index_pass")
+            .required(false)
+            .takes_value(true)
+            .help("An index password to use")
+    };
+    let value_pass_arg = || {
+        Arg::with_name("value_pass")
+            .long("value_pass")
+            .required(false)
+            .takes_value(true)
+            .help("A value password to use")
+    };
     App::new("banyan-cli")
         .version("0.1")
         .author("Rüdiger Klaehn")
         .about("CLI to work with large banyan trees on ipfs")
+        .arg(index_pass_arg())
+        .arg(value_pass_arg())
         .subcommand(
             SubCommand::with_name("dump")
                 .about("Dump a tree")
@@ -326,6 +342,14 @@ impl Tagger {
     }
 }
 
+fn create_salsa_key(text: &str) -> salsa20::Key {
+    let mut key = [0u8; 32];
+    for (i, v) in text.as_bytes().iter().take(32).enumerate() {
+        key[i] = *v;
+    }
+    key.into()
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     // a builder for `FmtSubscriber`.
@@ -353,8 +377,19 @@ async fn main() -> Result<()> {
     };
 
     let store = Arc::new(IpfsStore::new());
-    let forest = Arc::new(Forest::<TT>::new(store, Config::debug()));
     let matches = app().get_matches();
+    let index_key: salsa20::Key = matches
+        .value_of("index_pass")
+        .map(create_salsa_key)
+        .unwrap_or_default();
+    let value_key: salsa20::Key = matches
+        .value_of("value_pass")
+        .map(create_salsa_key)
+        .unwrap_or_default();
+    let mut config = Config::debug();
+    config.index_key = index_key;
+    config.value_key = value_key;
+    let forest = Arc::new(Forest::<TT>::new(store, config));
     if let Some(matches) = matches.subcommand_matches("dump") {
         let root = Cid::from_str(
             matches
@@ -392,8 +427,6 @@ async fn main() -> Result<()> {
             "building a tree with {} batches of {} values, unbalanced: {}",
             batches, count, unbalanced
         );
-        let store = Arc::new(IpfsStore::new());
-        let forest = Arc::new(Forest::new(store, Config::default()));
         let mut tree = Tree::<TT, String>::empty(forest);
         let mut offset: u64 = 0;
         for _ in 0..batches {

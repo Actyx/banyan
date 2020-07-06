@@ -1,10 +1,14 @@
 //! The index data structures for the tree
 use super::ipfs::Cid;
-use super::zstd_array::ZstdArrayBuilder;
+use super::zstd_array::{ZstdArray, ZstdArrayBuilder, ZstdArrayRef};
 use anyhow::{anyhow, Result};
 use bitvec::prelude::*;
 use derive_more::From;
-use serde::{de::DeserializeOwned, Deserialize, Deserializer, Serialize, Serializer};
+use salsa20::{
+    stream_cipher::{NewStreamCipher, SyncStreamCipher},
+    XSalsa20,
+};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{convert::From, sync::Arc};
 
 /// trait for items that can be combined in an associative way
@@ -151,110 +155,11 @@ impl<T: CompactSeq> BranchIndex<T> {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
-struct IndexW<'a, T> {
-    // number of events
-    count: Option<u64>,
-    // level of the tree node
-    level: Option<u32>,
-    // block is sealed
-    sealed: bool,
-    // link to the branch node
-    cid: Option<&'a Cid>,
-    // extra data
-    data: &'a T,
-    value_bytes: u64,
-    key_bytes: Option<u64>,
-}
-
-impl<'a, T> From<&'a Index<T>> for IndexW<'a, T> {
-    fn from(value: &'a Index<T>) -> Self {
-        match value {
-            Index::Branch(i) => Self {
-                sealed: i.sealed,
-                value_bytes: i.value_bytes,
-                cid: i.cid.as_ref(),
-                data: &i.summaries,
-                count: Some(i.count),
-                level: Some(i.level),
-                key_bytes: Some(i.key_bytes),
-            },
-            Index::Leaf(i) => Self {
-                sealed: i.sealed,
-                value_bytes: i.value_bytes,
-                cid: i.cid.as_ref(),
-                data: &i.keys,
-                count: None,
-                level: None,
-                key_bytes: None,
-            },
-        }
-    }
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct IndexR<T> {
-    // number of events
-    count: Option<u64>,
-    // level of the tree node
-    level: Option<u32>,
-    // value bytes
-    key_bytes: Option<u64>,
-    // block is sealed
-    sealed: bool,
-    // link to the branch node
-    cid: Option<Cid>,
-    // extra data
-    data: T,
-    // value bytes
-    value_bytes: u64,
-}
-
-impl<T> From<IndexR<T>> for Index<T> {
-    fn from(v: IndexR<T>) -> Self {
-        if let (Some(level), Some(count), Some(key_bytes)) = (v.level, v.count, v.key_bytes) {
-            BranchIndex {
-                cid: v.cid,
-                summaries: v.data,
-                sealed: v.sealed,
-                value_bytes: v.value_bytes,
-                key_bytes,
-                count,
-                level,
-            }
-            .into()
-        } else {
-            LeafIndex {
-                cid: v.cid,
-                keys: v.data,
-                sealed: v.sealed,
-                value_bytes: v.value_bytes,
-            }
-            .into()
-        }
-    }
-}
-
 /// index
 #[derive(Debug, Clone, From)]
 pub enum Index<T> {
     Leaf(LeafIndex<T>),
     Branch(BranchIndex<T>),
-}
-
-use crate::zstd_array::{ZstdArray, ZstdArrayRef};
-use std::result;
-
-impl<T: Serialize> Serialize for Index<T> {
-    fn serialize<S: Serializer>(&self, serializer: S) -> result::Result<S::Ok, S::Error> {
-        IndexW::<T>::from(self).serialize(serializer)
-    }
-}
-
-impl<'de, T: DeserializeOwned> Deserialize<'de> for Index<T> {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> result::Result<Index<T>, D::Error> {
-        IndexR::<T>::deserialize(deserializer).map(Into::into)
-    }
 }
 
 impl<T: CompactSeq> Index<T> {
@@ -329,10 +234,7 @@ impl<T: Clone> Branch<T> {
 
 /// fully in memory representation of a leaf node
 #[derive(Debug)]
-pub enum Leaf {
-    Writable(ZstdArrayBuilder),
-    Readonly(ZstdArray),
-}
+pub struct Leaf(ZstdArray);
 
 impl Leaf {
     /// Create a leaf from data in readonly mode. Conversion to writeable will only happen on demand.
@@ -340,25 +242,22 @@ impl Leaf {
     /// Note that this does not provide any validation that the passed data is in fact zstd compressed cbor.    
     /// If you pass random data, you will only notice that something is wrong once you try to use it.
     pub fn new(data: Arc<[u8]>) -> Self {
-        Self::Readonly(ZstdArray::new(data))
+        Self(ZstdArray::new(data))
+    }
+
+    pub fn from_builder(builder: ZstdArrayBuilder) -> Result<Self> {
+        Ok(Self(builder.build()?))
     }
 
     pub fn builder(self, level: i32) -> Result<ZstdArrayBuilder> {
-        match self {
-            Leaf::Writable(x) => Ok(x),
-            Leaf::Readonly(x) => ZstdArrayBuilder::init(x.as_ref().compressed(), level),
-        }
+        ZstdArrayBuilder::init(self.0.as_ref().compressed(), level)
     }
 
     /// Create a leaf containing a single item, with the given compression level
     pub fn single<V: Serialize>(value: &V, level: i32) -> Result<Self> {
-        Ok(Leaf::Writable(ZstdArrayBuilder::new(level)?.push(value)?))
-    }
-
-    /// Push an item. The compression level will only be used if this leaf is in readonly mode, otherwise
-    /// the compression level of the builder will be used.
-    pub fn push<V: Serialize>(self, value: &V, level: i32) -> Result<Self> {
-        Ok(Leaf::Writable(self.builder(level)?.push(value)?))
+        Ok(Leaf::from_builder(
+            ZstdArrayBuilder::new(level)?.push(value)?,
+        )?)
     }
 
     /// Push an item. The compression level will only be used if this leaf is in readonly mode, otherwise
@@ -369,16 +268,11 @@ impl Leaf {
         compressed_size: u64,
         level: i32,
     ) -> Result<Self> {
-        Ok(Leaf::Writable(
-            self.builder(level)?.fill(from, compressed_size)?,
-        ))
+        Leaf::from_builder(self.builder(level)?.fill(from, compressed_size)?)
     }
 
     pub fn as_ref(&self) -> ZstdArrayRef {
-        match self {
-            Leaf::Writable(x) => x.as_ref(),
-            Leaf::Readonly(x) => x.as_ref(),
-        }
+        self.0.as_ref()
     }
 }
 
@@ -493,11 +387,15 @@ const CBOR_ARRAY_START: u8 = (4 << 5) | 31;
 const CBOR_BREAK: u8 = 255;
 
 pub fn serialize_compressed<T: Serialize + CompactSeq>(
+    key: &salsa20::Key,
+    nonce: &salsa20::XNonce,
     items: &[Index<T>],
     level: i32,
-) -> Result<Vec<u8>> {
+    into: &mut Vec<u8>,
+) -> Result<()> {
     let mut cids: Vec<&Cid> = Vec::new();
     let mut compressed: Vec<u8> = Vec::new();
+    compressed.extend_from_slice(&nonce);
     let mut writer = zstd::stream::write::Encoder::new(compressed.by_ref(), level)?;
     writer.write_all(&[CBOR_ARRAY_START])?;
     for item in items.iter() {
@@ -508,13 +406,24 @@ pub fn serialize_compressed<T: Serialize + CompactSeq>(
     }
     writer.write_all(&[CBOR_BREAK])?;
     writer.finish()?;
-    let ipld = serde_cbor::to_vec(&(cids, serde_cbor::Value::Bytes(compressed)))?;
-    Ok(ipld)
+    salsa20::XSalsa20::new(key, nonce).apply_keystream(&mut compressed[24..]);
+    Ok(serde_cbor::to_writer(
+        into,
+        &(cids, serde_cbor::Value::Bytes(compressed)),
+    )?)
 }
 
-pub fn deserialize_compressed<T: DeserializeOwned>(ipld: &[u8]) -> Result<Vec<Index<T>>> {
+pub fn deserialize_compressed<T: DeserializeOwned>(
+    key: &salsa20::Key,
+    ipld: &[u8],
+) -> Result<Vec<Index<T>>> {
     let (mut cids, compressed): (VecDeque<Cid>, serde_cbor::Value) = serde_cbor::from_slice(ipld)?;
-    if let serde_cbor::Value::Bytes(compressed) = compressed {
+    if let serde_cbor::Value::Bytes(mut compressed) = compressed {
+        if compressed.len() < 24 {
+            return Err(anyhow!("nonce missing"));
+        }
+        let (nonce, compressed) = compressed.split_at_mut(24);
+        XSalsa20::new(key, (&*nonce).into()).apply_keystream(compressed);
         let reader = zstd::stream::read::Decoder::new(Cursor::new(compressed))?;
 
         let data: Vec<IndexRC<T>> = serde_cbor::from_reader(reader)?;

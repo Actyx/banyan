@@ -6,6 +6,7 @@ use serde::{
     Deserialize, Serialize,
 };
 use std::{
+    borrow::Borrow,
     io::{prelude::*, Cursor, Write},
     sync::Arc,
 };
@@ -262,6 +263,10 @@ impl ZstdArrayBuilder {
         }
         self.encoder.flush()?;
         Ok(self)
+    }
+
+    pub fn build(self) -> Result<ZstdArray> {
+        Ok(ZstdArray::new(self.encoder.finish()?.into()))
     }
 }
 
