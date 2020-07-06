@@ -23,6 +23,7 @@ anyhow = "1.0.31"
 bitvec = "0.17.4"
 salsa20 = "0.5.2"
 rand = "0.7.3"
+ref-cast = "1.0.2"
 
 [dev-dependencies]
 hex = "0.4.2"

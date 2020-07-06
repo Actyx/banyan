@@ -250,7 +250,7 @@ impl Leaf {
     }
 
     pub fn builder(self, level: i32) -> Result<ZstdArrayBuilder> {
-        ZstdArrayBuilder::init(self.0.as_ref().compressed(), level)
+        ZstdArrayBuilder::init((&self.0).compressed(), level)
     }
 
     /// Create a leaf containing a single item, with the given compression level
@@ -271,8 +271,8 @@ impl Leaf {
         Leaf::from_builder(self.builder(level)?.fill(from, compressed_size)?)
     }
 
-    pub fn as_ref(&self) -> ZstdArrayRef {
-        self.0.as_ref()
+    pub fn as_ref(&self) -> &ZstdArrayRef {
+        &self.0
     }
 }
 
