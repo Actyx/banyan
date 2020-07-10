@@ -1,10 +1,13 @@
 use banyan::index::{Semigroup, SimpleCompactSeq};
 use banyan::store::MemStore;
-use banyan::tree::{Config, Forest, Tree, TreeTypes};
+use banyan::{
+    query::OffsetRangeQuery,
+    tree::{Config, Forest, Tree, TreeTypes},
+};
 use futures::prelude::*;
 use quickcheck::{Arbitrary, Gen, TestResult};
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+use std::{ops::Range, sync::Arc};
 
 struct TT;
 
@@ -61,21 +64,31 @@ async fn build_stream(xs: Vec<(Key, u64)>) -> quickcheck::TestResult {
     .await
 }
 
-// #[quickcheck_async::tokio]
-// async fn build_stream_filtered(xs: Vec<(Key, u64)>) -> quickcheck::TestResult {
-//     test(|| async {
-//         let tree = create_test_tree(xs.clone()).await?;
-//         let actual = tree
-//             .stream_filtered(&TrueQuery)
-//             .collect::<Vec<_>>()
-//             .await
-//             .into_iter()
-//             .collect::<anyhow::Result<Vec<_>>>()?;
-//         let expected = xs.iter().cloned().enumerate().map(|(i, (k, v))| (i as u64, k, v)).collect::<Vec<_>>();
-//         Ok(actual == expected)
-//     })
-//     .await
-// }
+#[quickcheck_async::tokio]
+async fn build_stream_filtered(xs: Vec<(Key, u64)>, range: Range<u64>) -> quickcheck::TestResult {
+    test(|| async {
+        let range = range.clone();
+        let tree = create_test_tree(xs.clone()).await?;
+        let actual = tree
+            .stream_filtered(&OffsetRangeQuery::from(range.clone()))
+            .collect::<Vec<_>>()
+            .await
+            .into_iter()
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        let expected = xs
+            .iter()
+            .cloned()
+            .enumerate()
+            .map(|(i, (k, v))| (i as u64, k, v))
+            .filter(|(offset, _, _)| range.contains(offset))
+            .collect::<Vec<_>>();
+        if actual != expected {
+            println!("{:?} {:?} {:?}", range, actual, expected);
+        }
+        Ok(actual == expected)
+    })
+    .await
+}
 
 #[quickcheck_async::tokio]
 async fn build_get(xs: Vec<(Key, u64)>) -> quickcheck::TestResult {

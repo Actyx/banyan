@@ -759,6 +759,7 @@ where
         let s = async move {
             Ok(match self.load_node(&index).await? {
                 NodeInfo::Leaf(index, node) => {
+                    // todo: don't get the node here, since we might not need it
                     let mut matching = BitVec::repeat(true, index.keys.len());
                     query.containing(offset, index, &mut matching);
                     let keys = index.select_keys(&matching);
@@ -770,6 +771,7 @@ where
                     stream::iter(pairs).map(Ok).left_stream().left_stream()
                 }
                 NodeInfo::Branch(index, node) => {
+                    // todo: don't get the node here, since we might not need it
                     let mut matching = BitVec::repeat(true, index.summaries.len());
                     query.intersecting(offset, index, &mut matching);
                     let offsets = zip_with_offset(node.children.into_iter(), offset);

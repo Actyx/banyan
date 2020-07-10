@@ -1,9 +1,10 @@
 use crate::{
     index::{BranchIndex, CompactSeq, LeafIndex},
     tree::TreeTypes,
+    util::RangeBoundsExt,
 };
 use bitvec::prelude::BitVec;
-use std::ops::{Bound, RangeBounds};
+use std::ops::RangeBounds;
 
 /// A query
 ///
@@ -32,25 +33,6 @@ impl<R: RangeBounds<u64>> From<R> for OffsetRangeQuery<R> {
         Self(value)
     }
 }
-
-fn lt<T: Ord>(end: Bound<T>, start: Bound<T>) -> bool {
-    match (end, start) {
-        (Bound::Unbounded, _) => false,
-        (_, Bound::Unbounded) => false,
-        (Bound::Included(end), Bound::Included(start)) => end < start,
-        (Bound::Excluded(end), Bound::Included(start)) => end <= start,
-        (Bound::Included(end), Bound::Excluded(start)) => end <= start,
-        (Bound::Excluded(end), Bound::Excluded(start)) => end <= start,
-    }
-}
-
-trait RangeBoundsExt<T: Ord>: RangeBounds<T> {
-    fn intersects(&self, b: &impl RangeBounds<T>) -> bool {
-        lt(self.end_bound(), b.start_bound()) && lt(b.end_bound(), self.start_bound())
-    }
-}
-
-impl<T: Ord, R: RangeBounds<T>> RangeBoundsExt<T> for R {}
 
 impl<T: TreeTypes, R: RangeBounds<u64>> Query<T> for OffsetRangeQuery<R> {
     fn containing(&self, mut offset: u64, index: &LeafIndex<T::Seq>, res: &mut BitVec) {
@@ -115,3 +97,6 @@ impl<TT: TreeTypes, A: Query<TT>, B: Query<TT>> Query<TT> for AndQuery<A, B> {
         self.1.intersecting(offset, index, res);
     }
 }
+
+#[cfg(test)]
+mod tests {}
