@@ -20,6 +20,8 @@ use std::{
 };
 use tracing::*;
 
+type FutureResult<'a, T> = LocalBoxFuture<'a, Result<T>>;
+
 /// Trees can be parametrized with the key type and the sequence type
 ///
 /// There might be more types in the future, so all of them are grouped in this trait.
@@ -562,7 +564,7 @@ where
         &'a self,
         level: u32,
         from: &'a mut std::iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
-    ) -> LocalBoxFuture<'a, Result<Index<T::Seq>>> {
+    ) -> FutureResult<'a, Index<T::Seq>> {
         self.fill_node(level, from).boxed_local()
     }
 
@@ -712,7 +714,7 @@ where
         &'a self,
         node: &'a Index<T::Seq>,
         from: &'a mut std::iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
-    ) -> LocalBoxFuture<'a, Result<Index<T::Seq>>> {
+    ) -> FutureResult<'a, Index<T::Seq>> {
         self.extend(node, from).boxed_local()
     }
 
@@ -731,7 +733,7 @@ where
                         offset -= child.count();
                     }
                 }
-                Err(anyhow!("index out of bounds: {}", offset).into())
+                Err(anyhow!("index out of bounds: {}", offset))
             }
             NodeInfo::Leaf(index, node) => {
                 let v = node.child_at::<V>(offset)?;
@@ -746,7 +748,7 @@ where
         &'a self,
         node: &'a Index<T::Seq>,
         offset: u64,
-    ) -> LocalBoxFuture<'a, Result<Option<(T::Key, V)>>> {
+    ) -> FutureResult<'a, Option<(T::Key, V)>> {
         self.get(node, offset).boxed_local()
     }
 
@@ -897,7 +899,7 @@ where
         offset: u64,
         query: &'a Q,
         index: &'a Index<T::Seq>,
-    ) -> LocalBoxFuture<'a, Result<Index<T::Seq>>> {
+    ) -> FutureResult<'a, Index<T::Seq>> {
         self.forget_except(offset, query, index).boxed_local()
     }
 
@@ -963,7 +965,7 @@ where
         &'a self,
         index: &'a Index<T::Seq>,
         report: &'a mut Vec<String>,
-    ) -> LocalBoxFuture<'a, Result<Index<T::Seq>>> {
+    ) -> FutureResult<'a, Index<T::Seq>> {
         self.repair(index, report).boxed_local()
     }
 
@@ -1011,7 +1013,7 @@ where
         &'a self,
         index: &'a Index<T::Seq>,
         prefix: &'a str,
-    ) -> LocalBoxFuture<'a, Result<()>> {
+    ) -> FutureResult<'a, ()> {
         self.dump(index, prefix).boxed_local()
     }
 
@@ -1092,14 +1094,14 @@ where
         }
     }
 
-    fn is_packedr<'a>(&'a self, index: &'a Index<T::Seq>) -> LocalBoxFuture<'a, Result<bool>> {
+    fn is_packedr<'a>(&'a self, index: &'a Index<T::Seq>) -> FutureResult<'a, bool> {
         self.is_packed(index).boxed_local()
     }
 
     fn filledr<'a>(
         &'a self,
         index: &'a Index<T::Seq>,
-    ) -> LocalBoxFuture<'a, Result<Option<Index<T::Seq>>>> {
+    ) -> FutureResult<'a, Option<Index<T::Seq>>> {
         self.filled(index).boxed_local()
     }
 
