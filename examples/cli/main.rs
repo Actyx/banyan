@@ -14,8 +14,11 @@ use tracing_subscriber;
 mod ipfs;
 
 use banyan::index::*;
-use banyan::tree::OffsetQuery;
-use banyan::{ipfs::Cid, tree::*};
+use banyan::{
+    ipfs::Cid,
+    query::{OffsetRangeQuery, Query},
+    tree::*,
+};
 use ipfs::IpfsStore;
 
 use bitvec::prelude::*;
@@ -515,7 +518,8 @@ async fn main() -> Result<()> {
             .ok_or(anyhow!("required arg before not provided"))?
             .parse()?;
         let mut tree = Tree::<TT, serde_cbor::Value>::new(root, forest).await?;
-        tree.forget_except(&OffsetQuery::new(offset)).await?;
+        tree.forget_except(&OffsetRangeQuery::from(offset..))
+            .await?;
         tree.dump().await?;
         println!("{:?}", tree);
     } else {

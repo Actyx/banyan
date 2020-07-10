@@ -5,7 +5,7 @@ use std::{collections::BTreeSet, sync::Arc};
 
 use banyan::index::*;
 use banyan::store::MemStore;
-use banyan::tree::*;
+use banyan::{query::Query, tree::*};
 
 use bitvec::prelude::BitVec;
 

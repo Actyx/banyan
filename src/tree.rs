@@ -1,6 +1,10 @@
 use super::index::*;
 use crate::ipfs::Cid;
-use crate::{store::ArcStore, zstd_array::ZstdArrayBuilder};
+use crate::{
+    query::{OffsetRangeQuery, Query},
+    store::ArcStore,
+    zstd_array::ZstdArrayBuilder,
+};
 use anyhow::{anyhow, Result};
 use bitvec::prelude::*;
 use future::LocalBoxFuture;
@@ -52,16 +56,6 @@ pub struct Tree<T: TreeTypes, V> {
     root: Option<Index<T::Seq>>,
     forest: Arc<Forest<T>>,
     _t: PhantomData<V>,
-}
-
-/// A query
-///
-/// Queries work on compact value sequences instead of individual values for efficiency.
-pub trait Query<T: TreeTypes> {
-    /// a bitvec with `x.data.count()` elements, where each value is a bool indicating if the query *does* match
-    fn containing(&self, offset: u64, x: &LeafIndex<T::Seq>, res: &mut BitVec);
-    /// a bitvec with `x.data.count()` elements, where each value is a bool indicating if the query *can* match
-    fn intersecting(&self, offset: u64, x: &BranchIndex<T::Seq>, res: &mut BitVec);
 }
 
 /// Configuration for a forest. Includes settings for when a node is considered full
@@ -226,7 +220,7 @@ impl<V: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static, T:
     }
 
     pub async fn collect_from<B: FromIterator<(T::Key, V)>>(&self, offset: u64) -> Result<B> {
-        let query = OffsetQuery::new(offset);
+        let query = OffsetRangeQuery::from(offset..);
         let items: Vec<Result<(T::Key, V)>> = self
             .stream_filtered(&query)
             .map_ok(|(_, k, v)| (k, v))
@@ -357,33 +351,6 @@ impl<V: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static, T:
     /// number of elements in the tree
     pub fn count(&self) -> u64 {
         self.root.as_ref().map(|x| x.count()).unwrap_or_default()
-    }
-}
-
-pub struct OffsetQuery {
-    from: u64,
-}
-
-impl OffsetQuery {
-    pub fn new(from: u64) -> Self {
-        Self { from }
-    }
-}
-
-impl<T: TreeTypes> Query<T> for OffsetQuery {
-    fn containing(&self, offset: u64, x: &LeafIndex<T::Seq>, res: &mut BitVec) {
-        info!("OffsetQuery::containing {}", offset);
-        let from = self.from;
-        for i in 0..(x.keys.len()).min(res.len()) {
-            let o = i as u64;
-            if res[i] {
-                res.set(i, o + offset >= from)
-            }
-        }
-    }
-    fn intersecting(&self, offset: u64, _x: &BranchIndex<T::Seq>, _res: &mut BitVec) {
-        info!("OffsetQuery::intersecting {}", offset);
-        // TODO: implement
     }
 }
 
@@ -1009,11 +976,7 @@ where
         Ok(())
     }
 
-    fn dumpr<'a>(
-        &'a self,
-        index: &'a Index<T::Seq>,
-        prefix: &'a str,
-    ) -> FutureResult<'a, ()> {
+    fn dumpr<'a>(&'a self, index: &'a Index<T::Seq>, prefix: &'a str) -> FutureResult<'a, ()> {
         self.dump(index, prefix).boxed_local()
     }
 
@@ -1098,10 +1061,7 @@ where
         self.is_packed(index).boxed_local()
     }
 
-    fn filledr<'a>(
-        &'a self,
-        index: &'a Index<T::Seq>,
-    ) -> FutureResult<'a, Option<Index<T::Seq>>> {
+    fn filledr<'a>(&'a self, index: &'a Index<T::Seq>) -> FutureResult<'a, Option<Index<T::Seq>>> {
         self.filled(index).boxed_local()
     }
 
