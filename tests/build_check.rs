@@ -64,30 +64,28 @@ async fn build_stream(xs: Vec<(Key, u64)>) -> quickcheck::TestResult {
     .await
 }
 
+async fn compare_filtered(xs: Vec<(Key, u64)>, range: Range<u64>) -> anyhow::Result<bool> {
+    let range = range.clone();
+    let tree = create_test_tree(xs.clone()).await?;
+    let actual = tree
+        .stream_filtered(&OffsetRangeQuery::from(range.clone()))
+        .collect::<Vec<_>>()
+        .await
+        .into_iter()
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    let expected = xs
+        .iter()
+        .cloned()
+        .enumerate()
+        .map(|(i, (k, v))| (i as u64, k, v))
+        .filter(|(offset, _, _)| range.contains(offset))
+        .collect::<Vec<_>>();
+    Ok(actual == expected)
+}
+
 #[quickcheck_async::tokio]
 async fn build_stream_filtered(xs: Vec<(Key, u64)>, range: Range<u64>) -> quickcheck::TestResult {
-    test(|| async {
-        let range = range.clone();
-        let tree = create_test_tree(xs.clone()).await?;
-        let actual = tree
-            .stream_filtered(&OffsetRangeQuery::from(range.clone()))
-            .collect::<Vec<_>>()
-            .await
-            .into_iter()
-            .collect::<anyhow::Result<Vec<_>>>()?;
-        let expected = xs
-            .iter()
-            .cloned()
-            .enumerate()
-            .map(|(i, (k, v))| (i as u64, k, v))
-            .filter(|(offset, _, _)| range.contains(offset))
-            .collect::<Vec<_>>();
-        if actual != expected {
-            println!("{:?} {:?} {:?}", range, actual, expected);
-        }
-        Ok(actual == expected)
-    })
-    .await
+    test(|| compare_filtered(xs.clone(), range.clone())).await
 }
 
 #[quickcheck_async::tokio]
@@ -101,4 +99,12 @@ async fn build_get(xs: Vec<(Key, u64)>) -> quickcheck::TestResult {
         Ok(actual == xs)
     })
     .await
+}
+
+#[tokio::test]
+async fn filter_test_simple() -> anyhow::Result<()> {
+    let _ = env_logger::builder().is_test(true).try_init();
+    let res = compare_filtered(vec![(Key(1), 1), (Key(2), 2)], 0..1).await;
+    assert_eq!(res.ok(), Some(true));
+    Ok(())
 }

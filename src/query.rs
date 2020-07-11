@@ -26,6 +26,7 @@ impl<TT: TreeTypes> Query<TT> for Box<dyn Query<TT>> {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct OffsetRangeQuery<R>(R);
 
 impl<R: RangeBounds<u64>> From<R> for OffsetRangeQuery<R> {
@@ -42,10 +43,10 @@ impl<T: TreeTypes, R: RangeBounds<u64>> Query<T> for OffsetRangeQuery<R> {
             res.set_all(false);
         } else {
             for i in 0..(index.keys.len()).min(res.len()) {
-                offset += 1;
                 if res[i] {
                     res.set(i, self.0.contains(&offset))
                 }
+                offset += 1;
             }
         }
     }

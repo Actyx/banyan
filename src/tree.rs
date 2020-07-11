@@ -300,7 +300,7 @@ impl<V: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static, T:
     }
 
     /// stream the tree, filtered by a query
-    pub fn stream_filtered<'a, Q: Query<T>>(
+    pub fn stream_filtered<'a, Q: Query<T> + Debug>(
         &'a self,
         query: &'a Q,
     ) -> impl Stream<Item = Result<(u64, T::Key, V)>> + 'a {
@@ -750,7 +750,7 @@ where
         Box::pin(s)
     }
 
-    fn stream_filtered<'a, V: DeserializeOwned, Q: Query<T>>(
+    fn stream_filtered<'a, V: DeserializeOwned, Q: Query<T> + Debug>(
         &'a self,
         offset: u64,
         query: &'a Q,

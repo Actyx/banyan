@@ -97,6 +97,7 @@ impl Semigroup for Value {
     }
 }
 
+#[derive(Debug)]
 struct DnfQuery(Vec<Value>);
 
 impl DnfQuery {

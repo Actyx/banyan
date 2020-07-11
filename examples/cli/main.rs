@@ -126,6 +126,7 @@ impl Semigroup for Key {
     }
 }
 
+#[derive(Debug)]
 struct DnfQuery(Vec<Key>);
 
 impl DnfQuery {
