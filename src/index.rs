@@ -112,18 +112,18 @@ impl<T: Serialize + DeserializeOwned + Semigroup + Clone> CompactSeq for SimpleC
 
 /// index for a leaf of n events
 #[derive(Debug, Clone)]
-pub struct LeafIndex<T> {
+pub struct LeafIndex<L, T> {
     // block is sealed
     pub sealed: bool,
     // link to the block
-    pub cid: Option<Cid>,
+    pub cid: Option<L>,
     /// A sequence of keys with the same number of values as the data block the cid points to.
     pub keys: T,
     // serialized size of the data
     pub value_bytes: u64,
 }
 
-impl<T: CompactSeq> LeafIndex<T> {
+impl<L, T: CompactSeq> LeafIndex<L, T> {
     pub fn keys(&self) -> impl Iterator<Item = T::Item> {
         self.keys.to_vec().into_iter()
     }
@@ -134,7 +134,7 @@ impl<T: CompactSeq> LeafIndex<T> {
 
 /// index for a branch node
 #[derive(Debug, Clone)]
-pub struct BranchIndex<T> {
+pub struct BranchIndex<L, T> {
     // number of events
     pub count: u64,
     // level of the tree node
@@ -142,7 +142,7 @@ pub struct BranchIndex<T> {
     // block is sealed
     pub sealed: bool,
     // link to the branch node
-    pub cid: Option<Cid>,
+    pub cid: Option<L>,
     // extra data
     pub summaries: T,
     // serialized size of the children
@@ -151,7 +151,7 @@ pub struct BranchIndex<T> {
     pub key_bytes: u64,
 }
 
-impl<T: CompactSeq> BranchIndex<T> {
+impl<L, T: CompactSeq> BranchIndex<L, T> {
     pub fn summaries<'a>(&'a self) -> impl Iterator<Item = T::Item> + 'a {
         self.summaries.to_vec().into_iter()
     }
@@ -159,12 +159,12 @@ impl<T: CompactSeq> BranchIndex<T> {
 
 /// index
 #[derive(Debug, Clone, From)]
-pub enum Index<T> {
-    Leaf(LeafIndex<T>),
-    Branch(BranchIndex<T>),
+pub enum Index<L, T> {
+    Leaf(LeafIndex<L, T>),
+    Branch(BranchIndex<L, T>),
 }
 
-impl<T: CompactSeq> Index<T> {
+impl<L, T: CompactSeq> Index<L, T> {
     pub fn data(&self) -> &T {
         match self {
             Index::Leaf(x) => &x.keys,
@@ -172,7 +172,7 @@ impl<T: CompactSeq> Index<T> {
         }
     }
 
-    pub fn cid(&self) -> &Option<Cid> {
+    pub fn cid(&self) -> &Option<L> {
         match self {
             Index::Leaf(x) => &x.cid,
             Index::Branch(x) => &x.cid,
@@ -212,22 +212,22 @@ impl<T: CompactSeq> Index<T> {
 
 #[derive(Debug, Clone)]
 /// fully in memory representation of a branch node
-pub struct Branch<T> {
+pub struct Branch<L, T> {
     // index data for the children
-    pub children: Vec<Index<T>>,
+    pub children: Vec<Index<L, T>>,
 }
 
-impl<T: Clone> Branch<T> {
-    pub fn new(children: Vec<Index<T>>) -> Self {
+impl<L: Clone, T: Clone> Branch<L, T> {
+    pub fn new(children: Vec<Index<L, T>>) -> Self {
         assert!(!children.is_empty());
         Self { children }
     }
-    pub fn last_child(&mut self) -> &Index<T> {
+    pub fn last_child(&mut self) -> &Index<L, T> {
         self.children
             .last()
             .expect("branch can never have 0 children")
     }
-    pub fn last_child_mut(&mut self) -> &mut Index<T> {
+    pub fn last_child_mut(&mut self) -> &mut Index<L, T> {
         self.children
             .last_mut()
             .expect("branch can never have 0 children")
@@ -278,11 +278,11 @@ impl Leaf {
     }
 }
 
-pub(crate) enum NodeInfo<'a, T> {
-    Branch(&'a BranchIndex<T>, Branch<T>),
-    Leaf(&'a LeafIndex<T>, Leaf),
-    PurgedBranch(&'a BranchIndex<T>),
-    PurgedLeaf(&'a LeafIndex<T>),
+pub(crate) enum NodeInfo<'a, L, T> {
+    Branch(&'a BranchIndex<L, T>, Branch<L, T>),
+    Leaf(&'a LeafIndex<L, T>, Leaf),
+    PurgedBranch(&'a BranchIndex<L, T>),
+    PurgedLeaf(&'a LeafIndex<L, T>),
 }
 
 impl Leaf {
@@ -309,8 +309,8 @@ struct IndexWC<'a, T> {
     data: &'a T,
 }
 
-impl<'a, T> From<&'a Index<T>> for IndexWC<'a, T> {
-    fn from(value: &'a Index<T>) -> Self {
+impl<'a, L, T> From<&'a Index<L, T>> for IndexWC<'a, T> {
+    fn from(value: &'a Index<L, T>) -> Self {
         match value {
             Index::Branch(i) => Self {
                 sealed: i.sealed,
@@ -353,7 +353,7 @@ struct IndexRC<T> {
 }
 
 impl<T> IndexRC<T> {
-    fn to_index(self, cids: &mut VecDeque<Cid>) -> Index<T> {
+    fn to_index<L>(self, cids: &mut VecDeque<L>) -> Index<L, T> {
         let cid = if !self.purged { cids.pop_front() } else { None };
         if let (Some(level), Some(count), Some(key_bytes)) =
             (self.level, self.count, self.key_bytes)
@@ -388,14 +388,14 @@ use std::{
 const CBOR_ARRAY_START: u8 = (4 << 5) | 31;
 const CBOR_BREAK: u8 = 255;
 
-pub fn serialize_compressed<T: Serialize + CompactSeq>(
+pub fn serialize_compressed<L: Serialize, T: Serialize + CompactSeq>(
     key: &salsa20::Key,
     nonce: &salsa20::XNonce,
-    items: &[Index<T>],
+    items: &[Index<L, T>],
     level: i32,
     into: &mut Vec<u8>,
 ) -> Result<()> {
-    let mut cids: Vec<&Cid> = Vec::new();
+    let mut cids: Vec<&L> = Vec::new();
     let mut compressed: Vec<u8> = Vec::new();
     compressed.extend_from_slice(&nonce);
     let mut writer = zstd::stream::write::Encoder::new(compressed.by_ref(), level)?;
@@ -415,11 +415,11 @@ pub fn serialize_compressed<T: Serialize + CompactSeq>(
     )?)
 }
 
-pub fn deserialize_compressed<T: DeserializeOwned>(
+pub fn deserialize_compressed<L: DeserializeOwned, T: DeserializeOwned>(
     key: &salsa20::Key,
     ipld: &[u8],
-) -> Result<Vec<Index<T>>> {
-    let (mut cids, compressed): (VecDeque<Cid>, serde_cbor::Value) = serde_cbor::from_slice(ipld)?;
+) -> Result<Vec<Index<L, T>>> {
+    let (mut cids, compressed): (VecDeque<L>, serde_cbor::Value) = serde_cbor::from_slice(ipld)?;
     if let serde_cbor::Value::Bytes(mut compressed) = compressed {
         if compressed.len() < 24 {
             return Err(anyhow!("nonce missing"));

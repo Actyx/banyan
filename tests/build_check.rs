@@ -17,6 +17,7 @@ struct Key(u64);
 impl TreeTypes for TT {
     type Key = Key;
     type Seq = SimpleCompactSeq<Key>;
+    type Link = banyan::ipfs::Cid;
 }
 
 impl Semigroup for Key {

@@ -11,17 +11,17 @@ use std::ops::RangeBounds;
 /// Queries work on compact value sequences instead of individual values for efficiency.
 pub trait Query<T: TreeTypes> {
     /// a bitvec with `x.data.count()` elements, where each value is a bool indicating if the query *does* match
-    fn containing(&self, offset: u64, _index: &LeafIndex<T::Seq>, res: &mut BitVec);
+    fn containing(&self, offset: u64, _index: &LeafIndex<T::Link, T::Seq>, res: &mut BitVec);
     /// a bitvec with `x.data.count()` elements, where each value is a bool indicating if the query *can* match
-    fn intersecting(&self, offset: u64, _index: &BranchIndex<T::Seq>, res: &mut BitVec);
+    fn intersecting(&self, offset: u64, _index: &BranchIndex<T::Link, T::Seq>, res: &mut BitVec);
 }
 
 impl<TT: TreeTypes> Query<TT> for Box<dyn Query<TT>> {
-    fn containing(&self, offset: u64, x: &LeafIndex<TT::Seq>, res: &mut BitVec) {
+    fn containing(&self, offset: u64, x: &LeafIndex<TT::Link, TT::Seq>, res: &mut BitVec) {
         self.as_ref().containing(offset, x, res);
     }
 
-    fn intersecting(&self, offset: u64, x: &BranchIndex<TT::Seq>, res: &mut BitVec) {
+    fn intersecting(&self, offset: u64, x: &BranchIndex<TT::Link, TT::Seq>, res: &mut BitVec) {
         self.as_ref().intersecting(offset, x, res);
     }
 }
@@ -36,7 +36,7 @@ impl<R: RangeBounds<u64>> From<R> for OffsetRangeQuery<R> {
 }
 
 impl<T: TreeTypes, R: RangeBounds<u64>> Query<T> for OffsetRangeQuery<R> {
-    fn containing(&self, mut offset: u64, index: &LeafIndex<T::Seq>, res: &mut BitVec) {
+    fn containing(&self, mut offset: u64, index: &LeafIndex<T::Link, T::Seq>, res: &mut BitVec) {
         let range = offset..offset + index.keys.count();
         // shortcut test
         if !&self.0.intersects(&range) {
@@ -51,7 +51,7 @@ impl<T: TreeTypes, R: RangeBounds<u64>> Query<T> for OffsetRangeQuery<R> {
         }
     }
 
-    fn intersecting(&self, offset: u64, index: &BranchIndex<T::Seq>, res: &mut BitVec) {
+    fn intersecting(&self, offset: u64, index: &BranchIndex<T::Link, T::Seq>, res: &mut BitVec) {
         // we just look at whether the entire index overlaps with the query range.
         // if not, we just clear all bits.
         let range = offset..offset + index.count;
@@ -64,11 +64,11 @@ impl<T: TreeTypes, R: RangeBounds<u64>> Query<T> for OffsetRangeQuery<R> {
 pub struct EmptyQuery;
 
 impl<TT: TreeTypes> Query<TT> for EmptyQuery {
-    fn containing(&self, _offset: u64, _index: &LeafIndex<TT::Seq>, res: &mut BitVec) {
+    fn containing(&self, _offset: u64, _index: &LeafIndex<TT::Link, TT::Seq>, res: &mut BitVec) {
         res.set_all(false);
     }
 
-    fn intersecting(&self, _offset: u64, _index: &BranchIndex<TT::Seq>, res: &mut BitVec) {
+    fn intersecting(&self, _offset: u64, _index: &BranchIndex<TT::Link, TT::Seq>, res: &mut BitVec) {
         res.set_all(false);
     }
 }
@@ -76,11 +76,11 @@ impl<TT: TreeTypes> Query<TT> for EmptyQuery {
 pub struct AllQuery;
 
 impl<TT: TreeTypes> Query<TT> for AllQuery {
-    fn containing(&self, _offset: u64, _index: &LeafIndex<TT::Seq>, _res: &mut BitVec) {
+    fn containing(&self, _offset: u64, _index: &LeafIndex<TT::Link, TT::Seq>, _res: &mut BitVec) {
         // this query does not add any additional constraints, so we don't have to do anything
     }
 
-    fn intersecting(&self, _offset: u64, _index: &BranchIndex<TT::Seq>, _res: &mut BitVec) {
+    fn intersecting(&self, _offset: u64, _index: &BranchIndex<TT::Link, TT::Seq>, _res: &mut BitVec) {
         // this query does not add any additional constraints, so we don't have to do anything
     }
 }
@@ -88,12 +88,12 @@ impl<TT: TreeTypes> Query<TT> for AllQuery {
 pub struct AndQuery<A, B>(A, B);
 
 impl<TT: TreeTypes, A: Query<TT>, B: Query<TT>> Query<TT> for AndQuery<A, B> {
-    fn containing(&self, offset: u64, index: &LeafIndex<TT::Seq>, res: &mut BitVec) {
+    fn containing(&self, offset: u64, index: &LeafIndex<TT::Link, TT::Seq>, res: &mut BitVec) {
         self.0.containing(offset, index, res);
         self.1.containing(offset, index, res);
     }
 
-    fn intersecting(&self, offset: u64, index: &BranchIndex<TT::Seq>, res: &mut BitVec) {
+    fn intersecting(&self, offset: u64, index: &BranchIndex<TT::Link, TT::Seq>, res: &mut BitVec) {
         self.0.intersecting(offset, index, res);
         self.1.intersecting(offset, index, res);
     }

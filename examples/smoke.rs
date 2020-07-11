@@ -8,6 +8,7 @@ use banyan::store::MemStore;
 use banyan::{query::Query, tree::*};
 
 use bitvec::prelude::BitVec;
+use banyan::ipfs::Cid;
 
 pub type Error = anyhow::Error;
 pub type Result<T> = anyhow::Result<T>;
@@ -17,6 +18,7 @@ struct TT {}
 impl TreeTypes for TT {
     type Key = Value;
     type Seq = ValueSeq;
+    type Link = Cid;
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialOrd, PartialEq, Ord, Eq)]
@@ -110,14 +112,14 @@ impl DnfQuery {
 }
 
 impl Query<TT> for DnfQuery {
-    fn intersecting(&self, _: u64, x: &BranchIndex<ValueSeq>, matching: &mut BitVec) {
+    fn intersecting(&self, _: u64, x: &BranchIndex<Cid, ValueSeq>, matching: &mut BitVec) {
         for (i, s) in x.summaries().take(matching.len()).enumerate() {
             if matching[i] {
                 matching.set(i, self.intersects(&s));
             }
         }
     }
-    fn containing(&self, _: u64, x: &LeafIndex<ValueSeq>, matching: &mut BitVec) {
+    fn containing(&self, _: u64, x: &LeafIndex<Cid, ValueSeq>, matching: &mut BitVec) {
         for (i, s) in x.keys().take(matching.len()).enumerate() {
             if matching[i] {
                 matching.set(i, self.contains(&s));

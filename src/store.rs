@@ -7,12 +7,12 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-pub trait Store {
-    fn put(&self, data: &[u8], codec: cid::Codec) -> BoxFuture<Result<Cid>>;
-    fn get(&self, cid: &Cid) -> BoxFuture<Result<Arc<[u8]>>>;
+pub trait Store<L> {
+    fn put(&self, data: &[u8], codec: cid::Codec) -> BoxFuture<Result<L>>;
+    fn get(&self, cid: &L) -> BoxFuture<Result<Arc<[u8]>>>;
 }
 
-pub type ArcStore = Arc<dyn Store + Send + Sync + 'static>;
+pub type ArcStore<L> = Arc<dyn Store<L> + Send + Sync + 'static>;
 
 pub struct MemStore(Arc<RwLock<HashMap<Cid, Arc<[u8]>>>>);
 
@@ -22,7 +22,7 @@ impl MemStore {
     }
 }
 
-impl Store for MemStore {
+impl Store<Cid> for MemStore {
     fn put(&self, data: &[u8], codec: cid::Codec) -> BoxFuture<Result<Cid>> {
         let cid = Cid::new(data, codec);
         self.0

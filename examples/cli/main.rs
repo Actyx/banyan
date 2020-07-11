@@ -31,6 +31,7 @@ struct TT {}
 impl TreeTypes for TT {
     type Key = Key;
     type Seq = KeySeq;
+    type Link = Cid;
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialOrd, PartialEq, Ord, Eq)]
@@ -139,14 +140,14 @@ impl DnfQuery {
 }
 
 impl Query<TT> for DnfQuery {
-    fn intersecting(&self, _: u64, x: &BranchIndex<KeySeq>, matching: &mut BitVec) {
+    fn intersecting(&self, _: u64, x: &BranchIndex<Cid, KeySeq>, matching: &mut BitVec) {
         for (i, s) in x.summaries().take(matching.len()).enumerate() {
             if matching[i] {
                 matching.set(i, self.intersects(&s));
             }
         }
     }
-    fn containing(&self, _: u64, x: &LeafIndex<KeySeq>, matching: &mut BitVec) {
+    fn containing(&self, _: u64, x: &LeafIndex<Cid, KeySeq>, matching: &mut BitVec) {
         for (i, s) in x.keys().take(matching.len()).enumerate() {
             if matching[i] {
                 matching.set(i, self.contains(&s));
