@@ -4,9 +4,10 @@ use serde::{Deserialize, Serialize};
 use std::{collections::BTreeSet, sync::Arc};
 
 use banyan::index::*;
-use banyan::store::MemStore;
+use banyan::ipfs::MemStore;
 use banyan::{query::Query, tree::*};
 
+use banyan::ipfs::Cid;
 use bitvec::prelude::BitVec;
 
 pub type Error = anyhow::Error;
@@ -17,6 +18,7 @@ struct TT {}
 impl TreeTypes for TT {
     type Key = Value;
     type Seq = ValueSeq;
+    type Link = Cid;
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialOrd, PartialEq, Ord, Eq)]
@@ -110,14 +112,14 @@ impl DnfQuery {
 }
 
 impl Query<TT> for DnfQuery {
-    fn intersecting(&self, _: u64, x: &BranchIndex<ValueSeq>, matching: &mut BitVec) {
+    fn intersecting(&self, _: u64, x: &BranchIndex<TT>, matching: &mut BitVec) {
         for (i, s) in x.summaries().take(matching.len()).enumerate() {
             if matching[i] {
                 matching.set(i, self.intersects(&s));
             }
         }
     }
-    fn containing(&self, _: u64, x: &LeafIndex<ValueSeq>, matching: &mut BitVec) {
+    fn containing(&self, _: u64, x: &LeafIndex<TT>, matching: &mut BitVec) {
         for (i, s) in x.keys().take(matching.len()).enumerate() {
             if matching[i] {
                 matching.set(i, self.contains(&s));

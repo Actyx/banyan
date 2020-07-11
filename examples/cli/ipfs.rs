@@ -50,8 +50,13 @@ impl IpfsStore {
     }
 }
 
-impl Store for IpfsStore {
-    fn put(&self, data: &[u8], codec: cid::Codec) -> BoxFuture<Result<Cid>> {
+impl Store<Cid> for IpfsStore {
+    fn put(&self, data: &[u8], raw: bool) -> BoxFuture<Result<Cid>> {
+        let codec = if raw {
+            cid::Codec::Raw
+        } else {
+            cid::Codec::DagCBOR
+        };
         let data = data.to_vec();
         async move { crate::ipfs::block_put(&data, codec, false).await }.boxed()
     }

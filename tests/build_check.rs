@@ -1,5 +1,5 @@
 use banyan::index::{Semigroup, SimpleCompactSeq};
-use banyan::store::MemStore;
+use banyan::ipfs::MemStore;
 use banyan::{
     query::OffsetRangeQuery,
     tree::{Config, Forest, Tree, TreeTypes},
@@ -17,6 +17,7 @@ struct Key(u64);
 impl TreeTypes for TT {
     type Key = Key;
     type Seq = SimpleCompactSeq<Key>;
+    type Link = banyan::ipfs::Cid;
 }
 
 impl Semigroup for Key {

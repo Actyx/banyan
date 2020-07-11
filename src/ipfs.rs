@@ -1,8 +1,15 @@
 //! helper methods to work with ipfs/ipld
+use crate::store::Store;
+use anyhow::{anyhow, Result};
 use derive_more::{Display, From, FromStr};
+use futures::{future::BoxFuture, prelude::*};
 use multihash::Sha2_256;
 use serde::{de::Visitor, ser::SerializeStruct, Deserialize, Deserializer, Serialize, Serializer};
 use serde_cbor::tags::Tagged;
+use std::{
+    collections::HashMap,
+    sync::{Arc, RwLock},
+};
 use std::{convert::TryFrom, fmt, result, str::FromStr};
 
 #[derive(Clone, Hash, PartialEq, Eq, Display, From, FromStr)]
@@ -136,5 +143,38 @@ impl<'de> Deserialize<'de> for CidIo {
             }
         }
         deserializer.deserialize_any(CidVisitor)
+    }
+}
+
+pub struct MemStore(Arc<RwLock<HashMap<Cid, Arc<[u8]>>>>);
+
+impl MemStore {
+    pub fn new() -> Self {
+        Self(Arc::new(RwLock::new(HashMap::new())))
+    }
+}
+
+impl Store<Cid> for MemStore {
+    fn put(&self, data: &[u8], raw: bool) -> BoxFuture<Result<Cid>> {
+        let codec = if raw {
+            cid::Codec::Raw
+        } else {
+            cid::Codec::DagCBOR
+        };
+        let cid = Cid::new(data, codec);
+        self.0
+            .as_ref()
+            .write()
+            .unwrap()
+            .insert(cid.clone(), data.into());
+        future::ok(cid).boxed()
+    }
+    fn get(&self, cid: &Cid) -> BoxFuture<Result<Arc<[u8]>>> {
+        let x = self.0.as_ref().read().unwrap();
+        if let Some(value) = x.get(cid) {
+            future::ok(value.clone()).boxed()
+        } else {
+            future::err(anyhow!("not there")).boxed()
+        }
     }
 }
