@@ -17,10 +17,10 @@ use serde::{de::DeserializeOwned, Serialize};
 use std::fmt::Debug;
 use std::{
     fmt,
+    hash::Hash,
     iter::FromIterator,
     marker::PhantomData,
     sync::{Arc, RwLock},
-    hash::Hash,
 };
 use tracing::*;
 
@@ -559,7 +559,10 @@ where
     }
 
     /// load a branch given a branch index
-    async fn load_branch(&self, index: &BranchIndex<T::Link, T::Seq>) -> Result<Option<Branch<T::Link, T::Seq>>> {
+    async fn load_branch(
+        &self,
+        index: &BranchIndex<T::Link, T::Seq>,
+    ) -> Result<Option<Branch<T::Link, T::Seq>>> {
         Ok(if let Some(cid) = &index.cid {
             let bytes = self.store.get(&cid).await?;
             let children: Vec<_> = deserialize_compressed(&self.index_key, &bytes)?;
@@ -572,7 +575,8 @@ where
 
     async fn load_branch_from_cid(&self, cid: T::Link) -> Result<Index<T::Link, T::Seq>> {
         let bytes = self.store.get(&cid).await?;
-        let children: Vec<Index<T::Link, T::Seq>> = deserialize_compressed(&self.index_key, &bytes)?;
+        let children: Vec<Index<T::Link, T::Seq>> =
+            deserialize_compressed(&self.index_key, &bytes)?;
         let count = children.iter().map(|x| x.count()).sum();
         let level = children.iter().map(|x| x.level()).max().unwrap() + 1;
         let value_bytes = children.iter().map(|x| x.value_bytes()).sum();
@@ -614,7 +618,10 @@ where
     }
 
     /// load a node, returning a structure containing the index and value for convenient matching
-    async fn load_node<'a>(&self, index: &'a Index<T::Link, T::Seq>) -> Result<NodeInfo<'a, T::Link, T::Seq>> {
+    async fn load_node<'a>(
+        &self,
+        index: &'a Index<T::Link, T::Seq>,
+    ) -> Result<NodeInfo<'a, T::Link, T::Seq>> {
         Ok(match index {
             Index::Branch(index) => {
                 if let Some(branch) = self.load_branch_cached(index).await? {
@@ -634,7 +641,11 @@ where
     }
 
     /// store a leaf in the cache, and return it wrapped into a generic index
-    fn cache_leaf(&self, index: LeafIndex<T::Link, T::Seq>, node: Leaf) -> LeafIndex<T::Link, T::Seq> {
+    fn cache_leaf(
+        &self,
+        index: LeafIndex<T::Link, T::Seq>,
+        node: Leaf,
+    ) -> LeafIndex<T::Link, T::Seq> {
         if let Some(cid) = &index.cid {
             self.leaf_cache.write().unwrap().put(cid.clone(), node);
         }
@@ -979,11 +990,18 @@ where
         Ok(())
     }
 
-    fn dumpr<'a>(&'a self, index: &'a Index<T::Link, T::Seq>, prefix: &'a str) -> FutureResult<'a, ()> {
+    fn dumpr<'a>(
+        &'a self,
+        index: &'a Index<T::Link, T::Seq>,
+        prefix: &'a str,
+    ) -> FutureResult<'a, ()> {
         self.dump(index, prefix).boxed_local()
     }
 
-    async fn filled(&self, index: &Index<T::Link, T::Seq>) -> Result<Option<Index<T::Link, T::Seq>>> {
+    async fn filled(
+        &self,
+        index: &Index<T::Link, T::Seq>,
+    ) -> Result<Option<Index<T::Link, T::Seq>>> {
         if index.sealed() {
             Ok(Some(index.clone()))
         } else if let NodeInfo::Branch(_, branch) = self.load_node(index).await? {
@@ -997,7 +1015,11 @@ where
         }
     }
 
-    async fn check_invariants(&self, index: &Index<T::Link, T::Seq>, msgs: &mut Vec<String>) -> Result<()> {
+    async fn check_invariants(
+        &self,
+        index: &Index<T::Link, T::Seq>,
+        msgs: &mut Vec<String>,
+    ) -> Result<()> {
         macro_rules! check {
             ($expression:expr) => {
                 if !$expression {
@@ -1064,13 +1086,17 @@ where
         self.is_packed(index).boxed_local()
     }
 
-    fn filledr<'a>(&'a self, index: &'a Index<T::Link, T::Seq>) -> FutureResult<'a, Option<Index<T::Link, T::Seq>>> {
+    fn filledr<'a>(
+        &'a self,
+        index: &'a Index<T::Link, T::Seq>,
+    ) -> FutureResult<'a, Option<Index<T::Link, T::Seq>>> {
         self.filled(index).boxed_local()
     }
 
     /// creates a new forest
     pub fn new(store: ArcStore<T::Link>, config: Config) -> Self {
-        let branch_cache = RwLock::new(lru::LruCache::<T::Link, Branch<T::Link, T::Seq>>::new(1000));
+        let branch_cache =
+            RwLock::new(lru::LruCache::<T::Link, Branch<T::Link, T::Seq>>::new(1000));
         let leaf_cache = RwLock::new(lru::LruCache::<T::Link, Leaf>::new(1000));
         let index_key = config.index_key;
         let value_key = config.value_key;

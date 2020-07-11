@@ -7,8 +7,8 @@ use banyan::index::*;
 use banyan::store::MemStore;
 use banyan::{query::Query, tree::*};
 
-use bitvec::prelude::BitVec;
 use banyan::ipfs::Cid;
+use bitvec::prelude::BitVec;
 
 pub type Error = anyhow::Error;
 pub type Result<T> = anyhow::Result<T>;

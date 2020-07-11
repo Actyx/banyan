@@ -68,7 +68,12 @@ impl<TT: TreeTypes> Query<TT> for EmptyQuery {
         res.set_all(false);
     }
 
-    fn intersecting(&self, _offset: u64, _index: &BranchIndex<TT::Link, TT::Seq>, res: &mut BitVec) {
+    fn intersecting(
+        &self,
+        _offset: u64,
+        _index: &BranchIndex<TT::Link, TT::Seq>,
+        res: &mut BitVec,
+    ) {
         res.set_all(false);
     }
 }
@@ -80,7 +85,12 @@ impl<TT: TreeTypes> Query<TT> for AllQuery {
         // this query does not add any additional constraints, so we don't have to do anything
     }
 
-    fn intersecting(&self, _offset: u64, _index: &BranchIndex<TT::Link, TT::Seq>, _res: &mut BitVec) {
+    fn intersecting(
+        &self,
+        _offset: u64,
+        _index: &BranchIndex<TT::Link, TT::Seq>,
+        _res: &mut BitVec,
+    ) {
         // this query does not add any additional constraints, so we don't have to do anything
     }
 }
