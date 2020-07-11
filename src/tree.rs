@@ -44,7 +44,7 @@ pub trait TreeTypes {
 pub struct Forest<T: TreeTypes> {
     store: ArcStore<T::Link>,
     config: Config,
-    branch_cache: RwLock<lru::LruCache<T::Link, Branch<T::Link, T::Seq>>>,
+    branch_cache: RwLock<lru::LruCache<T::Link, Branch<T>>>,
     leaf_cache: RwLock<lru::LruCache<T::Link, Leaf>>,
     index_key: salsa20::Key,
     value_key: salsa20::Key,
@@ -55,7 +55,7 @@ pub struct Forest<T: TreeTypes> {
 ///
 /// Most of the logic except for handling the empty case is implemented in the forest
 pub struct Tree<T: TreeTypes, V> {
-    root: Option<Index<T::Link, T::Seq>>,
+    root: Option<Index<T>>,
     forest: Arc<Forest<T>>,
     _t: PhantomData<V>,
 }
@@ -173,7 +173,7 @@ impl<V: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static, T:
         }
     }
 
-    fn with_root(&self, root: Option<Index<T::Link, T::Seq>>) -> Self {
+    fn with_root(&self, root: Option<Index<T>>) -> Self {
         Tree {
             root,
             forest: self.forest.clone(),
@@ -357,10 +357,10 @@ impl<V: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static, T:
 }
 
 /// Utility method to zip a number of indices with an offset that is increased by each index value
-fn zip_with_offset<'a, I: Iterator<Item = Index<L, T>> + 'a, L, T: CompactSeq + 'a>(
+fn zip_with_offset<'a, I: Iterator<Item = Index<T>> + 'a, T: TreeTypes + 'a>(
     value: I,
     offset: u64,
-) -> impl Iterator<Item = (Index<L, T>, u64)> + 'a {
+) -> impl Iterator<Item = (Index<T>, u64)> + 'a {
     value.scan(offset, |offset, x| {
         let o0 = *offset;
         *offset += x.count();
@@ -369,10 +369,10 @@ fn zip_with_offset<'a, I: Iterator<Item = Index<L, T>> + 'a, L, T: CompactSeq + 
 }
 
 /// Utility method to zip a number of indices with an offset that is increased by each index value
-fn zip_with_offset_ref<'a, I: Iterator<Item = &'a Index<L, T>> + 'a, L: 'a, T: CompactSeq + 'a>(
+fn zip_with_offset_ref<'a, I: Iterator<Item = &'a Index<T>> + 'a, T: TreeTypes + 'a>(
     value: I,
     offset: u64,
-) -> impl Iterator<Item = (&'a Index<L, T>, u64)> + 'a {
+) -> impl Iterator<Item = (&'a Index<T>, u64)> + 'a {
     value.scan(offset, |offset, x| {
         let o0 = *offset;
         *offset += x.count();
@@ -391,7 +391,7 @@ where
     }
 
     /// load a leaf given a leaf index
-    async fn load_leaf(&self, index: &LeafIndex<T::Link, T::Seq>) -> Result<Option<Leaf>> {
+    async fn load_leaf(&self, index: &LeafIndex<T>) -> Result<Option<Leaf>> {
         Ok(if let Some(cid) = &index.cid {
             let data = &self.store.get(cid).await?;
             if data.len() < 24 {
@@ -415,7 +415,7 @@ where
         mut keys: T::Seq,
         builder: ZstdArrayBuilder,
         from: &mut std::iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
-    ) -> Result<LeafIndex<T::Link, T::Seq>> {
+    ) -> Result<LeafIndex<T>> {
         assert!(from.peek().is_some());
         let builder = builder.fill(
             || {
@@ -438,8 +438,8 @@ where
         tmp.extend(leaf.as_ref().compressed());
         XSalsa20::new(&self.value_key.into(), &nonce.into()).apply_keystream(&mut tmp[24..]);
         // store leaf
-        let cid = self.store.put(&tmp, cid::Codec::Raw).await?;
-        let index = LeafIndex {
+        let cid = self.store.put(&tmp, true).await?;
+        let index: LeafIndex<T> = LeafIndex {
             cid: Some(cid),
             value_bytes: leaf.as_ref().compressed().len() as u64,
             sealed: self.leaf_sealed(leaf.as_ref().compressed().len() as u64, keys.count()),
@@ -456,9 +456,9 @@ where
 
     async fn extend_above<V: Serialize + Debug>(
         &self,
-        node: Index<T::Link, T::Seq>,
+        node: Index<T>,
         from: &mut std::iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
-    ) -> Result<Index<T::Link, T::Seq>> {
+    ) -> Result<Index<T>> {
         let mut node = self.extend(&node, from).await?;
         while from.peek().is_some() || node.level() == 0 {
             let level = node.level() + 1;
@@ -469,10 +469,10 @@ where
 
     async fn create_branch<V: Serialize + Debug>(
         &self,
-        mut children: Vec<Index<T::Link, T::Seq>>,
+        mut children: Vec<Index<T>>,
         level: u32,
         from: &mut std::iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
-    ) -> Result<BranchIndex<T::Link, T::Seq>> {
+    ) -> Result<BranchIndex<T>> {
         assert!(children.iter().all(|child| child.level() <= level - 1));
         let mut summaries = children
             .iter()
@@ -490,7 +490,7 @@ where
         let key_bytes = children.iter().map(|x| x.key_bytes()).sum::<u64>() + encoded_children_len;
         let sealed = self.branch_sealed(&children, level);
         let summaries: T::Seq = T::Seq::new(summaries.into_iter())?;
-        let index = BranchIndex {
+        let index: BranchIndex<T> = BranchIndex {
             level,
             count,
             sealed,
@@ -513,7 +513,7 @@ where
         &self,
         level: u32,
         from: &mut std::iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
-    ) -> Result<Index<T::Link, T::Seq>> {
+    ) -> Result<Index<T>> {
         assert!(from.peek().is_some());
         if level == 0 {
             Ok(self
@@ -533,12 +533,12 @@ where
         &'a self,
         level: u32,
         from: &'a mut std::iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
-    ) -> FutureResult<'a, Index<T::Link, T::Seq>> {
+    ) -> FutureResult<'a, Index<T>> {
         self.fill_node(level, from).boxed_local()
     }
 
     /// predicate to determine if a leaf is sealed, based on the config
-    fn branch_sealed(&self, items: &[Index<T::Link, T::Seq>], level: u32) -> bool {
+    fn branch_sealed(&self, items: &[Index<T>], level: u32) -> bool {
         // a branch with less than 2 children is never considered sealed.
         // if we ever get this a branch that is too large despite having just 1 child,
         // we should just panic.
@@ -559,24 +559,20 @@ where
     }
 
     /// load a branch given a branch index
-    async fn load_branch(
-        &self,
-        index: &BranchIndex<T::Link, T::Seq>,
-    ) -> Result<Option<Branch<T::Link, T::Seq>>> {
+    async fn load_branch(&self, index: &BranchIndex<T>) -> Result<Option<Branch<T>>> {
         Ok(if let Some(cid) = &index.cid {
             let bytes = self.store.get(&cid).await?;
             let children: Vec<_> = deserialize_compressed(&self.index_key, &bytes)?;
             // let children = CborZstdArrayRef::new(bytes.as_ref()).items()?;
-            Some(Branch::<T::Link, T::Seq>::new(children))
+            Some(Branch::<T>::new(children))
         } else {
             None
         })
     }
 
-    async fn load_branch_from_cid(&self, cid: T::Link) -> Result<Index<T::Link, T::Seq>> {
+    async fn load_branch_from_cid(&self, cid: T::Link) -> Result<Index<T>> {
         let bytes = self.store.get(&cid).await?;
-        let children: Vec<Index<T::Link, T::Seq>> =
-            deserialize_compressed(&self.index_key, &bytes)?;
+        let children: Vec<Index<T>> = deserialize_compressed(&self.index_key, &bytes)?;
         let count = children.iter().map(|x| x.count()).sum();
         let level = children.iter().map(|x| x.level()).max().unwrap() + 1;
         let value_bytes = children.iter().map(|x| x.value_bytes()).sum();
@@ -596,10 +592,7 @@ where
     }
 
     /// load a branch given a branch index, from the cache
-    async fn load_branch_cached(
-        &self,
-        index: &BranchIndex<T::Link, T::Seq>,
-    ) -> Result<Option<Branch<T::Link, T::Seq>>> {
+    async fn load_branch_cached(&self, index: &BranchIndex<T>) -> Result<Option<Branch<T>>> {
         if let Some(cid) = &index.cid {
             match self.branch_cache.write().unwrap().pop(cid) {
                 Some(branch) => Ok(Some(branch)),
@@ -618,10 +611,7 @@ where
     }
 
     /// load a node, returning a structure containing the index and value for convenient matching
-    async fn load_node<'a>(
-        &self,
-        index: &'a Index<T::Link, T::Seq>,
-    ) -> Result<NodeInfo<'a, T::Link, T::Seq>> {
+    async fn load_node<'a>(&self, index: &'a Index<T>) -> Result<NodeInfo<'a, T>> {
         Ok(match index {
             Index::Branch(index) => {
                 if let Some(branch) = self.load_branch_cached(index).await? {
@@ -641,11 +631,7 @@ where
     }
 
     /// store a leaf in the cache, and return it wrapped into a generic index
-    fn cache_leaf(
-        &self,
-        index: LeafIndex<T::Link, T::Seq>,
-        node: Leaf,
-    ) -> LeafIndex<T::Link, T::Seq> {
+    fn cache_leaf(&self, index: LeafIndex<T>, node: Leaf) -> LeafIndex<T> {
         if let Some(cid) = &index.cid {
             self.leaf_cache.write().unwrap().put(cid.clone(), node);
         }
@@ -654,9 +640,9 @@ where
 
     async fn extend<V: Serialize + Debug>(
         &self,
-        index: &Index<T::Link, T::Seq>,
+        index: &Index<T>,
         from: &mut std::iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
-    ) -> Result<Index<T::Link, T::Seq>> {
+    ) -> Result<Index<T>> {
         info!(
             "extend {} {} {} {}",
             index.level(),
@@ -691,15 +677,15 @@ where
 
     fn extendr<'a, V: Serialize + Debug + 'a>(
         &'a self,
-        node: &'a Index<T::Link, T::Seq>,
+        node: &'a Index<T>,
         from: &'a mut std::iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
-    ) -> FutureResult<'a, Index<T::Link, T::Seq>> {
+    ) -> FutureResult<'a, Index<T>> {
         self.extend(node, from).boxed_local()
     }
 
     async fn get<V: DeserializeOwned>(
         &self,
-        index: &Index<T::Link, T::Seq>,
+        index: &Index<T>,
         mut offset: u64,
     ) -> Result<Option<(T::Key, V)>> {
         assert!(offset < index.count());
@@ -725,7 +711,7 @@ where
 
     fn getr<'a, V: DeserializeOwned + 'a>(
         &'a self,
-        node: &'a Index<T::Link, T::Seq>,
+        node: &'a Index<T>,
         offset: u64,
     ) -> FutureResult<'a, Option<(T::Key, V)>> {
         self.get(node, offset).boxed_local()
@@ -733,7 +719,7 @@ where
 
     fn stream<'a, V: DeserializeOwned + Debug>(
         &'a self,
-        index: Index<T::Link, T::Seq>,
+        index: Index<T>,
     ) -> LocalBoxStream<'a, Result<(T::Key, V)>> {
         let s = async move {
             Ok(match self.load_node(&index).await? {
@@ -766,7 +752,7 @@ where
         &'a self,
         offset: u64,
         query: &'a Q,
-        index: Index<T::Link, T::Seq>,
+        index: Index<T>,
     ) -> LocalBoxStream<'a, Result<(u64, T::Key, V)>> {
         let s = async move {
             Ok(match self.load_node(&index).await? {
@@ -810,7 +796,7 @@ where
         Box::pin(s)
     }
 
-    async fn persist_branch(&self, children: &[Index<T::Link, T::Seq>]) -> Result<(T::Link, u64)> {
+    async fn persist_branch(&self, children: &[Index<T>]) -> Result<(T::Link, u64)> {
         let mut cbor = Vec::new();
         serialize_compressed(
             &self.index_key,
@@ -819,18 +805,15 @@ where
             self.config.zstd_level,
             &mut cbor,
         )?;
-        Ok((
-            self.store.put(&cbor, cid::Codec::DagCBOR).await?,
-            cbor.len() as u64,
-        ))
+        Ok((self.store.put(&cbor, false).await?, cbor.len() as u64))
     }
 
     async fn forget_except<Q: Query<T>>(
         &self,
         offset: u64,
         query: &Q,
-        index: &Index<T::Link, T::Seq>,
-    ) -> Result<Index<T::Link, T::Seq>> {
+        index: &Index<T>,
+    ) -> Result<Index<T>> {
         match index {
             Index::Branch(index) => {
                 let mut index = index.clone();
@@ -879,16 +862,12 @@ where
         &'a self,
         offset: u64,
         query: &'a Q,
-        index: &'a Index<T::Link, T::Seq>,
-    ) -> FutureResult<'a, Index<T::Link, T::Seq>> {
+        index: &'a Index<T>,
+    ) -> FutureResult<'a, Index<T>> {
         self.forget_except(offset, query, index).boxed_local()
     }
 
-    async fn repair(
-        &self,
-        index: &Index<T::Link, T::Seq>,
-        report: &mut Vec<String>,
-    ) -> Result<Index<T::Link, T::Seq>> {
+    async fn repair(&self, index: &Index<T>, report: &mut Vec<String>) -> Result<Index<T>> {
         match index {
             Index::Branch(index) => {
                 let mut index = index.clone();
@@ -944,13 +923,13 @@ where
     // all these stubs could be replaced with https://docs.rs/async-recursion/
     fn repairr<'a>(
         &'a self,
-        index: &'a Index<T::Link, T::Seq>,
+        index: &'a Index<T>,
         report: &'a mut Vec<String>,
-    ) -> FutureResult<'a, Index<T::Link, T::Seq>> {
+    ) -> FutureResult<'a, Index<T>> {
         self.repair(index, report).boxed_local()
     }
 
-    async fn dump(&self, index: &Index<T::Link, T::Seq>, prefix: &str) -> Result<()> {
+    async fn dump(&self, index: &Index<T>, prefix: &str) -> Result<()> {
         match self.load_node(index).await? {
             NodeInfo::Leaf(index, _) => {
                 println!(
@@ -990,18 +969,11 @@ where
         Ok(())
     }
 
-    fn dumpr<'a>(
-        &'a self,
-        index: &'a Index<T::Link, T::Seq>,
-        prefix: &'a str,
-    ) -> FutureResult<'a, ()> {
+    fn dumpr<'a>(&'a self, index: &'a Index<T>, prefix: &'a str) -> FutureResult<'a, ()> {
         self.dump(index, prefix).boxed_local()
     }
 
-    async fn filled(
-        &self,
-        index: &Index<T::Link, T::Seq>,
-    ) -> Result<Option<Index<T::Link, T::Seq>>> {
+    async fn filled(&self, index: &Index<T>) -> Result<Option<Index<T>>> {
         if index.sealed() {
             Ok(Some(index.clone()))
         } else if let NodeInfo::Branch(_, branch) = self.load_node(index).await? {
@@ -1015,11 +987,7 @@ where
         }
     }
 
-    async fn check_invariants(
-        &self,
-        index: &Index<T::Link, T::Seq>,
-        msgs: &mut Vec<String>,
-    ) -> Result<()> {
+    async fn check_invariants(&self, index: &Index<T>, msgs: &mut Vec<String>) -> Result<()> {
         macro_rules! check {
             ($expression:expr) => {
                 if !$expression {
@@ -1058,7 +1026,7 @@ where
         Ok(())
     }
 
-    async fn is_packed(&self, index: &Index<T::Link, T::Seq>) -> Result<bool> {
+    async fn is_packed(&self, index: &Index<T>) -> Result<bool> {
         if let NodeInfo::Branch(index, branch) = self.load_node(index).await? {
             Ok(if index.sealed {
                 // sealed nodes, for themselves, are packed
@@ -1082,21 +1050,17 @@ where
         }
     }
 
-    fn is_packedr<'a>(&'a self, index: &'a Index<T::Link, T::Seq>) -> FutureResult<'a, bool> {
+    fn is_packedr<'a>(&'a self, index: &'a Index<T>) -> FutureResult<'a, bool> {
         self.is_packed(index).boxed_local()
     }
 
-    fn filledr<'a>(
-        &'a self,
-        index: &'a Index<T::Link, T::Seq>,
-    ) -> FutureResult<'a, Option<Index<T::Link, T::Seq>>> {
+    fn filledr<'a>(&'a self, index: &'a Index<T>) -> FutureResult<'a, Option<Index<T>>> {
         self.filled(index).boxed_local()
     }
 
     /// creates a new forest
     pub fn new(store: ArcStore<T::Link>, config: Config) -> Self {
-        let branch_cache =
-            RwLock::new(lru::LruCache::<T::Link, Branch<T::Link, T::Seq>>::new(1000));
+        let branch_cache = RwLock::new(lru::LruCache::<T::Link, Branch<T>>::new(1000));
         let leaf_cache = RwLock::new(lru::LruCache::<T::Link, Leaf>::new(1000));
         let index_key = config.index_key;
         let value_key = config.value_key;

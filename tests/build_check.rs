@@ -1,5 +1,5 @@
 use banyan::index::{Semigroup, SimpleCompactSeq};
-use banyan::store::MemStore;
+use banyan::ipfs::MemStore;
 use banyan::{
     query::OffsetRangeQuery,
     tree::{Config, Forest, Tree, TreeTypes},

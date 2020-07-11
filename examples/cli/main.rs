@@ -140,14 +140,14 @@ impl DnfQuery {
 }
 
 impl Query<TT> for DnfQuery {
-    fn intersecting(&self, _: u64, x: &BranchIndex<Cid, KeySeq>, matching: &mut BitVec) {
+    fn intersecting(&self, _: u64, x: &BranchIndex<TT>, matching: &mut BitVec) {
         for (i, s) in x.summaries().take(matching.len()).enumerate() {
             if matching[i] {
                 matching.set(i, self.intersects(&s));
             }
         }
     }
-    fn containing(&self, _: u64, x: &LeafIndex<Cid, KeySeq>, matching: &mut BitVec) {
+    fn containing(&self, _: u64, x: &LeafIndex<TT>, matching: &mut BitVec) {
         for (i, s) in x.keys().take(matching.len()).enumerate() {
             if matching[i] {
                 matching.set(i, self.contains(&s));
