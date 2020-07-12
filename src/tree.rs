@@ -26,15 +26,17 @@ use tracing::*;
 
 type FutureResult<'a, T> = LocalBoxFuture<'a, Result<T>>;
 
-/// Trees can be parametrized with the key type and the sequence type
+/// Trees can be parametrized with the key type and the sequence type. Also, to avoid a dependency
+/// on a link type with all its baggage, we parameterize the link type.
 ///
-/// There might be more types in the future, so all of them are grouped in this trait.
+/// There might be more types in the future, so this essentially acts as a module for the entire
+/// code base.
 pub trait TreeTypes {
     /// key type. This also doubles as the type for a combination (union) of keys
     type Key: Semigroup + Debug + Eq;
     /// compact sequence type to be used for indices
     type Seq: CompactSeq<Item = Self::Key> + Serialize + DeserializeOwned + Clone + Debug;
-
+    /// link type to use over block boundaries
     type Link: ToString + Hash + Eq + Serialize + DeserializeOwned + Clone + Debug;
 }
 
@@ -46,8 +48,6 @@ pub struct Forest<T: TreeTypes> {
     config: Config,
     branch_cache: RwLock<lru::LruCache<T::Link, Branch<T>>>,
     leaf_cache: RwLock<lru::LruCache<T::Link, Leaf>>,
-    index_key: salsa20::Key,
-    value_key: salsa20::Key,
     _tt: PhantomData<T>,
 }
 
@@ -385,6 +385,14 @@ impl<T> Forest<T>
 where
     T: TreeTypes,
 {
+    fn value_key(&self) -> salsa20::Key {
+        self.config.value_key
+    }
+
+    fn index_key(&self) -> salsa20::Key {
+        self.config.index_key
+    }
+
     /// predicate to determine if a leaf is sealed, based on the config
     fn leaf_sealed(&self, bytes: u64, count: u64) -> bool {
         bytes >= self.config.target_leaf_size || count >= self.config.max_leaf_count
@@ -399,7 +407,7 @@ where
             }
             let (nonce, data) = data.split_at(24);
             let mut data = data.to_vec();
-            XSalsa20::new(&self.value_key.into(), nonce.into()).apply_keystream(&mut data);
+            XSalsa20::new(&self.value_key().into(), nonce.into()).apply_keystream(&mut data);
             // cipher.apply_keystream(data)
             Some(Leaf::new(data.into()))
         } else {
@@ -436,7 +444,7 @@ where
         let nonce = self.random_nonce();
         tmp.extend(nonce.as_slice());
         tmp.extend(leaf.as_ref().compressed());
-        XSalsa20::new(&self.value_key.into(), &nonce.into()).apply_keystream(&mut tmp[24..]);
+        XSalsa20::new(&self.value_key().into(), &nonce.into()).apply_keystream(&mut tmp[24..]);
         // store leaf
         let cid = self.store.put(&tmp, true).await?;
         let index: LeafIndex<T> = LeafIndex {
@@ -562,7 +570,7 @@ where
     async fn load_branch(&self, index: &BranchIndex<T>) -> Result<Option<Branch<T>>> {
         Ok(if let Some(cid) = &index.cid {
             let bytes = self.store.get(&cid).await?;
-            let children: Vec<_> = deserialize_compressed(&self.index_key, &bytes)?;
+            let children: Vec<_> = deserialize_compressed(&self.index_key(), &bytes)?;
             // let children = CborZstdArrayRef::new(bytes.as_ref()).items()?;
             Some(Branch::<T>::new(children))
         } else {
@@ -572,7 +580,7 @@ where
 
     async fn load_branch_from_cid(&self, cid: T::Link) -> Result<Index<T>> {
         let bytes = self.store.get(&cid).await?;
-        let children: Vec<Index<T>> = deserialize_compressed(&self.index_key, &bytes)?;
+        let children: Vec<Index<T>> = deserialize_compressed(&self.index_key(), &bytes)?;
         let count = children.iter().map(|x| x.count()).sum();
         let level = children.iter().map(|x| x.level()).max().unwrap() + 1;
         let value_bytes = children.iter().map(|x| x.value_bytes()).sum();
@@ -799,7 +807,7 @@ where
     async fn persist_branch(&self, children: &[Index<T>]) -> Result<(T::Link, u64)> {
         let mut cbor = Vec::new();
         serialize_compressed(
-            &self.index_key,
+            &self.index_key(),
             &self.random_nonce(),
             &children,
             self.config.zstd_level,
@@ -1062,14 +1070,10 @@ where
     pub fn new(store: ArcStore<T::Link>, config: Config) -> Self {
         let branch_cache = RwLock::new(lru::LruCache::<T::Link, Branch<T>>::new(1000));
         let leaf_cache = RwLock::new(lru::LruCache::<T::Link, Leaf>::new(1000));
-        let index_key = config.index_key;
-        let value_key = config.value_key;
         Self {
             store,
             config,
             branch_cache,
-            index_key,
-            value_key,
             leaf_cache,
             _tt: PhantomData,
         }
