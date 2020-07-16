@@ -13,7 +13,6 @@ use std::{
     convert::TryFrom, fmt, result, str::FromStr,
 };
 
-
 #[derive(Clone, Hash, PartialEq, Eq, Display, From, FromStr)]
 pub struct Cid(cid::Cid);
 
@@ -184,7 +183,8 @@ impl Store<Cid> for MemStore {
 
 pub(crate) async fn block_get(key: &Cid) -> Result<Arc<[u8]>> {
     let url = format!("http://localhost:5001/api/v0/block/get?arg={}", key);
-    let data: Vec<u8> = reqwest::get(url.as_str()).await?.bytes().await?.to_vec();
+    let client = reqwest::Client::new();
+    let data: Vec<u8> = client.post(url.as_str()).send().await?.bytes().await?.to_vec();
     Ok(data.into())
 }
 
