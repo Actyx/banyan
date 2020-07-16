@@ -1,5 +1,5 @@
 use banyan::index::{Semigroup, SimpleCompactSeq};
-use banyan::ipfs::MemStore;
+use ipfs::MemStore;
 use banyan::{
     query::OffsetRangeQuery,
     tree::{Config, Forest, Tree, TreeTypes},
@@ -8,6 +8,7 @@ use futures::prelude::*;
 use quickcheck::{Arbitrary, Gen, TestResult};
 use serde::{Deserialize, Serialize};
 use std::{ops::Range, sync::Arc};
+mod ipfs;
 
 struct TT;
 
@@ -17,7 +18,7 @@ struct Key(u64);
 impl TreeTypes for TT {
     type Key = Key;
     type Seq = SimpleCompactSeq<Key>;
-    type Link = banyan::ipfs::Cid;
+    type Link = ipfs::Cid;
 }
 
 impl Semigroup for Key {

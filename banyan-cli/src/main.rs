@@ -15,11 +15,10 @@ mod ipfs;
 
 use banyan::index::*;
 use banyan::{
-    ipfs::Cid,
     query::{OffsetRangeQuery, Query},
     tree::*,
 };
-use ipfs::IpfsStore;
+use ipfs::{IpfsStore, Cid};
 
 use bitvec::prelude::*;
 
