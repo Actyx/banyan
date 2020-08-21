@@ -66,11 +66,12 @@ async fn build_stream(xs: Vec<(Key, u64)>) -> quickcheck::TestResult {
     .await
 }
 
+/// checks that stream_filtered_static returns the same elements as filtering each element manually
 async fn compare_filtered(xs: Vec<(Key, u64)>, range: Range<u64>) -> anyhow::Result<bool> {
     let range = range.clone();
     let tree = create_test_tree(xs.clone()).await?;
     let actual = tree
-        .stream_filtered(&OffsetRangeQuery::from(range.clone()))
+        .stream_filtered_static(OffsetRangeQuery::from(range.clone()))
         .collect::<Vec<_>>()
         .await
         .into_iter()
@@ -85,9 +86,67 @@ async fn compare_filtered(xs: Vec<(Key, u64)>, range: Range<u64>) -> anyhow::Res
     Ok(actual == expected)
 }
 
+/// checks that stream_filtered_static_chunked returns the same elements as filtering each element manually
+async fn compare_filtered_chunked(xs: Vec<(Key, u64)>, range: Range<u64>) -> anyhow::Result<bool> {
+    let range = range.clone();
+    let tree = create_test_tree(xs.clone()).await?;
+    let actual = tree
+        .stream_filtered_static_chunked(OffsetRangeQuery::from(range.clone()))
+        .map(|chunk_result| chunk_result.map(|chunk| stream::iter(chunk.data.into_iter().map(Ok))))
+        .try_flatten()
+        .collect::<Vec<_>>()
+        .await
+        .into_iter()
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    let expected = xs
+        .iter()
+        .cloned()
+        .enumerate()
+        .map(|(i, (k, v))| (i as u64, k, v))
+        .filter(|(offset, _, _)| range.contains(offset))
+        .collect::<Vec<_>>();
+    Ok(actual == expected)
+}
+
+/// checks that stream_filtered_static_chunked returns the same elements as filtering each element manually
+async fn filtered_chunked_no_holes(xs: Vec<(Key, u64)>, range: Range<u64>) -> anyhow::Result<bool> {
+    let range = range.clone();
+    let tree = create_test_tree(xs.clone()).await?;
+    let chunks = tree
+        .stream_filtered_static_chunked(OffsetRangeQuery::from(range.clone()))
+        .collect::<Vec<_>>()
+        .await
+        .into_iter()
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    let max_offset = chunks.iter().fold(0, |offset, chunk| {
+        if offset == chunk.min {
+            chunk.max
+        } else {
+            offset
+        }
+    });
+    Ok(max_offset == (xs.len() as u64))
+}
+
 #[quickcheck_async::tokio]
 async fn build_stream_filtered(xs: Vec<(Key, u64)>, range: Range<u64>) -> quickcheck::TestResult {
     test(|| compare_filtered(xs.clone(), range.clone())).await
+}
+
+#[quickcheck_async::tokio]
+async fn build_stream_filtered_chunked(
+    xs: Vec<(Key, u64)>,
+    range: Range<u64>,
+) -> quickcheck::TestResult {
+    test(|| compare_filtered_chunked(xs.clone(), range.clone())).await
+}
+
+#[quickcheck_async::tokio]
+async fn build_stream_filtered_chunked_no_holes(
+    xs: Vec<(Key, u64)>,
+    range: Range<u64>,
+) -> quickcheck::TestResult {
+    test(|| filtered_chunked_no_holes(xs.clone(), range.clone())).await
 }
 
 #[quickcheck_async::tokio]

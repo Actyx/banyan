@@ -330,6 +330,19 @@ impl<
         }
     }
 
+    pub fn stream_filtered_static_chunked(
+        self,
+        query: impl Query<T> + Clone + 'static,
+    ) -> impl Stream<Item = Result<FilteredChunk<T, V>>> + 'static {
+        match &self.root {
+            Some(index) => self
+                .forest
+                .stream_filtered_static_chunked(0, query, index.clone())
+                .left_stream(),
+            None => stream::empty().right_stream(),
+        }
+    }
+
     /// forget all data except the one matching the query
     ///
     /// this is done as best effort and will not be precise. E.g. if a chunk of data contains
@@ -1230,9 +1243,9 @@ where
 
 pub struct FilteredChunk<T: TreeTypes, V> {
     // inclusive
-    min: u64,
+    pub min: u64,
     // exclusive
-    max: u64,
+    pub max: u64,
     // data
-    data: Vec<(u64, T::Key, V)>,
+    pub data: Vec<(u64, T::Key, V)>,
 }
