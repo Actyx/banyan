@@ -147,8 +147,10 @@ impl<V, T: TreeTypes> Clone for Tree<T, V> {
     }
 }
 
-impl<V: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static, T: TreeTypes>
-    Tree<T, V>
+impl<
+        V: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static,
+        T: TreeTypes + 'static,
+    > Tree<T, V>
 {
     pub async fn new(cid: T::Link, forest: Arc<Forest<T>>) -> Result<Self> {
         Ok(Self {
@@ -315,6 +317,19 @@ impl<V: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static, T:
         }
     }
 
+    pub fn stream_filtered_static(
+        self,
+        query: Arc<impl Query<T> + Debug + 'static>,
+    ) -> impl Stream<Item = Result<(u64, T::Key, V)>> + 'static {
+        match &self.root {
+            Some(index) => self
+                .forest
+                .stream_filtered_static(0, query, index.clone())
+                .left_stream(),
+            None => stream::empty().right_stream(),
+        }
+    }
+
     /// forget all data except the one matching the query
     ///
     /// this is done as best effort and will not be precise. E.g. if a chunk of data contains
@@ -354,6 +369,11 @@ impl<V: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static, T:
     pub fn count(&self) -> u64 {
         self.root.as_ref().map(|x| x.count()).unwrap_or_default()
     }
+
+    /// root of a non-empty tree
+    pub fn root(self) -> Option<T::Link> {
+        self.root.and_then(|index| index.cid().clone())
+    }
 }
 
 /// Utility method to zip a number of indices with an offset that is increased by each index value
@@ -383,25 +403,33 @@ fn zip_with_offset_ref<'a, I: Iterator<Item = &'a Index<T>> + 'a, T: TreeTypes +
 /// basic random access append only async tree
 impl<T> Forest<T>
 where
-    T: TreeTypes,
+    T: TreeTypes + 'static,
 {
     fn value_key(&self) -> salsa20::Key {
-        self.config.value_key
+        self.config().value_key
     }
 
     fn index_key(&self) -> salsa20::Key {
-        self.config.index_key
+        self.config().index_key
+    }
+
+    fn config(&self) -> &Config {
+        &self.config
+    }
+
+    fn store(&self) -> &ArcStore<T::Link> {
+        &self.store
     }
 
     /// predicate to determine if a leaf is sealed, based on the config
     fn leaf_sealed(&self, bytes: u64, count: u64) -> bool {
-        bytes >= self.config.target_leaf_size || count >= self.config.max_leaf_count
+        bytes >= self.config().target_leaf_size || count >= self.config().max_leaf_count
     }
 
     /// load a leaf given a leaf index
     async fn load_leaf(&self, index: &LeafIndex<T>) -> Result<Option<Leaf>> {
         Ok(if let Some(cid) = &index.cid {
-            let data = &self.store.get(cid).await?;
+            let data = &self.store().get(cid).await?;
             if data.len() < 24 {
                 return Err(anyhow!("leaf data without nonce"));
             }
@@ -427,7 +455,7 @@ where
         assert!(from.peek().is_some());
         let builder = builder.fill(
             || {
-                if keys.count() < self.config.max_leaf_count {
+                if keys.count() < self.config().max_leaf_count {
                     from.next().map(|(k, v)| {
                         keys.push(&k);
                         v
@@ -436,7 +464,7 @@ where
                     None
                 }
             },
-            self.config.target_leaf_size,
+            self.config().target_leaf_size,
         )?;
         let leaf = Leaf::from_builder(builder)?;
         // encrypt leaf
@@ -486,7 +514,7 @@ where
             .iter()
             .map(|child| child.data().summarize())
             .collect::<Vec<_>>();
-        while from.peek().is_some() && ((children.len() as u64) <= self.config.max_branch_count) {
+        while from.peek().is_some() && ((children.len() as u64) <= self.config().max_branch_count) {
             let child = self.fill_noder(level - 1, from).await?;
             let summary = child.data().summarize();
             summaries.push(summary);
@@ -527,7 +555,7 @@ where
             Ok(self
                 .create_leaf(
                     T::Seq::empty(),
-                    ZstdArrayBuilder::new(self.config.zstd_level)?,
+                    ZstdArrayBuilder::new(self.config().zstd_level)?,
                     from,
                 )
                 .await?
@@ -563,7 +591,7 @@ where
             return false;
         }
         // we must be full
-        items.len() as u64 >= self.config.max_branch_count
+        items.len() as u64 >= self.config().max_branch_count
     }
 
     /// load a branch given a branch index
@@ -602,7 +630,7 @@ where
     /// load a branch given a branch index, from the cache
     async fn load_branch_cached(&self, index: &BranchIndex<T>) -> Result<Option<Branch<T>>> {
         if let Some(cid) = &index.cid {
-            match self.branch_cache.write().unwrap().pop(cid) {
+            match self.branch_cache().write().unwrap().pop(cid) {
                 Some(branch) => Ok(Some(branch)),
                 None => self.load_branch(index).await,
             }
@@ -641,7 +669,7 @@ where
     /// store a leaf in the cache, and return it wrapped into a generic index
     fn cache_leaf(&self, index: LeafIndex<T>, node: Leaf) -> LeafIndex<T> {
         if let Some(cid) = &index.cid {
-            self.leaf_cache.write().unwrap().put(cid.clone(), node);
+            self.leaf_cache().write().unwrap().put(cid.clone(), node);
         }
         index
     }
@@ -665,7 +693,7 @@ where
             NodeInfo::Leaf(index, leaf) => {
                 info!("extending existing leaf");
                 let data = index.keys.clone();
-                let builder = leaf.builder(self.config.zstd_level)?;
+                let builder = leaf.builder(self.config().zstd_level)?;
                 Ok(self.create_leaf(data, builder, from).await?.into())
             }
             NodeInfo::Branch(index, branch) => {
@@ -804,13 +832,64 @@ where
         Box::pin(s)
     }
 
+    fn stream_filtered_static<V: DeserializeOwned, Q: Query<T> + Debug + 'static>(
+        self: Arc<Self>,
+        offset: u64,
+        query: Arc<Q>,
+        index: Index<T>,
+    ) -> LocalBoxStream<'static, Result<(u64, T::Key, V)>> {
+        let s = async move {
+            Ok(match self.load_node(&index).await? {
+                NodeInfo::Leaf(index, node) => {
+                    // todo: don't get the node here, since we might not need it
+                    let mut matching = BitVec::repeat(true, index.keys.len());
+                    query.containing(offset, index, &mut matching);
+                    let keys = index.select_keys(&matching);
+                    let elems: Vec<V> = node.as_ref().select(&matching)?;
+                    let pairs = keys
+                        .zip(elems)
+                        .map(|((o, k), v)| ((o as u64) + offset, k, v))
+                        .collect::<Vec<_>>();
+                    stream::iter(pairs).map(Ok).left_stream().left_stream()
+                }
+                NodeInfo::Branch(index, node) => {
+                    // todo: don't get the node here, since we might not need it
+                    let mut matching = BitVec::repeat(true, index.summaries.len());
+                    query.intersecting(offset, index, &mut matching);
+                    let offsets = zip_with_offset(node.children.into_iter(), offset);
+                    let children = matching.into_iter().zip(offsets).filter_map(|(m, c)| {
+                        // use bool::then_some in case it gets stabilized
+                        if m {
+                            Some(c)
+                        } else {
+                            None
+                        }
+                    });
+                    stream::iter(children)
+                        .map(move |(child, offset)| {
+                            self.clone()
+                                .stream_filtered_static(offset, query.clone(), child)
+                        })
+                        .flatten()
+                        .right_stream()
+                        .left_stream()
+                }
+                NodeInfo::PurgedBranch(_) | NodeInfo::PurgedLeaf(_) => {
+                    stream::empty().right_stream()
+                }
+            })
+        }
+        .try_flatten_stream();
+        Box::pin(s)
+    }
+
     async fn persist_branch(&self, children: &[Index<T>]) -> Result<(T::Link, u64)> {
         let mut cbor = Vec::new();
         serialize_compressed(
             &self.index_key(),
             &self.random_nonce(),
             &children,
-            self.config.zstd_level,
+            self.config().zstd_level,
             &mut cbor,
         )?;
         Ok((self.store.put(&cbor, false).await?, cbor.len() as u64))
@@ -1064,6 +1143,14 @@ where
 
     fn filledr<'a>(&'a self, index: &'a Index<T>) -> FutureResult<'a, Option<Index<T>>> {
         self.filled(index).boxed_local()
+    }
+
+    fn leaf_cache(&self) -> &RwLock<lru::LruCache<T::Link, Leaf>> {
+        &self.leaf_cache
+    }
+
+    fn branch_cache(&self) -> &RwLock<lru::LruCache<T::Link, Branch<T>>> {
+        &self.branch_cache
     }
 
     /// creates a new forest

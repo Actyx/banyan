@@ -4,7 +4,7 @@ use crate::{
     util::RangeBoundsExt,
 };
 use bitvec::prelude::BitVec;
-use std::ops::RangeBounds;
+use std::{ops::RangeBounds, sync::Arc};
 
 /// A query
 ///
@@ -17,6 +17,16 @@ pub trait Query<T: TreeTypes> {
 }
 
 impl<T: TreeTypes> Query<T> for Box<dyn Query<T>> {
+    fn containing(&self, offset: u64, x: &LeafIndex<T>, res: &mut BitVec) {
+        self.as_ref().containing(offset, x, res);
+    }
+
+    fn intersecting(&self, offset: u64, x: &BranchIndex<T>, res: &mut BitVec) {
+        self.as_ref().intersecting(offset, x, res);
+    }
+}
+
+impl<T: TreeTypes> Query<T> for Arc<dyn Query<T>> {
     fn containing(&self, offset: u64, x: &LeafIndex<T>, res: &mut BitVec) {
         self.as_ref().containing(offset, x, res);
     }
@@ -73,6 +83,7 @@ impl<T: TreeTypes> Query<T> for EmptyQuery {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct AllQuery;
 
 impl<T: TreeTypes> Query<T> for AllQuery {
@@ -85,7 +96,8 @@ impl<T: TreeTypes> Query<T> for AllQuery {
     }
 }
 
-pub struct AndQuery<A, B>(A, B);
+#[derive(Debug, Clone)]
+pub struct AndQuery<A, B>(pub A, pub B);
 
 impl<T: TreeTypes, A: Query<T>, B: Query<T>> Query<T> for AndQuery<A, B> {
     fn containing(&self, offset: u64, index: &LeafIndex<T>, res: &mut BitVec) {

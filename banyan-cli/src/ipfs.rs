@@ -1,16 +1,18 @@
 //! helper methods to work with ipfs/ipld
-use banyan::store::Store;
-use futures::{future::BoxFuture, prelude::*};
-use reqwest::multipart::Part;
 use anyhow::{anyhow, Result};
+use banyan::store::Store;
 use derive_more::{Display, From, FromStr};
+use futures::{future::BoxFuture, prelude::*};
 use multihash::Sha2_256;
+use reqwest::multipart::Part;
 use serde::{de::Visitor, ser::SerializeStruct, Deserialize, Deserializer, Serialize, Serializer};
 use serde_cbor::tags::Tagged;
 use std::{
     collections::HashMap,
+    convert::TryFrom,
+    fmt, result,
+    str::FromStr,
     sync::{Arc, RwLock},
-    convert::TryFrom, fmt, result, str::FromStr,
 };
 
 #[derive(Clone, Hash, PartialEq, Eq, Display, From, FromStr)]
@@ -180,11 +182,16 @@ impl Store<Cid> for MemStore {
     }
 }
 
-
 pub(crate) async fn block_get(key: &Cid) -> Result<Arc<[u8]>> {
     let url = format!("http://localhost:5001/api/v0/block/get?arg={}", key);
     let client = reqwest::Client::new();
-    let data: Vec<u8> = client.post(url.as_str()).send().await?.bytes().await?.to_vec();
+    let data: Vec<u8> = client
+        .post(url.as_str())
+        .send()
+        .await?
+        .bytes()
+        .await?
+        .to_vec();
     Ok(data.into())
 }
 

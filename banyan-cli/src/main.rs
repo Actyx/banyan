@@ -18,7 +18,7 @@ use banyan::{
     query::{OffsetRangeQuery, Query},
     tree::*,
 };
-use ipfs::{IpfsStore, Cid};
+use ipfs::{Cid, IpfsStore};
 
 use bitvec::prelude::*;
 

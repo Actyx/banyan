@@ -1,10 +1,10 @@
 use banyan::index::{Semigroup, SimpleCompactSeq};
-use ipfs::MemStore;
 use banyan::{
-    query::OffsetRangeQuery,
+    query::{AllQuery, OffsetRangeQuery},
     tree::{Config, Forest, Tree, TreeTypes},
 };
 use futures::prelude::*;
+use ipfs::MemStore;
 use quickcheck::{Arbitrary, Gen, TestResult};
 use serde::{Deserialize, Serialize};
 use std::{ops::Range, sync::Arc};
@@ -108,5 +108,24 @@ async fn filter_test_simple() -> anyhow::Result<()> {
     let _ = env_logger::builder().is_test(true).try_init();
     let res = compare_filtered(vec![(Key(1), 1), (Key(2), 2)], 0..1).await;
     assert_eq!(res.ok(), Some(true));
+    Ok(())
+}
+
+#[tokio::test]
+async fn stream_test_simple() -> anyhow::Result<()> {
+    let store = Arc::new(MemStore::new());
+    let forest = Arc::new(Forest::<TT>::new(store, Config::debug()));
+    let mut trees = Vec::new();
+    for n in 1..=10u64 {
+        let mut tree = Tree::<TT, u64>::empty(forest.clone());
+        tree.extend((0..n).map(|t| (Key(t), n))).await?;
+        tree.assert_invariants().await?;
+        trees.push(tree.root().unwrap());
+    }
+    println!("{:?}", trees);
+    let res = banyan::stream::SourceStream(forest, AllQuery)
+        .query::<u64>(stream::iter(trees).boxed_local());
+    let res = res.collect::<Vec<_>>().await;
+    println!("{:?}", res);
     Ok(())
 }
