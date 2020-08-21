@@ -1,6 +1,6 @@
 //! helper methods to work with ipfs/ipld
-use banyan::store::Store;
 use anyhow::{anyhow, Result};
+use banyan::store::Store;
 use derive_more::{Display, From, FromStr};
 use futures::{future::BoxFuture, prelude::*};
 use multihash::Sha2_256;

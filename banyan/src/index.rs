@@ -61,11 +61,11 @@ pub trait CompactSeq: Serialize + DeserializeOwned {
     }
 
     /// utility function to select some items for a compactseq.
-    fn select(&self, bits: &BitVec) -> Vec<(usize, Self::Item)> {
+    fn select(&self, bits: &BitVec) -> Vec<(u64, Self::Item)> {
         (0..self.len())
             .filter_map(move |i| {
                 if bits[i] {
-                    Some((i, self.get(i).unwrap()))
+                    Some((i as u64, self.get(i).unwrap()))
                 } else {
                     None
                 }
@@ -137,7 +137,7 @@ impl<T: TreeTypes> LeafIndex<T> {
     pub fn keys(&self) -> impl Iterator<Item = T::Key> {
         self.keys.to_vec().into_iter()
     }
-    pub fn select_keys(&self, bits: &BitVec) -> impl Iterator<Item = (usize, T::Key)> {
+    pub fn select_keys(&self, bits: &BitVec) -> impl Iterator<Item = (u64, T::Key)> {
         self.keys.select(bits).into_iter()
     }
 }

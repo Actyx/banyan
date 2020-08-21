@@ -4,12 +4,12 @@ use crate::{
     util::RangeBoundsExt,
 };
 use bitvec::prelude::BitVec;
-use std::ops::RangeBounds;
+use std::{fmt::Debug, ops::RangeBounds, sync::Arc};
 
 /// A query
 ///
 /// Queries work on compact value sequences instead of individual values for efficiency.
-pub trait Query<T: TreeTypes> {
+pub trait Query<T: TreeTypes>: Debug {
     /// a bitvec with `x.data.count()` elements, where each value is a bool indicating if the query *does* match
     fn containing(&self, offset: u64, _index: &LeafIndex<T>, res: &mut BitVec);
     /// a bitvec with `x.data.count()` elements, where each value is a bool indicating if the query *can* match
@@ -17,6 +17,16 @@ pub trait Query<T: TreeTypes> {
 }
 
 impl<T: TreeTypes> Query<T> for Box<dyn Query<T>> {
+    fn containing(&self, offset: u64, x: &LeafIndex<T>, res: &mut BitVec) {
+        self.as_ref().containing(offset, x, res);
+    }
+
+    fn intersecting(&self, offset: u64, x: &BranchIndex<T>, res: &mut BitVec) {
+        self.as_ref().intersecting(offset, x, res);
+    }
+}
+
+impl<T: TreeTypes> Query<T> for Arc<dyn Query<T>> {
     fn containing(&self, offset: u64, x: &LeafIndex<T>, res: &mut BitVec) {
         self.as_ref().containing(offset, x, res);
     }
@@ -35,7 +45,7 @@ impl<R: RangeBounds<u64>> From<R> for OffsetRangeQuery<R> {
     }
 }
 
-impl<T: TreeTypes, R: RangeBounds<u64>> Query<T> for OffsetRangeQuery<R> {
+impl<T: TreeTypes, R: RangeBounds<u64> + Debug> Query<T> for OffsetRangeQuery<R> {
     fn containing(&self, mut offset: u64, index: &LeafIndex<T>, res: &mut BitVec) {
         let range = offset..offset + index.keys.count();
         // shortcut test
@@ -61,6 +71,7 @@ impl<T: TreeTypes, R: RangeBounds<u64>> Query<T> for OffsetRangeQuery<R> {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct EmptyQuery;
 
 impl<T: TreeTypes> Query<T> for EmptyQuery {
@@ -73,6 +84,7 @@ impl<T: TreeTypes> Query<T> for EmptyQuery {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct AllQuery;
 
 impl<T: TreeTypes> Query<T> for AllQuery {
@@ -85,7 +97,8 @@ impl<T: TreeTypes> Query<T> for AllQuery {
     }
 }
 
-pub struct AndQuery<A, B>(A, B);
+#[derive(Debug, Clone)]
+pub struct AndQuery<A, B>(pub A, pub B);
 
 impl<T: TreeTypes, A: Query<T>, B: Query<T>> Query<T> for AndQuery<A, B> {
     fn containing(&self, offset: u64, index: &LeafIndex<T>, res: &mut BitVec) {
