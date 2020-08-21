@@ -7,7 +7,7 @@ use stream::LocalBoxStream;
 
 pub struct SourceStream<TT: TreeTypes + 'static, Q>(pub Arc<Forest<TT>>, pub Q);
 
-impl<TT: TreeTypes + 'static, Q: Query<TT> + Clone + Debug + 'static> SourceStream<TT, Q> {
+impl<TT: TreeTypes + 'static, Q: Query<TT> + Clone + 'static> SourceStream<TT, Q> {
     pub fn query<V: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static>(
         self,
         roots: LocalBoxStream<'static, TT::Link>,
@@ -19,7 +19,7 @@ impl<TT: TreeTypes + 'static, Q: Query<TT> + Clone + Debug + 'static> SourceStre
             .filter_map(move |cid| Tree::<TT, V>::new(cid, forest.clone()).map(|r| r.ok()))
             .flat_map(move |tree: Tree<TT, V>| {
                 // create an intersection of a range query and the main query
-                let query = Arc::new(AndQuery(
+                let query: Arc<dyn Query<TT>> = Arc::new(AndQuery(
                     OffsetRangeQuery::from(offset.get()..),
                     query.clone(),
                 ));

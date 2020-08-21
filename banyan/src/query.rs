@@ -4,12 +4,12 @@ use crate::{
     util::RangeBoundsExt,
 };
 use bitvec::prelude::BitVec;
-use std::{ops::RangeBounds, sync::Arc};
+use std::{fmt::Debug, ops::RangeBounds, sync::Arc};
 
 /// A query
 ///
 /// Queries work on compact value sequences instead of individual values for efficiency.
-pub trait Query<T: TreeTypes> {
+pub trait Query<T: TreeTypes>: Debug {
     /// a bitvec with `x.data.count()` elements, where each value is a bool indicating if the query *does* match
     fn containing(&self, offset: u64, _index: &LeafIndex<T>, res: &mut BitVec);
     /// a bitvec with `x.data.count()` elements, where each value is a bool indicating if the query *can* match
@@ -45,7 +45,7 @@ impl<R: RangeBounds<u64>> From<R> for OffsetRangeQuery<R> {
     }
 }
 
-impl<T: TreeTypes, R: RangeBounds<u64>> Query<T> for OffsetRangeQuery<R> {
+impl<T: TreeTypes, R: RangeBounds<u64> + Debug> Query<T> for OffsetRangeQuery<R> {
     fn containing(&self, mut offset: u64, index: &LeafIndex<T>, res: &mut BitVec) {
         let range = offset..offset + index.keys.count();
         // shortcut test
@@ -71,6 +71,7 @@ impl<T: TreeTypes, R: RangeBounds<u64>> Query<T> for OffsetRangeQuery<R> {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct EmptyQuery;
 
 impl<T: TreeTypes> Query<T> for EmptyQuery {

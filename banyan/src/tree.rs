@@ -319,7 +319,7 @@ impl<
 
     pub fn stream_filtered_static(
         self,
-        query: Arc<impl Query<T> + Debug + 'static>,
+        query: impl Query<T> + Clone + 'static,
     ) -> impl Stream<Item = Result<(u64, T::Key, V)>> + 'static {
         match &self.root {
             Some(index) => self
@@ -800,7 +800,7 @@ where
                     let elems: Vec<V> = node.as_ref().select(&matching)?;
                     let pairs = keys
                         .zip(elems)
-                        .map(|((o, k), v)| ((o as u64) + offset, k, v))
+                        .map(|((o, k), v)| (o + offset, k, v))
                         .collect::<Vec<_>>();
                     stream::iter(pairs).map(Ok).left_stream().left_stream()
                 }
@@ -832,10 +832,10 @@ where
         Box::pin(s)
     }
 
-    fn stream_filtered_static<V: DeserializeOwned, Q: Query<T> + Debug + 'static>(
+    fn stream_filtered_static<V: DeserializeOwned, Q: Query<T> + Clone + 'static>(
         self: Arc<Self>,
         offset: u64,
-        query: Arc<Q>,
+        query: Q,
         index: Index<T>,
     ) -> LocalBoxStream<'static, Result<(u64, T::Key, V)>> {
         let s = async move {
@@ -848,7 +848,7 @@ where
                     let elems: Vec<V> = node.as_ref().select(&matching)?;
                     let pairs = keys
                         .zip(elems)
-                        .map(|((o, k), v)| ((o as u64) + offset, k, v))
+                        .map(|((o, k), v)| (o + offset, k, v))
                         .collect::<Vec<_>>();
                     stream::iter(pairs).map(Ok).left_stream().left_stream()
                 }
@@ -873,6 +873,67 @@ where
                         .flatten()
                         .right_stream()
                         .left_stream()
+                }
+                NodeInfo::PurgedBranch(_) | NodeInfo::PurgedLeaf(_) => {
+                    stream::empty().right_stream()
+                }
+            })
+        }
+        .try_flatten_stream();
+        Box::pin(s)
+    }
+
+    fn stream_filtered_static_chunked<V: DeserializeOwned, Q: Query<T> + Clone + 'static>(
+        self: Arc<Self>,
+        offset: u64,
+        query: Q,
+        index: Index<T>,
+    ) -> LocalBoxStream<'static, Result<FilteredChunk<T, V>>> {
+        let s = async move {
+            Ok(match self.load_node(&index).await? {
+                NodeInfo::Leaf(index, node) => {
+                    // todo: don't get the node here, since we might not need it
+                    let mut matching = BitVec::repeat(true, index.keys.len());
+                    query.containing(offset, index, &mut matching);
+                    let keys = index.select_keys(&matching);
+                    let elems: Vec<V> = node.as_ref().select(&matching)?;
+                    let pairs = keys
+                        .zip(elems)
+                        .map(|((o, k), v)| (o + offset, k, v))
+                        .collect::<Vec<_>>();
+                    let chunk = FilteredChunk {
+                        min: offset,
+                        max: offset + index.keys.count(),
+                        data: pairs,
+                    };
+                    stream::once(future::ready(chunk))
+                        .map(Ok)
+                        .left_stream()
+                        .left_stream()
+                }
+                NodeInfo::Branch(index, node) => {
+                    // todo: don't get the node here, since we might not need it
+                    let mut matching = BitVec::repeat(true, index.summaries.len());
+                    query.intersecting(offset, index, &mut matching);
+                    let offsets = zip_with_offset(node.children.into_iter(), offset);
+                    let iter = matching.into_iter().zip(offsets).map(
+                        move |(is_matching, (child, offset))| {
+                            if is_matching {
+                                self.clone()
+                                    .stream_filtered_static_chunked(offset, query.clone(), child)
+                                    .right_stream()
+                            } else {
+                                let placeholder = FilteredChunk {
+                                    min: offset,
+                                    max: offset + child.count(),
+                                    data: Vec::new(),
+                                };
+                                stream::once(future::ok(placeholder)).left_stream()
+                            }
+                        },
+                    );
+                    let stream = stream::iter(iter).flatten().right_stream().left_stream();
+                    stream
                 }
                 NodeInfo::PurgedBranch(_) | NodeInfo::PurgedLeaf(_) => {
                     stream::empty().right_stream()
@@ -1165,4 +1226,13 @@ where
             _tt: PhantomData,
         }
     }
+}
+
+pub struct FilteredChunk<T: TreeTypes, V> {
+    // inclusive
+    min: u64,
+    // exclusive
+    max: u64,
+    // data
+    data: Vec<(u64, T::Key, V)>,
 }
