@@ -25,6 +25,7 @@ use bitvec::prelude::*;
 pub type Error = anyhow::Error;
 pub type Result<T> = anyhow::Result<T>;
 
+#[derive(Debug)]
 struct TT {}
 
 impl TreeTypes for TT {
@@ -438,7 +439,7 @@ async fn main() -> Result<()> {
             "building a tree with {} batches of {} values, unbalanced: {}",
             batches, count, unbalanced
         );
-        let mut tree = Tree::<TT, String>::empty(forest);
+        let mut tree = Tree::<TT, String>::empty(forest.clone());
         let mut offset: u64 = 0;
         for _ in 0..batches {
             let v = (0..count)
@@ -463,8 +464,13 @@ async fn main() -> Result<()> {
             }
         }
         tree.dump().await?;
+        let roots = tree.roots().await?;
+        let levels = roots.iter().map(|x| x.level()).collect::<Vec<_>>();
+        let tree2 = Tree::<TT, i32>::from_roots(forest, roots).await?;
         println!("{:?}", tree);
         println!("{}", tree);
+        println!("{:?}", levels);
+        tree2.dump().await?;
     } else if let Some(matches) = matches.subcommand_matches("pack") {
         let root = Cid::from_str(
             matches
@@ -473,7 +479,7 @@ async fn main() -> Result<()> {
         )?;
         let tree = Tree::<TT, serde_cbor::Value>::new(root, forest).await?;
         tree.dump().await?;
-        let tree = tree.pack().await?;
+        let tree = tree.pack2().await?;
         tree.assert_invariants().await?;
         assert!(tree.is_packed().await?);
         tree.dump().await?;

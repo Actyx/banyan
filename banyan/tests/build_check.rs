@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::{ops::Range, sync::Arc};
 mod ipfs;
 
+#[derive(Debug)]
 struct TT;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -193,9 +194,12 @@ fn build(items: &mut Vec<u32>) {
     const MAX_BRANCH: usize = 8;
     if items.len() <= 1 {
         // nothing we can do
-        return
+        return;
     } else {
-        let pos = items.iter().position(|x| *x != items[0]).unwrap_or(items.len());
+        let pos = items
+            .iter()
+            .position(|x| *x != items[0])
+            .unwrap_or(items.len());
         if pos >= MAX_BRANCH || pos == items.len() || pos == items.len() - 1 {
             // a valid node can be built from the start
             items.splice(0..MAX_BRANCH.min(items.len()), vec![items[0] + 1]);
@@ -210,7 +214,9 @@ fn build(items: &mut Vec<u32>) {
 
 #[test]
 fn build_test() {
-    let mut v = vec![1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut v = vec![
+        1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    ];
     while v.len() > 1 {
         println!("{:?}", v);
         build(&mut v);
