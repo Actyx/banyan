@@ -277,10 +277,8 @@ impl<
     pub async fn pack2(&self) -> Result<Self> {
         let roots = self.roots().await?;
         let mut filled = Tree::<T, V>::from_roots(self.forest.clone(), roots).await?;
-        assert!(filled.is_packed().await?);
         let remainder: Vec<_> = self.collect_from(filled.count()).await?;
         filled.extend(remainder).await?;
-        assert!(filled.is_packed().await?);
         Ok(filled)
     }
 
@@ -301,7 +299,7 @@ impl<
         } else {
             self.forest.fill_node(0, from.by_ref()).await?.into()
         };
-        self.root = Some(self.forest.extend_above(root, from.by_ref()).await?);
+        self.root = Some(self.forest.extend_above(&root, u32::max_value(), from.by_ref()).await?);
         Ok(())
     }
 
@@ -319,7 +317,7 @@ impl<
                 let mut from = from.peekable();
                 Some(
                     self.forest
-                        .create_branch(vec![a, b], level, from.by_ref())
+                        .create_branch_unbalanced(vec![a, b], level, from.by_ref())
                         .await?
                         .into(),
                 )
@@ -546,24 +544,19 @@ where
         Ok(self.cache_leaf(index, leaf))
     }
 
-    async fn extend_above<V: Serialize + Debug>(
+    async fn create_branch<V: Serialize + Debug>(
         &self,
-        node: Index<T>,
+        children: Vec<Index<T>>,
+        level: u32,
         from: &mut std::iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
-    ) -> Result<Index<T>> {
-        println!("before extend {}", self.is_packed(&node).await?);
-        let mut node = self.extend(&node, from).await?;
-        println!("after extend {}", self.is_packed(&node).await?);
-        while from.peek().is_some() || node.level() == 0 {
-            let level = node.level() + 1;
-            node = self.create_branch(vec![node], level, from).await?.into();
-        }
-        Ok(node)
+    ) -> Result<BranchIndex<T>> {
+        assert!(from.peek().is_none() || children.iter().all(|child| child.level() == level - 1));
+        self.create_branch_unbalanced(children, level, from).await
     }
 
     /// given some children and some additional elements, creates a node with the given
     /// children and new children from `from` until it is full
-    async fn create_branch<V: Serialize + Debug>(
+    async fn create_branch_unbalanced<V: Serialize + Debug>(
         &self,
         mut children: Vec<Index<T>>,
         level: u32,
@@ -805,18 +798,38 @@ where
         index
     }
     
+    /// extends an existing node with some values
+    ///
+    /// The result will have the max level `level`. `from` will contain all elements that did not fit.
+    async fn extend_above<V: Serialize + Debug>(
+        &self,
+        node: &Index<T>,
+        level: u32,
+        from: &mut std::iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
+    ) -> Result<Index<T>> {
+        assert!(level >= node.level());
+        let mut node = self.extendr(node, from).await?;
+        while (from.peek().is_some() || node.level() == 0) && node.level() < level {
+            let level = node.level() + 1;
+            node = self.create_branch(vec![node], level, from).await?.into();
+        }
+        Ok(node)
+    }
+
+    /// extends an existing node with some values
+    ///
+    /// The result will have the same level as the input. `from` will contain all elements that did not fit.
     async fn extend<V: Serialize + Debug>(
         &self,
         index: &Index<T>,
         from: &mut std::iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
     ) -> Result<Index<T>> {
         info!(
-            "extend {} {} {} {} {}",
+            "extend {} {} {} {}",
             index.level(),
             index.key_bytes(),
             index.value_bytes(),
             index.sealed(),
-            self.is_packed(index).await?,
         );
         if index.sealed() || from.peek().is_none() {
             return Ok(index.clone());
@@ -829,22 +842,21 @@ where
                 Ok(self.create_leaf(data, builder, from).await?.into())
             }
             NodeInfo::Branch(index, branch) => {
-                info!("extending branch");
+                info!("extending existing branch");
                 let mut children = branch.children;
-                if let Some(last_child) = children.last_mut() {
-                    *last_child = self.extendr(&last_child, from).await?;
+                if let Some(last_child) = children.last_mut() {                    
+                    *last_child = self.extend_above(last_child, index.level - 1, from).await?;
                 }
                 let result = self
                     .create_branch(children, index.level, from)
                     .await?
                     .into();
-                if !self.is_packed(&result).await? {
-                    self.dump(&result, "  ").await?;
-                }
-                // info!("is_packed {}", self.is_packed(&result).await?);
                 Ok(result)
             }
-            NodeInfo::PurgedBranch(_) | NodeInfo::PurgedLeaf(_) => Ok(index.clone()),
+            NodeInfo::PurgedBranch(_) | NodeInfo::PurgedLeaf(_) => {
+                // purged nodes can not be extended
+                Ok(index.clone())
+            }
         }
     }
 
