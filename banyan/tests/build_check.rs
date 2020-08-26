@@ -188,3 +188,45 @@ async fn stream_test_simple() -> anyhow::Result<()> {
     println!("{:?}", res);
     Ok(())
 }
+
+fn build(items: &mut Vec<u32>) {
+    const MAX_BRANCH: usize = 8;
+    if items.len() <= 1 {
+        // nothing we can do
+        return
+    } else {
+        let pos = items.iter().position(|x| *x != items[0]).unwrap_or(items.len());
+        if pos >= MAX_BRANCH || pos == items.len() || pos == items.len() - 1 {
+            // a valid node can be built from the start
+            items.splice(0..MAX_BRANCH.min(items.len()), vec![items[0] + 1]);
+        } else {
+            // temporarily remove the start and recurse
+            let removed = items.splice(0..pos, std::iter::empty()).collect::<Vec<_>>();
+            build(items);
+            items.splice(0..0, removed);
+        }
+    }
+}
+
+#[test]
+fn build_test() {
+    let mut v = vec![1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    while v.len() > 1 {
+        println!("{:?}", v);
+        build(&mut v);
+    }
+    println!("{:?}", v);
+}
+
+#[quickcheck_async::tokio]
+async fn build_converges(data: Vec<u32>) -> bool {
+    let mut v = data;
+    v.sort();
+    v.reverse();
+    while v.len() > 1 {
+        println!("{:?}", v);
+        build(&mut v);
+    }
+    println!("{:?}", v);
+    true
+}
