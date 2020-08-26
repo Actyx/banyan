@@ -208,24 +208,6 @@ impl<
         }
     }
 
-    fn with_root(&self, root: Option<Index<T>>) -> Self {
-        Tree {
-            root,
-            forest: self.forest.clone(),
-            _t: PhantomData,
-        }
-    }
-
-    /// returns the part of the tree that is considered filled, basically everything up to the first gap
-    ///
-    /// a gap is a non-full leaf or a "level hole"
-    pub async fn filled(&self) -> Result<Self> {
-        Ok(match &self.root {
-            Some(index) => self.with_root(self.forest.filled(index).await?),
-            None => self.with_root(None),
-        })
-    }
-
     pub async fn check_invariants(&self) -> Result<Vec<String>> {
         let mut msgs = Vec::new();
         if let Some(root) = &self.root {
@@ -268,13 +250,6 @@ impl<
 
     /// packs the tree to the left
     pub async fn pack(&self) -> Result<Self> {
-        let mut filled = self.filled().await?;
-        let remainder: Vec<_> = self.collect_from(filled.count()).await?;
-        filled.extend(remainder).await?;
-        Ok(filled)
-    }
-
-    pub async fn pack2(&self) -> Result<Self> {
         let roots = self.roots().await?;
         let mut filled = Tree::<T, V>::from_roots(self.forest.clone(), roots).await?;
         let remainder: Vec<_> = self.collect_from(filled.count()).await?;
@@ -299,7 +274,11 @@ impl<
         } else {
             self.forest.fill_node(0, from.by_ref()).await?.into()
         };
-        self.root = Some(self.forest.extend_above(&root, u32::max_value(), from.by_ref()).await?);
+        self.root = Some(
+            self.forest
+                .extend_above(&root, u32::max_value(), from.by_ref())
+                .await?,
+        );
         Ok(())
     }
 
@@ -544,6 +523,8 @@ where
         Ok(self.cache_leaf(index, leaf))
     }
 
+    /// given some children and some additional elements, creates a node with the given
+    /// children and new children from `from` until it is full
     async fn create_branch<V: Serialize + Debug>(
         &self,
         children: Vec<Index<T>>,
@@ -562,25 +543,23 @@ where
         level: u32,
         from: &mut std::iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
     ) -> Result<BranchIndex<T>> {
-        assert!(children.iter().all(|child| child.level() <= level - 1));
-        assert!(children.is_empty() || children.iter().any(|child| child.level() == level - 1));
+        assert!(
+            children.iter().all(|child| child.level() <= level - 1),
+            "All children must be below the level of the branch to be created."
+        );
+        assert!(
+            children.is_empty() || children.iter().any(|child| child.level() == level - 1),
+            "If there are children, at least one must be directly below the branch to be created."
+        );
         let mut summaries = children
             .iter()
             .map(|child| child.data().summarize())
             .collect::<Vec<_>>();
-        println!("{:?}", children.iter().map(|x| (x.level(), x.sealed())).collect::<Vec<_>>());
-        if !is_sorted(children.iter().map(|x| x.level()).rev()) {
-            panic!("children passed to create_branch unsorted");
-        }
         while from.peek().is_some() && ((children.len() as u64) <= self.config().max_branch_count) {
             let child = self.fill_noder(level - 1, from).await?;
             let summary = child.data().summarize();
             summaries.push(summary);
             children.push(child);
-        }
-        if !is_sorted(children.iter().map(|x| x.level()).rev()) {
-            println!("{:?}", show_levels(&children));
-            panic!("children after adding are unsorted");
         }
         let index = self.new_branch(&children).await?;
         info!(
@@ -797,7 +776,7 @@ where
         }
         index
     }
-    
+
     /// extends an existing node with some values
     ///
     /// The result will have the max level `level`. `from` will contain all elements that did not fit.
@@ -844,7 +823,7 @@ where
             NodeInfo::Branch(index, branch) => {
                 info!("extending existing branch");
                 let mut children = branch.children;
-                if let Some(last_child) = children.last_mut() {                    
+                if let Some(last_child) = children.last_mut() {
                     *last_child = self.extend_above(last_child, index.level - 1, from).await?;
                 }
                 let result = self
@@ -1270,20 +1249,6 @@ where
         self.dump(index, prefix).boxed_local()
     }
 
-    async fn filled(&self, index: &Index<T>) -> Result<Option<Index<T>>> {
-        if index.sealed() {
-            Ok(Some(index.clone()))
-        } else if let NodeInfo::Branch(_, branch) = self.load_node(index).await? {
-            if let Some(child) = branch.children.first() {
-                self.filledr(child).await
-            } else {
-                Ok(None)
-            }
-        } else {
-            Ok(None)
-        }
-    }
-
     async fn roots(&self, index: &Index<T>) -> Result<Vec<Index<T>>> {
         let mut res = Vec::new();
         let mut level: i32 = i32::max_value();
@@ -1361,42 +1326,38 @@ where
         Ok(())
     }
 
+    /// Checks if a node is packed to the left
     async fn is_packed(&self, index: &Index<T>) -> Result<bool> {
-        if let NodeInfo::Branch(index, branch) = self.load_node(index).await? {
-            Ok(if index.sealed {
-                // sealed nodes, for themselves, are packed
-                true
-            } else {
-                if let Some((last, rest)) = branch.children.split_last() {
-                    // for the first n-1 children, they must all be sealed and at exactly 1 level below
-                    let first_ok = rest
-                        .iter()
-                        .all(|child| child.sealed() && child.level() == index.level - 1);
-                    // for the last child, it can be at any level below, and does not have to be sealed, but it must itself be balanced
-                    let last_ok = self.is_packedr(last).await?;
-                    if !first_ok {
-                        println!("first_ok false {:?}", show_levels(&branch.children));
-                    }
-                    if !last_ok {
-                        println!("last_ok false {:?}", show_levels(&branch.children));
-                    }
-                    first_ok && last_ok
-                } else {
-                    // this should not happen, but a branch with no children can be considered packed
+        Ok(
+            if let NodeInfo::Branch(index, branch) = self.load_node(index).await? {
+                if index.sealed {
+                    // sealed nodes, for themselves, are packed
                     true
+                } else {
+                    if let Some((last, rest)) = branch.children.split_last() {
+                        // for the first n-1 children, they must all be sealed and at exactly 1 level below
+                        let first_ok = rest
+                            .iter()
+                            .all(|child| child.sealed() && child.level() == index.level - 1);
+                        // for the last child, it can be at any level below, and does not have to be sealed,
+                        let last_ok = last.level() <= index.level - 1;
+                        // but it must itself be packed
+                        let rec_ok = self.is_packedr(last).await?;
+                        first_ok && last_ok && rec_ok
+                    } else {
+                        // this should not happen, but a branch with no children can be considered packed
+                        true
+                    }
                 }
-            })
-        } else {
-            Ok(true)
-        }
+            } else {
+                true
+            },
+        )
     }
 
+    /// Recursion helper for is_packed
     fn is_packedr<'a>(&'a self, index: &'a Index<T>) -> FutureResult<'a, bool> {
         self.is_packed(index).boxed_local()
-    }
-
-    fn filledr<'a>(&'a self, index: &'a Index<T>) -> FutureResult<'a, Option<Index<T>>> {
-        self.filled(index).boxed_local()
     }
 
     fn leaf_cache(&self) -> &RwLock<lru::LruCache<T::Link, Leaf>> {
@@ -1426,7 +1387,13 @@ fn is_sorted<T: Ord>(iter: impl Iterator<Item = T>) -> bool {
 }
 
 fn show_levels<T: TreeTypes>(children: &[Index<T>]) -> String {
-    format!("{:?}", children.iter().map(|x| (x.level(), x.sealed())).collect::<Vec<_>>())
+    format!(
+        "{:?}",
+        children
+            .iter()
+            .map(|x| (x.level(), x.sealed()))
+            .collect::<Vec<_>>()
+    )
 }
 
 pub struct FilteredChunk<T: TreeTypes, V> {

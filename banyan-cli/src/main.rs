@@ -489,16 +489,11 @@ async fn main() -> Result<()> {
         )?;
         let tree = Tree::<TT, serde_cbor::Value>::new(root, forest).await?;
         tree.dump().await?;
-        let tree2 = tree.pack2().await?;
+        let tree2 = tree.pack().await?;
         tree2.assert_invariants().await?;
         println!("Tree created via pack2:");
         tree2.dump().await?;
-        let tree3 = tree.pack().await?;
-        tree3.assert_invariants().await?;
-        println!("Tree created via old pack:");
-        tree3.dump().await?;
         assert!(tree2.is_packed().await?);
-        assert!(tree3.is_packed().await?);
         println!("{:?}", tree2);
     } else if let Some(matches) = matches.subcommand_matches("filter") {
         let root = Cid::from_str(
