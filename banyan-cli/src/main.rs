@@ -293,6 +293,12 @@ fn app() -> clap::App<'static, 'static> {
                         .long("unbalanced")
                         .takes_value(false)
                         .help("Do not balance while building"),
+                )
+                .arg(
+                    Arg::with_name("base")
+                        .long("base")
+                        .takes_value(true)
+                        .help("Base on which to build"),
                 ),
         )
         .subcommand(
@@ -435,11 +441,15 @@ async fn main() -> Result<()> {
             .ok_or(anyhow!("required arg count not provided"))?
             .parse()?;
         let unbalanced = matches.is_present("unbalanced");
+        let base = matches.value_of("base").map(Cid::from_str).transpose()?;
         println!(
             "building a tree with {} batches of {} values, unbalanced: {}",
             batches, count, unbalanced
         );
-        let mut tree = Tree::<TT, String>::empty(forest.clone());
+        let mut tree = match base {
+            Some(root) => Tree::<TT, String>::new(root, forest.clone()).await?,
+            None => Tree::<TT, String>::empty(forest.clone()),
+        };
         let mut offset: u64 = 0;
         for _ in 0..batches {
             let v = (0..count)
@@ -479,11 +489,17 @@ async fn main() -> Result<()> {
         )?;
         let tree = Tree::<TT, serde_cbor::Value>::new(root, forest).await?;
         tree.dump().await?;
-        let tree = tree.pack2().await?;
-        tree.assert_invariants().await?;
-        assert!(tree.is_packed().await?);
-        tree.dump().await?;
-        println!("{:?}", tree);
+        let tree2 = tree.pack2().await?;
+        tree2.assert_invariants().await?;
+        println!("Tree created via pack2:");
+        tree2.dump().await?;
+        let tree3 = tree.pack().await?;
+        tree3.assert_invariants().await?;
+        println!("Tree created via old pack:");
+        tree3.dump().await?;
+        assert!(tree2.is_packed().await?);
+        assert!(tree3.is_packed().await?);
+        println!("{:?}", tree2);
     } else if let Some(matches) = matches.subcommand_matches("filter") {
         let root = Cid::from_str(
             matches
