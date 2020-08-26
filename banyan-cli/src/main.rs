@@ -491,9 +491,8 @@ async fn main() -> Result<()> {
         tree.dump().await?;
         let tree2 = tree.pack().await?;
         tree2.assert_invariants().await?;
-        println!("Tree created via pack2:");
-        tree2.dump().await?;
         assert!(tree2.is_packed().await?);
+        tree2.dump().await?;
         println!("{:?}", tree2);
     } else if let Some(matches) = matches.subcommand_matches("filter") {
         let root = Cid::from_str(

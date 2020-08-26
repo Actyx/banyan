@@ -269,14 +269,9 @@ impl<
             // nothing to do
             return Ok(());
         }
-        let root = if let Some(root) = &self.root {
-            root.clone()
-        } else {
-            self.forest.fill_node(0, from.by_ref()).await?.into()
-        };
         self.root = Some(
             self.forest
-                .extend_above(&root, u32::max_value(), from.by_ref())
+                .extend_above(self.root.as_ref(), u32::max_value(), from.by_ref())
                 .await?,
         );
         Ok(())
@@ -296,7 +291,7 @@ impl<
                 let mut from = from.peekable();
                 Some(
                     self.forest
-                        .create_branch_unbalanced(vec![a, b], level, from.by_ref())
+                        .extend_branch_unbalanced(vec![a, b], level, from.by_ref())
                         .await?
                         .into(),
                 )
@@ -476,10 +471,24 @@ where
         })
     }
 
+    /// create a leaf from scratch from an interator
+    async fn leaf_from_iter<V: Serialize + Debug>(
+        &self,
+        from: &mut std::iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
+    ) -> Result<LeafIndex<T>> {
+        assert!(from.peek().is_some());
+        self.extend_leaf(
+            T::Seq::empty(),
+            ZstdArrayBuilder::new(self.config().zstd_level)?,
+            from,
+        )
+        .await
+    }
+
     /// Creates a leaf from a sequence that either contains all items from the sequence, or is full
     ///
     /// The result is the index of the leaf. The iterator will contain the elements that did not fit.
-    async fn create_leaf<V: Serialize + Debug>(
+    async fn extend_leaf<V: Serialize + Debug>(
         &self,
         mut keys: T::Seq,
         builder: ZstdArrayBuilder,
@@ -525,19 +534,32 @@ where
 
     /// given some children and some additional elements, creates a node with the given
     /// children and new children from `from` until it is full
-    async fn create_branch<V: Serialize + Debug>(
+    async fn extend_branch<V: Serialize + Debug>(
         &self,
         children: Vec<Index<T>>,
         level: u32,
         from: &mut std::iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
     ) -> Result<BranchIndex<T>> {
-        assert!(from.peek().is_none() || children.iter().all(|child| child.level() == level - 1));
-        self.create_branch_unbalanced(children, level, from).await
+        assert!(
+            from.peek().is_none()
+                || children
+                    .iter()
+                    .all(|child| child.level() == level - 1 && child.sealed()),
+            "All children must be sealed, and directly below the branch to be created."
+        );
+        let result = self.extend_branch_unbalanced(children, level, from).await?;
+        if from.peek().is_some() {
+            assert!(result.level == level);
+            assert!(result.sealed);
+        } else {
+            assert!(result.level <= level);
+        }
+        Ok(result)
     }
 
     /// given some children and some additional elements, creates a node with the given
     /// children and new children from `from` until it is full
-    async fn create_branch_unbalanced<V: Serialize + Debug>(
+    async fn extend_branch_unbalanced<V: Serialize + Debug>(
         &self,
         mut children: Vec<Index<T>>,
         level: u32,
@@ -555,7 +577,7 @@ where
             .iter()
             .map(|child| child.data().summarize())
             .collect::<Vec<_>>();
-        while from.peek().is_some() && ((children.len() as u64) <= self.config().max_branch_count) {
+        while from.peek().is_some() && ((children.len() as u64) < self.config().max_branch_count) {
             let child = self.fill_noder(level - 1, from).await?;
             let summary = child.data().summarize();
             summaries.push(summary);
@@ -581,20 +603,14 @@ where
         from: &mut std::iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
     ) -> Result<Index<T>> {
         assert!(from.peek().is_some());
-        if level == 0 {
-            Ok(self
-                .create_leaf(
-                    T::Seq::empty(),
-                    ZstdArrayBuilder::new(self.config().zstd_level)?,
-                    from,
-                )
-                .await?
-                .into())
+        Ok(if level == 0 {
+            self.leaf_from_iter(from).await?.into()
         } else {
-            Ok(self.create_branch(Vec::new(), level, from).await?.into())
-        }
+            self.extend_branch(Vec::new(), level, from).await?.into()
+        })
     }
 
+    /// recursion helper for fill_node
     fn fill_noder<'a, V: Serialize + Debug + 'a>(
         &'a self,
         level: u32,
@@ -608,7 +624,7 @@ where
     /// The level will be the max level of the children + 1. We do not want to support branches that are artificially high.
     async fn new_branch(&self, children: &[Index<T>]) -> Result<BranchIndex<T>> {
         assert!(!children.is_empty());
-        assert!(is_sorted(children.iter().map(|x| x.level()).rev()));
+        // assert!(is_sorted(children.iter().map(|x| x.level()).rev()));
         let (cid, encoded_children_len) = self.persist_branch(&children).await?;
         let level = children.iter().map(|x| x.level()).max().unwrap() + 1;
         let count = children.iter().map(|x| x.count()).sum();
@@ -631,9 +647,90 @@ where
         })
     }
 
+    /// extends an existing node with some values
+    ///
+    /// The result will have the max level `level`. `from` will contain all elements that did not fit.
+    async fn extend_above<V: Serialize + Debug>(
+        &self,
+        node: Option<&Index<T>>,
+        level: u32,
+        from: &mut std::iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
+    ) -> Result<Index<T>> {
+        assert!(from.peek().is_some());
+        assert!(node.map(|node| level >= node.level()).unwrap_or(true));
+        let mut node = if let Some(node) = node {
+            self.extendr(node, from).await?
+        } else {
+            self.leaf_from_iter(from).await?.into()
+        };
+        while (from.peek().is_some() || node.level() == 0) && node.level() < level {
+            let level = node.level() + 1;
+            node = self.extend_branch(vec![node], level, from).await?.into();
+        }
+        if from.peek().is_some() {
+            assert!(node.level() == level);
+            assert!(node.sealed());
+        } else {
+            assert!(node.level() <= level);
+        }
+        Ok(node)
+    }
+
+    /// extends an existing node with some values
+    ///
+    /// The result will have the same level as the input. `from` will contain all elements that did not fit.    
+    async fn extend<V: Serialize + Debug>(
+        &self,
+        index: &Index<T>,
+        from: &mut std::iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
+    ) -> Result<Index<T>> {
+        info!(
+            "extend {} {} {} {}",
+            index.level(),
+            index.key_bytes(),
+            index.value_bytes(),
+            index.sealed(),
+        );
+        if index.sealed() || from.peek().is_none() {
+            return Ok(index.clone());
+        }
+        Ok(match self.load_node(index).await? {
+            NodeInfo::Leaf(index, leaf) => {
+                info!("extending existing leaf");
+                let keys = index.keys.clone();
+                let builder = leaf.builder(self.config().zstd_level)?;
+                self.extend_leaf(keys, builder, from).await?.into()
+            }
+            NodeInfo::Branch(index, branch) => {
+                info!("extending existing branch");
+                let mut children = branch.children;
+                if let Some(last_child) = children.last_mut() {
+                    *last_child = self
+                        .extend_above(Some(last_child), index.level - 1, from)
+                        .await?;
+                }
+                self.extend_branch(children, index.level, from)
+                    .await?
+                    .into()
+            }
+            NodeInfo::PurgedBranch(_) | NodeInfo::PurgedLeaf(_) => {
+                // purged nodes can not be extended
+                index.clone()
+            }
+        })
+    }
+
+    fn extendr<'a, V: Serialize + Debug + 'a>(
+        &'a self,
+        node: &'a Index<T>,
+        from: &'a mut std::iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
+    ) -> FutureResult<'a, Index<T>> {
+        self.extend(node, from).boxed_local()
+    }
+
     /// Find a valid branch in an array of children.
     /// This can be either a sealed node at the start, or an unsealed node at the end
-    fn find_valid_branch(&self, children: &[Index<T>]) -> (usize, bool) {
+    fn find_valid_branch(&self, children: &[Index<T>]) -> BranchResult {
         assert!(!children.is_empty());
         let max_branch_count = self.config.max_branch_count as usize;
         let level = children[0].level();
@@ -643,13 +740,13 @@ where
             .unwrap_or(children.len());
         if pos >= max_branch_count {
             // sequence starts with roots that we can turn into a sealed node
-            (max_branch_count, true)
+            BranchResult::Sealed(max_branch_count)
         } else if pos == children.len() || pos == children.len() - 1 {
             // sequence is something we can turn into an unsealed node
-            (max_branch_count.min(children.len()), true)
+            BranchResult::Unsealed(max_branch_count.min(children.len()))
         } else {
             // remove first pos and recurse
-            (pos, false)
+            BranchResult::Skip(pos)
         }
     }
 
@@ -657,13 +754,15 @@ where
     async fn simplify_roots(&self, roots: &mut Vec<Index<T>>, from: usize) -> Result<()> {
         assert!(roots.len() > 1);
         assert!(is_sorted(roots.iter().map(|x| x.level()).rev()));
-        let (count, create) = self.find_valid_branch(&roots[from..]);
-        if create {
-            let range = from..from + count;
-            let node = self.new_branch(&roots[range.clone()]).await?;
-            roots.splice(range, Some(node.into()));
-        } else {
-            self.simplify_rootsr(roots, from + count).await?;
+        match self.find_valid_branch(&roots[from..]) {
+            BranchResult::Sealed(count) | BranchResult::Unsealed(count) => {
+                let range = from..from + count;
+                let node = self.new_branch(&roots[range.clone()]).await?;
+                roots.splice(range, Some(node.into()));
+            }
+            BranchResult::Skip(count) => {
+                self.simplify_rootsr(roots, from + count).await?;
+            }
         }
         Ok(())
     }
@@ -775,76 +874,6 @@ where
             self.leaf_cache().write().unwrap().put(cid.clone(), node);
         }
         index
-    }
-
-    /// extends an existing node with some values
-    ///
-    /// The result will have the max level `level`. `from` will contain all elements that did not fit.
-    async fn extend_above<V: Serialize + Debug>(
-        &self,
-        node: &Index<T>,
-        level: u32,
-        from: &mut std::iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
-    ) -> Result<Index<T>> {
-        assert!(level >= node.level());
-        let mut node = self.extendr(node, from).await?;
-        while (from.peek().is_some() || node.level() == 0) && node.level() < level {
-            let level = node.level() + 1;
-            node = self.create_branch(vec![node], level, from).await?.into();
-        }
-        Ok(node)
-    }
-
-    /// extends an existing node with some values
-    ///
-    /// The result will have the same level as the input. `from` will contain all elements that did not fit.
-    async fn extend<V: Serialize + Debug>(
-        &self,
-        index: &Index<T>,
-        from: &mut std::iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
-    ) -> Result<Index<T>> {
-        info!(
-            "extend {} {} {} {}",
-            index.level(),
-            index.key_bytes(),
-            index.value_bytes(),
-            index.sealed(),
-        );
-        if index.sealed() || from.peek().is_none() {
-            return Ok(index.clone());
-        }
-        match self.load_node(index).await? {
-            NodeInfo::Leaf(index, leaf) => {
-                info!("extending existing leaf");
-                let data = index.keys.clone();
-                let builder = leaf.builder(self.config().zstd_level)?;
-                Ok(self.create_leaf(data, builder, from).await?.into())
-            }
-            NodeInfo::Branch(index, branch) => {
-                info!("extending existing branch");
-                let mut children = branch.children;
-                if let Some(last_child) = children.last_mut() {
-                    *last_child = self.extend_above(last_child, index.level - 1, from).await?;
-                }
-                let result = self
-                    .create_branch(children, index.level, from)
-                    .await?
-                    .into();
-                Ok(result)
-            }
-            NodeInfo::PurgedBranch(_) | NodeInfo::PurgedLeaf(_) => {
-                // purged nodes can not be extended
-                Ok(index.clone())
-            }
-        }
-    }
-
-    fn extendr<'a, V: Serialize + Debug + 'a>(
-        &'a self,
-        node: &'a Index<T>,
-        from: &'a mut std::iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
-    ) -> FutureResult<'a, Index<T>> {
-        self.extend(node, from).boxed_local()
     }
 
     async fn get<V: DeserializeOwned>(
@@ -1394,6 +1423,12 @@ fn show_levels<T: TreeTypes>(children: &[Index<T>]) -> String {
             .map(|x| (x.level(), x.sealed()))
             .collect::<Vec<_>>()
     )
+}
+
+enum BranchResult {
+    Sealed(usize),
+    Unsealed(usize),
+    Skip(usize),
 }
 
 pub struct FilteredChunk<T: TreeTypes, V> {

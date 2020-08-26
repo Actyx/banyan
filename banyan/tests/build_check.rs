@@ -163,6 +163,33 @@ async fn build_get(xs: Vec<(Key, u64)>) -> quickcheck::TestResult {
     .await
 }
 
+#[quickcheck_async::tokio]
+async fn build_pack(xss: Vec<Vec<(Key, u64)>>) -> quickcheck::TestResult {
+    test(|| async {
+        let store = Arc::new(MemStore::new());
+        let forest = Arc::new(Forest::<TT>::new(store, Config::debug()));
+        let mut tree = Tree::<TT, u64>::empty(forest);
+        // flattened xss for reference
+        let xs = xss.iter().cloned().flatten().collect::<Vec<_>>();
+        println!("{}", xs.len());
+        // build complex unbalanced tree
+        for xs in xss.iter() {
+            tree.extend_unbalanced(xs.clone()).await.unwrap();
+        }
+        // check that the unbalanced tree itself matches the elements
+        let actual: Vec<_> = tree.collect_from(0).await?;
+        let unpacked_matches = xs == actual;
+
+        let packed = tree.pack().await?;
+        assert!(packed.is_packed().await?);
+        let actual: Vec<_> = packed.collect_from(0).await?;
+        let packed_matches = xs == actual;
+
+        Ok(unpacked_matches && packed_matches)
+    })
+    .await
+}
+
 #[tokio::test]
 async fn filter_test_simple() -> anyhow::Result<()> {
     let _ = env_logger::builder().is_test(true).try_init();
