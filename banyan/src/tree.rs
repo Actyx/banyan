@@ -391,7 +391,11 @@ impl<
 
     /// repair a tree by purging parts of the tree that can not be resolved.
     ///
-    /// produces a report of links that could not be resolved.const
+    /// produces a report of links that could not be resolved.
+    ///
+    /// Note that this is an emergency measure to recover data if the tree is not completely
+    /// available. It might result in a degenerate tree that can no longer be safely added to,
+    /// especially if there are repaired blocks in the non-packed part.
     ///
     /// TODO: figure out implications when forgetting non-sealed nodes
     pub async fn repair<'a>(&mut self) -> Result<Vec<String>> {
