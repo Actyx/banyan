@@ -7,6 +7,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     str::FromStr,
     sync::Arc,
+    time::Duration,
 };
 use tracing::Level;
 use tracing_subscriber;
@@ -15,7 +16,7 @@ mod ipfs;
 
 use banyan::index::*;
 use banyan::{
-    query::{OffsetRangeQuery, Query},
+    query::{AllQuery, OffsetRangeQuery, Query},
     tree::*,
 };
 use ipfs::{Cid, IpfsStore};
@@ -324,6 +325,8 @@ fn app() -> clap::App<'static, 'static> {
                 .about("Repair a tree")
                 .arg(root_arg()),
         )
+        .subcommand(SubCommand::with_name("send_stream").about("Send a stream"))
+        .subcommand(SubCommand::with_name("recv_stream").about("Receive a stream"))
         .subcommand(
             SubCommand::with_name("forget")
                 .about("Forget data from a tree")
@@ -539,6 +542,34 @@ async fn main() -> Result<()> {
             .await?;
         tree.dump().await?;
         println!("{:?}", tree);
+    } else if let Some(_) = matches.subcommand_matches("send_stream") {
+        let mut ticks = tokio::time::interval(Duration::from_secs(1));
+        let mut tree = Tree::<TT, String>::empty(forest);
+        let mut offset = 0;
+        while let Some(_) = ticks.next().await {
+            let key = Key::single(offset, offset, tags_from_offset(offset));
+            tree.extend_unpacked(Some((key, "xxx".into()))).await?;
+            offset += 1;
+            println!("{}", tree);
+        }
+    } else if let Some(_) = matches.subcommand_matches("recv_stream") {
+        use std::io;
+        use std::io::prelude::*;
+        let stdin = io::stdin();
+        let (s, r) = futures::channel::mpsc::unbounded();
+        tokio::task::spawn(async move {
+            for line in stdin.lock().lines() {
+                let text = line.unwrap();
+                let cid = Cid::from_str(&text).unwrap();
+                s.unbounded_send(cid).unwrap();
+            }
+        });
+        let mut stream = banyan::stream::SourceStream(forest, AllQuery)
+            .query::<String>(r.boxed_local())
+            .boxed_local();
+        while let Some(ev) = stream.next().await {
+            println!("{:?}", ev);
+        }
     } else {
         app().print_long_help()?;
         println!();

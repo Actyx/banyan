@@ -1,6 +1,6 @@
 use super::index::*;
 use crate::{
-    query::{OffsetRangeQuery, Query, AllQuery},
+    query::{AllQuery, OffsetRangeQuery, Query},
     store::ArcStore,
     zstd_array::ZstdArrayBuilder,
 };
@@ -97,10 +97,7 @@ impl Config {
     ///
     /// keys are hardcoded to 0
     pub fn debug_fast() -> Self {
-        Self::from_keys(
-            salsa20::Key::from([0u8; 32]),
-            salsa20::Key::from([0u8; 32]),
-        )
+        Self::from_keys(salsa20::Key::from([0u8; 32]), salsa20::Key::from([0u8; 32]))
     }
     /// reasonable default config from index key and value key
     pub fn from_keys(index_key: salsa20::Key, value_key: salsa20::Key) -> Self {
@@ -777,7 +774,9 @@ where
         match self.find_valid_branch(&roots[from..]) {
             BranchResult::Sealed(count) | BranchResult::Unsealed(count) => {
                 let range = from..from + count;
-                let node = self.new_branch(&roots[range.clone()], CreateMode::Packed).await?;
+                let node = self
+                    .new_branch(&roots[range.clone()], CreateMode::Packed)
+                    .await?;
                 roots.splice(range, Some(node.into()));
             }
             BranchResult::Skip(count) => {
@@ -1156,7 +1155,7 @@ where
                     let mut changed = false;
                     let offsets = zip_with_offset_ref(node.children.iter(), offset);
                     for (i, (child, offset)) in offsets.enumerate() {
-                        // TODO: ensure we only purge children that are in the packed part!                        
+                        // TODO: ensure we only purge children that are in the packed part!
                         let child1 = self.forget_exceptr(offset, query, child).await?;
                         if child1.cid().is_none() != child.cid().is_none() {
                             children[i] = child1;
