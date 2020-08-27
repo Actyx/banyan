@@ -174,15 +174,15 @@ async fn build_pack(xss: Vec<Vec<(Key, u64)>>) -> quickcheck::TestResult {
         println!("{}", xs.len());
         // build complex unbalanced tree
         for xs in xss.iter() {
-            tree.extend_unbalanced(xs.clone()).await.unwrap();
+            tree.extend_unpacked(xs.clone()).await.unwrap();
         }
         // check that the unbalanced tree itself matches the elements
-        let actual: Vec<_> = tree.collect_from(0).await?;
+        let actual: Vec<_> = tree.collect().await?;
         let unpacked_matches = xs == actual;
 
         let packed = tree.pack().await?;
         assert!(packed.is_packed().await?);
-        let actual: Vec<_> = packed.collect_from(0).await?;
+        let actual: Vec<_> = packed.collect().await?;
         let packed_matches = xs == actual;
 
         Ok(unpacked_matches && packed_matches)
