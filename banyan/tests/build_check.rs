@@ -210,8 +210,8 @@ async fn stream_test_simple() -> anyhow::Result<()> {
         trees.push(tree.root().unwrap());
     }
     println!("{:?}", trees);
-    let res = banyan::stream::SourceStream(forest, AllQuery)
-        .query::<u64>(stream::iter(trees).boxed_local());
+    let res = forest.query(AllQuery)
+        .stream::<u64>(stream::iter(trees).boxed_local());
     let res = res.collect::<Vec<_>>().await;
     println!("{:?}", res);
     Ok(())

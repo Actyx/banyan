@@ -23,6 +23,7 @@ use std::{
     sync::{Arc, RwLock},
 };
 use tracing::*;
+use crate::stream::SourceStream;
 
 type FutureResult<'a, T> = LocalBoxFuture<'a, Result<T>>;
 
@@ -1440,6 +1441,10 @@ where
             _tt: PhantomData,
         }
     }
+
+    pub fn query<Q>(self: Arc<Self>, query: Q) -> SourceStream<T, Q> {
+        SourceStream(self, query)
+    }
 }
 
 fn is_sorted<T: Ord>(iter: impl Iterator<Item = T>) -> bool {
@@ -1478,6 +1483,7 @@ enum CreateMode {
 
 /// A filtered chunk.
 /// Contains both data and information about the offsets the data resulted from.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FilteredChunk<T: TreeTypes, V> {
     // inclusive
     pub min: u64,

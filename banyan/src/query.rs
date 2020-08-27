@@ -4,7 +4,7 @@ use crate::{
     util::RangeBoundsExt,
 };
 use bitvec::prelude::BitVec;
-use std::{fmt::Debug, ops::{RangeBounds}, sync::Arc};
+use std::{fmt::Debug, ops::{RangeBounds}, sync::Arc, rc::Rc};
 
 /// A query
 ///
@@ -17,6 +17,16 @@ pub trait Query<T: TreeTypes>: Debug {
 }
 
 impl<T: TreeTypes> Query<T> for Box<dyn Query<T>> {
+    fn containing(&self, offset: u64, x: &LeafIndex<T>, res: &mut BitVec) {
+        self.as_ref().containing(offset, x, res);
+    }
+
+    fn intersecting(&self, offset: u64, x: &BranchIndex<T>, res: &mut BitVec) {
+        self.as_ref().intersecting(offset, x, res);
+    }
+}
+
+impl<T: TreeTypes> Query<T> for Rc<dyn Query<T>> {
     fn containing(&self, offset: u64, x: &LeafIndex<T>, res: &mut BitVec) {
         self.as_ref().containing(offset, x, res);
     }

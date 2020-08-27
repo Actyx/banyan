@@ -586,8 +586,8 @@ async fn main() -> Result<()> {
             .and_then(|data| future::ready(String::from_utf8(data).map_err(anyhow::Error::new)))
             .and_then(|data| future::ready(Cid::from_str(&data).map_err(anyhow::Error::new)));
         let cids = stream.filter_map(|x| future::ready(x.ok()));
-        let mut stream = banyan::stream::SourceStream(forest, AllQuery)
-            .query::<String>(cids.boxed_local())
+        let mut stream = forest.query(AllQuery)
+            .stream::<String>(cids.boxed_local())
             .boxed_local();
         while let Some(ev) = stream.next().await {
             println!("{:?}", ev);
