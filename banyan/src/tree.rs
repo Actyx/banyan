@@ -1442,6 +1442,12 @@ where
         }
     }
 
+    /// Creates a query object that can be used to translate a stream of roots
+    /// to a stream of filtered values.
+    ///
+    /// This is done in a two step process to have two separate methods, one for
+    /// which the type parameter can be inferred (Q), and one for which the type
+    /// parameter must be provided (V)
     pub fn query<Q>(self: Arc<Self>, query: Q) -> SourceStream<T, Q> {
         SourceStream(self, query)
     }

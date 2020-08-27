@@ -263,12 +263,19 @@ fn app() -> clap::App<'static, 'static> {
             .takes_value(true)
             .help("A value password to use")
     };
+    let verbose_arg = || {
+        Arg::with_name("verbose")
+            .short("v")
+            .multiple(true)
+            .help("Sets the level of verbosity")
+    };
     App::new("banyan-cli")
         .version("0.1")
         .author("Rüdiger Klaehn")
         .about("CLI to work with large banyan trees on ipfs")
         .arg(index_pass_arg())
         .arg(value_pass_arg())
+        .arg(verbose_arg())
         .subcommand(
             SubCommand::with_name("dump")
                 .about("Dump a tree")
@@ -388,14 +395,6 @@ fn create_salsa_key(text: &str) -> salsa20::Key {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // a builder for `FmtSubscriber`.
-    tracing_subscriber::fmt()
-        // all spans/events with a level higher than TRACE (e.g, debug, info, warn, etc.)
-        // will be written to stdout.
-        .with_max_level(Level::INFO)
-        // completes the builder and sets the constructed `Subscriber` as the default.
-        .init();
-
     let mut tagger = Tagger::new();
     // function to add some arbitrary tags to test out tag querying and compression
     let mut tags_from_offset = |i: u64| -> Tags {
@@ -422,6 +421,16 @@ async fn main() -> Result<()> {
         .value_of("value_pass")
         .map(create_salsa_key)
         .unwrap_or_default();
+    let verbosity = matches.occurrences_of("verbose");
+    let level = match verbosity {
+        0 => Level::ERROR,
+        1 => Level::INFO,
+        2 => Level::DEBUG,
+        _ => Level::TRACE,
+    };
+    tracing_subscriber::fmt()
+        .with_max_level(level)
+        .init();
     let mut config = Config::debug_fast();
     config.index_key = index_key;
     config.value_key = value_key;
@@ -573,9 +582,9 @@ async fn main() -> Result<()> {
             }
             offset += 1;
             if let Some(cid) = tree.cid() {
+                println!("publishing {} to {}", cid, topic);
                 pubsub_pub(topic, cid.to_string().as_bytes()).await?;
             }
-            println!("{}", tree);
         }
     } else if let Some(matches) = matches.subcommand_matches("recv_stream") {
         let topic = matches
