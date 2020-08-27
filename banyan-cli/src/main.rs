@@ -19,7 +19,7 @@ use banyan::{
     query::{AllQuery, OffsetRangeQuery, Query},
     tree::*,
 };
-use ipfs::{Cid, IpfsStore};
+use ipfs::{pubsub_pub, pubsub_sub, Cid, IpfsStore};
 
 use bitvec::prelude::*;
 
@@ -242,6 +242,13 @@ fn app() -> clap::App<'static, 'static> {
             .takes_value(true)
             .help("The root hash to use")
     };
+    let topic_arg = || {
+        Arg::with_name("topic")
+            .long("topic")
+            .required(true)
+            .takes_value(true)
+            .help("The topic to send/recv data over")
+    };
     let index_pass_arg = || {
         Arg::with_name("index_pass")
             .long("index_pass")
@@ -325,8 +332,16 @@ fn app() -> clap::App<'static, 'static> {
                 .about("Repair a tree")
                 .arg(root_arg()),
         )
-        .subcommand(SubCommand::with_name("send_stream").about("Send a stream"))
-        .subcommand(SubCommand::with_name("recv_stream").about("Receive a stream"))
+        .subcommand(
+            SubCommand::with_name("send_stream")
+                .about("Send a stream")
+                .arg(topic_arg()),
+        )
+        .subcommand(
+            SubCommand::with_name("recv_stream")
+                .about("Receive a stream")
+                .arg(topic_arg()),
+        )
         .subcommand(
             SubCommand::with_name("forget")
                 .about("Forget data from a tree")
@@ -542,7 +557,10 @@ async fn main() -> Result<()> {
             .await?;
         tree.dump().await?;
         println!("{:?}", tree);
-    } else if let Some(_) = matches.subcommand_matches("send_stream") {
+    } else if let Some(matches) = matches.subcommand_matches("send_stream") {
+        let topic = matches
+            .value_of("topic")
+            .ok_or(anyhow!("topic must be provided"))?;
         let mut ticks = tokio::time::interval(Duration::from_secs(1));
         let mut tree = Tree::<TT, String>::empty(forest);
         let mut offset = 0;
@@ -550,22 +568,36 @@ async fn main() -> Result<()> {
             let key = Key::single(offset, offset, tags_from_offset(offset));
             tree.extend_unpacked(Some((key, "xxx".into()))).await?;
             offset += 1;
+            if let Some(cid) = tree.cid() {
+                pubsub_pub(topic, cid.to_string().as_bytes()).await?;
+            }
             println!("{}", tree);
         }
-    } else if let Some(_) = matches.subcommand_matches("recv_stream") {
-        use std::io;
-        use std::io::prelude::*;
-        let stdin = io::stdin();
-        let (s, r) = futures::channel::mpsc::unbounded();
-        tokio::task::spawn(async move {
-            for line in stdin.lock().lines() {
-                let text = line.unwrap();
-                let cid = Cid::from_str(&text).unwrap();
-                s.unbounded_send(cid).unwrap();
-            }
-        });
+    } else if let Some(matches) = matches.subcommand_matches("recv_stream") {
+        let topic = matches
+            .value_of("topic")
+            .ok_or(anyhow!("topic must be provided"))?;
+        let stream = pubsub_sub(topic)?
+            .map_err(anyhow::Error::new)
+            .and_then(|data| future::ready(String::from_utf8(data).map_err(anyhow::Error::new)))
+            .and_then(|data| future::ready(Cid::from_str(&data).map_err(anyhow::Error::new)));
+        // while let Some(Ok(cid)) = stream.next().await {
+        //     println!("{}", cid);
+        // }
+        let cids = stream.filter_map(|x| future::ready(x.ok()));
+        // use std::io;
+        // use std::io::prelude::*;
+        // let stdin = io::stdin();
+        // let (s, r) = futures::channel::mpsc::unbounded();
+        // tokio::task::spawn(async move {
+        //     for line in stdin.lock().lines() {
+        //         let text = line.unwrap();
+        //         let cid = Cid::from_str(&text).unwrap();
+        //         s.unbounded_send(cid).unwrap();
+        //     }
+        // });
         let mut stream = banyan::stream::SourceStream(forest, AllQuery)
-            .query::<String>(r.boxed_local())
+            .query::<String>(cids.boxed_local())
             .boxed_local();
         while let Some(ev) = stream.next().await {
             println!("{:?}", ev);
