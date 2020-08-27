@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::{ops::Range, sync::Arc};
 mod ipfs;
 
+#[derive(Debug)]
 struct TT;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -162,6 +163,33 @@ async fn build_get(xs: Vec<(Key, u64)>) -> quickcheck::TestResult {
     .await
 }
 
+#[quickcheck_async::tokio]
+async fn build_pack(xss: Vec<Vec<(Key, u64)>>) -> quickcheck::TestResult {
+    test(|| async {
+        let store = Arc::new(MemStore::new());
+        let forest = Arc::new(Forest::<TT>::new(store, Config::debug()));
+        let mut tree = Tree::<TT, u64>::empty(forest);
+        // flattened xss for reference
+        let xs = xss.iter().cloned().flatten().collect::<Vec<_>>();
+        println!("{}", xs.len());
+        // build complex unbalanced tree
+        for xs in xss.iter() {
+            tree.extend_unpacked(xs.clone()).await.unwrap();
+        }
+        // check that the unbalanced tree itself matches the elements
+        let actual: Vec<_> = tree.collect().await?;
+        let unpacked_matches = xs == actual;
+
+        let packed = tree.pack().await?;
+        assert!(packed.is_packed().await?);
+        let actual: Vec<_> = packed.collect().await?;
+        let packed_matches = xs == actual;
+
+        Ok(unpacked_matches && packed_matches)
+    })
+    .await
+}
+
 #[tokio::test]
 async fn filter_test_simple() -> anyhow::Result<()> {
     let _ = env_logger::builder().is_test(true).try_init();
@@ -193,9 +221,12 @@ fn build(items: &mut Vec<u32>) {
     const MAX_BRANCH: usize = 8;
     if items.len() <= 1 {
         // nothing we can do
-        return
+        return;
     } else {
-        let pos = items.iter().position(|x| *x != items[0]).unwrap_or(items.len());
+        let pos = items
+            .iter()
+            .position(|x| *x != items[0])
+            .unwrap_or(items.len());
         if pos >= MAX_BRANCH || pos == items.len() || pos == items.len() - 1 {
             // a valid node can be built from the start
             items.splice(0..MAX_BRANCH.min(items.len()), vec![items[0] + 1]);
@@ -210,7 +241,9 @@ fn build(items: &mut Vec<u32>) {
 
 #[test]
 fn build_test() {
-    let mut v = vec![1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut v = vec![
+        1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    ];
     while v.len() > 1 {
         println!("{:?}", v);
         build(&mut v);

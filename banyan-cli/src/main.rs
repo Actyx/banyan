@@ -25,6 +25,7 @@ use bitvec::prelude::*;
 pub type Error = anyhow::Error;
 pub type Result<T> = anyhow::Result<T>;
 
+#[derive(Debug)]
 struct TT {}
 
 impl TreeTypes for TT {
@@ -292,6 +293,12 @@ fn app() -> clap::App<'static, 'static> {
                         .long("unbalanced")
                         .takes_value(false)
                         .help("Do not balance while building"),
+                )
+                .arg(
+                    Arg::with_name("base")
+                        .long("base")
+                        .takes_value(true)
+                        .help("Base on which to build"),
                 ),
         )
         .subcommand(
@@ -397,7 +404,7 @@ async fn main() -> Result<()> {
         .value_of("value_pass")
         .map(create_salsa_key)
         .unwrap_or_default();
-    let mut config = Config::debug();
+    let mut config = Config::debug_fast();
     config.index_key = index_key;
     config.value_key = value_key;
     let forest = Arc::new(Forest::<TT>::new(store, config));
@@ -407,7 +414,7 @@ async fn main() -> Result<()> {
                 .value_of("root")
                 .ok_or(anyhow!("root must be provided"))?,
         )?;
-        let tree = Tree::<TT, serde_cbor::Value>::new(root, forest).await?;
+        let tree = Tree::<TT, serde_cbor::Value>::from_cid(root, forest).await?;
         tree.dump().await?;
         return Ok(());
     } else if let Some(matches) = matches.subcommand_matches("stream") {
@@ -416,7 +423,7 @@ async fn main() -> Result<()> {
                 .value_of("root")
                 .ok_or(anyhow!("root must be provided"))?,
         )?;
-        let tree = Tree::<TT, serde_cbor::Value>::new(root, forest).await?;
+        let tree = Tree::<TT, serde_cbor::Value>::from_cid(root, forest).await?;
         let mut stream = tree.stream().enumerate();
         while let Some((i, Ok(v))) = stream.next().await {
             if i % 1000 == 0 {
@@ -434,11 +441,15 @@ async fn main() -> Result<()> {
             .ok_or(anyhow!("required arg count not provided"))?
             .parse()?;
         let unbalanced = matches.is_present("unbalanced");
+        let base = matches.value_of("base").map(Cid::from_str).transpose()?;
         println!(
             "building a tree with {} batches of {} values, unbalanced: {}",
             batches, count, unbalanced
         );
-        let mut tree = Tree::<TT, String>::empty(forest);
+        let mut tree = match base {
+            Some(root) => Tree::<TT, String>::from_cid(root, forest.clone()).await?,
+            None => Tree::<TT, String>::empty(forest.clone()),
+        };
         let mut offset: u64 = 0;
         for _ in 0..batches {
             let v = (0..count)
@@ -455,7 +466,7 @@ async fn main() -> Result<()> {
                 })
                 .collect::<Vec<_>>();
             if unbalanced {
-                tree.extend_unbalanced(v).await?;
+                tree.extend_unpacked(v).await?;
                 tree.assert_invariants().await?;
             } else {
                 tree.extend(v).await?;
@@ -463,21 +474,26 @@ async fn main() -> Result<()> {
             }
         }
         tree.dump().await?;
+        let roots = tree.roots().await?;
+        let levels = roots.iter().map(|x| x.level()).collect::<Vec<_>>();
+        let tree2 = Tree::<TT, i32>::from_roots(forest, roots).await?;
         println!("{:?}", tree);
         println!("{}", tree);
+        println!("{:?}", levels);
+        tree2.dump().await?;
     } else if let Some(matches) = matches.subcommand_matches("pack") {
         let root = Cid::from_str(
             matches
                 .value_of("root")
                 .ok_or(anyhow!("root must be provided"))?,
         )?;
-        let tree = Tree::<TT, serde_cbor::Value>::new(root, forest).await?;
+        let tree = Tree::<TT, serde_cbor::Value>::from_cid(root, forest).await?;
         tree.dump().await?;
-        let tree = tree.pack().await?;
-        tree.assert_invariants().await?;
-        assert!(tree.is_packed().await?);
-        tree.dump().await?;
-        println!("{:?}", tree);
+        let tree2 = tree.pack().await?;
+        tree2.assert_invariants().await?;
+        assert!(tree2.is_packed().await?);
+        tree2.dump().await?;
+        println!("{:?}", tree2);
     } else if let Some(matches) = matches.subcommand_matches("filter") {
         let root = Cid::from_str(
             matches
@@ -490,7 +506,7 @@ async fn main() -> Result<()> {
             .map(|tag| Key::filter_tags(Tags(btreeset! {Tag::new(tag)})))
             .collect::<Vec<_>>();
         let query = DnfQuery(tags);
-        let tree = Tree::<TT, serde_cbor::Value>::new(root, forest).await?;
+        let tree = Tree::<TT, serde_cbor::Value>::from_cid(root, forest).await?;
         tree.dump().await?;
         let mut stream = tree.stream_filtered(&query).enumerate();
         while let Some((i, Ok(v))) = stream.next().await {
@@ -504,7 +520,7 @@ async fn main() -> Result<()> {
                 .value_of("root")
                 .ok_or(anyhow!("root must be provided"))?,
         )?;
-        let mut tree = Tree::<TT, serde_cbor::Value>::new(root, forest).await?;
+        let mut tree = Tree::<TT, serde_cbor::Value>::from_cid(root, forest).await?;
         tree.repair().await?;
         tree.dump().await?;
         println!("{:?}", tree);
@@ -518,7 +534,7 @@ async fn main() -> Result<()> {
             .value_of("before")
             .ok_or(anyhow!("required arg before not provided"))?
             .parse()?;
-        let mut tree = Tree::<TT, serde_cbor::Value>::new(root, forest).await?;
+        let mut tree = Tree::<TT, serde_cbor::Value>::from_cid(root, forest).await?;
         tree.forget_except(&OffsetRangeQuery::from(offset..))
             .await?;
         tree.dump().await?;
