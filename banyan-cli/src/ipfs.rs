@@ -5,7 +5,10 @@ use derive_more::{Display, From, FromStr};
 use futures::{future::BoxFuture, prelude::*};
 use multihash::Sha2_256;
 use reqwest::multipart::Part;
-use serde::{de::Visitor, de::IgnoredAny, ser::SerializeStruct, Deserialize, Deserializer, Serialize, Serializer};
+use serde::{
+    de::IgnoredAny, de::Visitor, ser::SerializeStruct, Deserialize, Deserializer, Serialize,
+    Serializer,
+};
 use serde_cbor::tags::Tagged;
 use std::{
     collections::HashMap,
@@ -216,16 +219,15 @@ impl<'de> Deserialize<'de> for Base64Blob {
             where
                 E: serde::de::Error,
             {
-                base64::decode(v)
-                    .map(Base64Blob)
-                    .map_err(|err| serde::de::Error::custom(format!("Error decoding base64 string: {}", err)))
+                base64::decode(v).map(Base64Blob).map_err(|err| {
+                    serde::de::Error::custom(format!("Error decoding base64 string: {}", err))
+                })
             }
         }
 
         deserializer.deserialize_any(MyVisitor())
     }
 }
-
 
 #[derive(Debug, Clone, Deserialize)]
 struct IpfsPubsubEventIo {

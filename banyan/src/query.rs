@@ -4,7 +4,7 @@ use crate::{
     util::RangeBoundsExt,
 };
 use bitvec::prelude::BitVec;
-use std::{fmt::Debug, ops::RangeBounds, sync::Arc};
+use std::{fmt::Debug, ops::{RangeBounds}, sync::Arc};
 
 /// A query
 ///
@@ -109,6 +109,24 @@ impl<T: TreeTypes, A: Query<T>, B: Query<T>> Query<T> for AndQuery<A, B> {
     fn intersecting(&self, offset: u64, index: &BranchIndex<T>, res: &mut BitVec) {
         self.0.intersecting(offset, index, res);
         self.1.intersecting(offset, index, res);
+    }
+}
+#[derive(Debug, Clone)]
+pub struct OrQuery<A, B>(pub A, pub B);
+
+impl<T: TreeTypes, A: Query<T>, B: Query<T>> Query<T> for OrQuery<A, B> {
+    fn containing(&self, offset: u64, index: &LeafIndex<T>, res: &mut BitVec) {
+        let mut tmp = res.clone();
+        self.0.containing(offset, index, res);
+        self.1.containing(offset, index, &mut tmp);
+        *res |= tmp;
+    }
+
+    fn intersecting(&self, offset: u64, index: &BranchIndex<T>, res: &mut BitVec) {
+        let mut tmp = res.clone();
+        self.0.intersecting(offset, index, res);
+        self.1.intersecting(offset, index, &mut tmp);
+        *res |= tmp;
     }
 }
 
