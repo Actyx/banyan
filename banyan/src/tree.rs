@@ -168,6 +168,9 @@ impl<
     pub fn cid(&self) -> Option<T::Link> {
         self.root.as_ref().and_then(|r| r.cid().clone())
     }
+    pub fn level(&self) -> i32 {
+        self.root.as_ref().map(|x| x.level() as i32).unwrap_or(-1)
+    }
     pub async fn from_roots(forest: Arc<Forest<T>>, mut roots: Vec<Index<T>>) -> Result<Self> {
         assert!(roots.iter().all(|x| x.sealed()));
         assert!(is_sorted(roots.iter().map(|x| x.level()).rev()));

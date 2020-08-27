@@ -567,6 +567,10 @@ async fn main() -> Result<()> {
         while let Some(_) = ticks.next().await {
             let key = Key::single(offset, offset, tags_from_offset(offset));
             tree.extend_unpacked(Some((key, "xxx".into()))).await?;
+            if tree.level() > 100 {
+                println!("packing the tree");
+                tree = tree.pack().await?;
+            }
             offset += 1;
             if let Some(cid) = tree.cid() {
                 pubsub_pub(topic, cid.to_string().as_bytes()).await?;
@@ -581,21 +585,7 @@ async fn main() -> Result<()> {
             .map_err(anyhow::Error::new)
             .and_then(|data| future::ready(String::from_utf8(data).map_err(anyhow::Error::new)))
             .and_then(|data| future::ready(Cid::from_str(&data).map_err(anyhow::Error::new)));
-        // while let Some(Ok(cid)) = stream.next().await {
-        //     println!("{}", cid);
-        // }
         let cids = stream.filter_map(|x| future::ready(x.ok()));
-        // use std::io;
-        // use std::io::prelude::*;
-        // let stdin = io::stdin();
-        // let (s, r) = futures::channel::mpsc::unbounded();
-        // tokio::task::spawn(async move {
-        //     for line in stdin.lock().lines() {
-        //         let text = line.unwrap();
-        //         let cid = Cid::from_str(&text).unwrap();
-        //         s.unbounded_send(cid).unwrap();
-        //     }
-        // });
         let mut stream = banyan::stream::SourceStream(forest, AllQuery)
             .query::<String>(cids.boxed_local())
             .boxed_local();
