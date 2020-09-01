@@ -38,7 +38,9 @@ impl<TT: TreeTypes + 'static, Q: Query<TT> + Clone + 'static> SourceStream<TT, Q
             })
     }
 
-    pub fn stream_chunked<V: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static>(
+    pub fn stream_chunked<
+        V: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static,
+    >(
         self,
         roots: LocalBoxStream<'static, TT::Link>,
     ) -> impl Stream<Item = anyhow::Result<FilteredChunk<TT, V>>> {

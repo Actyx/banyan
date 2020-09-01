@@ -393,13 +393,13 @@ async fn main() -> Result<()> {
                 .value_of("root")
                 .ok_or(anyhow!("root must be provided"))?,
         )?;
-        let tree = Tree::<TT, serde_cbor::Value>::from_cid(root, forest).await?;
+        let mut tree = Tree::<TT, serde_cbor::Value>::from_cid(root, forest).await?;
         tree.dump().await?;
-        let tree2 = tree.pack().await?;
-        tree2.assert_invariants().await?;
-        assert!(tree2.is_packed().await?);
-        tree2.dump().await?;
-        println!("{:?}", tree2);
+        tree.pack().await?;
+        tree.assert_invariants().await?;
+        assert!(tree.is_packed().await?);
+        tree.dump().await?;
+        println!("{:?}", tree);
     } else if let Some(matches) = matches.subcommand_matches("filter") {
         let root = Cid::from_str(
             matches
@@ -441,8 +441,7 @@ async fn main() -> Result<()> {
             .ok_or(anyhow!("required arg before not provided"))?
             .parse()?;
         let mut tree = Tree::<TT, serde_cbor::Value>::from_cid(root, forest).await?;
-        tree.forget_except(&OffsetRangeQuery::from(offset..))
-            .await?;
+        tree.retain(&OffsetRangeQuery::from(offset..)).await?;
         tree.dump().await?;
         println!("{:?}", tree);
     } else if let Some(matches) = matches.subcommand_matches("send_stream") {
@@ -457,7 +456,7 @@ async fn main() -> Result<()> {
             tree.extend_unpacked(Some((key, "xxx".into()))).await?;
             if tree.level() > 100 {
                 println!("packing the tree");
-                tree = tree.pack().await?;
+                tree.pack().await?;
             }
             offset += 1;
             if let Some(cid) = tree.cid() {
@@ -496,34 +495,43 @@ async fn main() -> Result<()> {
             .parse()?;
         let unbalanced = false;
         let (tree, tcreate) = bench_build(forest.clone(), base, batches, count, unbalanced).await?;
-        let t0= std::time::Instant::now();
+        let t0 = std::time::Instant::now();
         let values: Vec<_> = tree.collect().await?;
-        let t1= std::time::Instant::now();
+        let t1 = std::time::Instant::now();
         let tcollect = t1 - t0;
-        let t0= std::time::Instant::now();
+        let t0 = std::time::Instant::now();
         let tags = vec![Key::range(0, u64::max_value(), Tags::single("fizz"))];
         let query: Arc<dyn Query<TT>> = Arc::new(DnfQuery(tags));
-        let values: Vec<_> = tree.clone().stream_filtered_static(query)
+        let values: Vec<_> = tree
+            .clone()
+            .stream_filtered_static(query)
             .map_ok(|(_, k, v)| (k, v))
             .collect::<Vec<_>>()
             .await;
         println!("{}", values.len());
-        let t1= std::time::Instant::now();
+        let t1 = std::time::Instant::now();
         let tfilter_common = t1 - t0;
-        let t0= std::time::Instant::now();
+        let t0 = std::time::Instant::now();
         let tags = vec![Key::range(0, count / 10, Tags::single("fizzbuzz"))];
         let query: Arc<dyn Query<TT>> = Arc::new(DnfQuery(tags));
-        let values: Vec<_> = tree.stream_filtered_static(query)
+        let values: Vec<_> = tree
+            .stream_filtered_static(query)
             .map_ok(|(_, k, v)| (k, v))
             .collect::<Vec<_>>()
             .await;
         println!("{}", values.len());
-        let t1= std::time::Instant::now();
+        let t1 = std::time::Instant::now();
         let tfilter_rare = t1 - t0;
         println!("create {}", (tcreate.as_micros() as f64) / 1000000.0);
         println!("collect {}", (tcollect.as_micros() as f64) / 1000000.0);
-        println!("filter_common {}", (tfilter_common.as_micros() as f64) / 1000000.0);
-        println!("filter_rare {}", (tfilter_rare.as_micros() as f64) / 1000000.0);
+        println!(
+            "filter_common {}",
+            (tfilter_common.as_micros() as f64) / 1000000.0
+        );
+        println!(
+            "filter_rare {}",
+            (tfilter_rare.as_micros() as f64) / 1000000.0
+        );
     } else {
         app().print_long_help()?;
         println!();

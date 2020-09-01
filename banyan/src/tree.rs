@@ -1,4 +1,5 @@
 use super::index::*;
+use crate::stream::SourceStream;
 use crate::{
     query::{AllQuery, OffsetRangeQuery, Query},
     store::ArcStore,
@@ -16,15 +17,14 @@ use salsa20::{
 use serde::{de::DeserializeOwned, Serialize};
 use std::fmt::Debug;
 use std::{
-    io,
     fmt,
     hash::Hash,
+    io,
     iter::FromIterator,
     marker::PhantomData,
     sync::{Arc, RwLock},
 };
 use tracing::*;
-use crate::stream::SourceStream;
 
 type FutureResult<'a, T> = LocalBoxFuture<'a, Result<T>>;
 
@@ -41,7 +41,7 @@ pub trait TreeTypes: Debug {
     /// link type to use over block boundaries
     type Link: ToString + Hash + Eq + Clone + Debug;
 
-    fn to_ipld(links: &[&Self::Link], data: Vec<u8>, w: impl io::Write<>) -> anyhow::Result<()>;
+    fn to_ipld(links: &[&Self::Link], data: Vec<u8>, w: impl io::Write) -> anyhow::Result<()>;
     fn from_ipld(reader: impl io::Read) -> anyhow::Result<(Vec<Self::Link>, Vec<u8>)>;
 }
 
@@ -265,12 +265,13 @@ impl<
     }
 
     /// packs the tree to the left
-    pub async fn pack(&self) -> Result<Self> {
+    pub async fn pack(&mut self) -> Result<()> {
         let roots = self.roots().await?;
         let mut filled = Tree::<T, V>::from_roots(self.forest.clone(), roots).await?;
         let remainder: Vec<_> = self.collect_from(filled.count()).await?;
         filled.extend(remainder).await?;
-        Ok(filled)
+        *self = filled;
+        Ok(())
     }
 
     /// append a single element. This is just a shortcut for extend.
@@ -390,9 +391,11 @@ impl<
     ///
     /// note that offsets will not be affected by this. Also, unsealed nodes will not be forgotten
     /// even if they do not match the query.
-    pub async fn forget_except<'a, Q: Query<T>>(&'a mut self, query: &'a Q) -> Result<()> {
+    pub async fn retain<'a, Q: Query<T>>(&'a mut self, query: &'a Q) -> Result<()> {
         if let Some(index) = &self.root {
-            self.root = Some(self.forest.forget_except(0, query, index).await?);
+            let mut level: i32 = i32::max_value();
+            let res = self.forest.retain(0, query, index, &mut level).await?;
+            self.root = Some(res);
         }
         Ok(())
     }
@@ -409,7 +412,8 @@ impl<
     pub async fn repair<'a>(&mut self) -> Result<Vec<String>> {
         let mut report = Vec::new();
         if let Some(index) = &self.root {
-            self.root = Some(self.forest.repair(index, &mut report).await?);
+            let mut level: i32 = i32::max_value();
+            self.root = Some(self.forest.repair(index, &mut report, &mut level).await?);
         }
         Ok(report)
     }
@@ -1145,19 +1149,27 @@ where
         Ok((self.store.put(&cbor, false).await?, cbor.len() as u64))
     }
 
-    async fn forget_except<Q: Query<T>>(
+    async fn retain<Q: Query<T>>(
         &self,
         offset: u64,
         query: &Q,
         index: &Index<T>,
+        level: &mut i32,
     ) -> Result<Index<T>> {
+        if !index.sealed() {
+            *level = (*level).min((index.level() as i32) - 1);
+        }
         match index {
             Index::Branch(index) => {
                 let mut index = index.clone();
                 // only do the check unless we are already purged
                 let mut matching = BitVec::repeat(true, index.summaries.len());
                 query.intersecting(offset, &index, &mut matching);
-                if index.cid.is_some() && index.sealed && !matching.any() {
+                if index.cid.is_some()
+                    && index.sealed
+                    && !matching.any()
+                    && index.level as i32 <= *level
+                {
                     index.cid = None;
                 }
                 // this will only be executed unless we are already purged
@@ -1167,8 +1179,8 @@ where
                     let offsets = zip_with_offset_ref(node.children.iter(), offset);
                     for (i, (child, offset)) in offsets.enumerate() {
                         // TODO: ensure we only purge children that are in the packed part!
-                        let child1 = self.forget_exceptr(offset, query, child).await?;
-                        if child1.cid().is_none() != child.cid().is_none() {
+                        let child1 = self.retainr(offset, query, child, level).await?;
+                        if child1.cid() != child.cid() {
                             children[i] = child1;
                             changed = true;
                         }
@@ -1183,12 +1195,14 @@ where
                 Ok(index.into())
             }
             Index::Leaf(index) => {
-                let mut index = index.clone();
-                let mut matching = BitVec::repeat(true, index.keys.len());
-                query.containing(offset, &index, &mut matching);
                 // only do the check unless we are already purged
-                if index.cid.is_some() && index.sealed && !matching.any() {
-                    index.cid = None
+                let mut index = index.clone();
+                if index.sealed && index.cid.is_some() && *level >= 0 {
+                    let mut matching = BitVec::repeat(true, index.keys.len());
+                    query.containing(offset, &index, &mut matching);
+                    if !matching.any() {
+                        index.cid = None
+                    }
                 }
                 Ok(index.into())
             }
@@ -1196,17 +1210,26 @@ where
     }
 
     // all these stubs could be replaced with https://docs.rs/async-recursion/
-    /// recursion helper for forget_except
-    fn forget_exceptr<'a, Q: Query<T>>(
+    /// recursion helper for retain
+    fn retainr<'a, Q: Query<T>>(
         &'a self,
         offset: u64,
         query: &'a Q,
         index: &'a Index<T>,
+        level: &'a mut i32,
     ) -> FutureResult<'a, Index<T>> {
-        self.forget_except(offset, query, index).boxed_local()
+        self.retain(offset, query, index, level).boxed_local()
     }
 
-    async fn repair(&self, index: &Index<T>, report: &mut Vec<String>) -> Result<Index<T>> {
+    async fn repair(
+        &self,
+        index: &Index<T>,
+        report: &mut Vec<String>,
+        level: &mut i32,
+    ) -> Result<Index<T>> {
+        if !index.sealed() {
+            *level = (*level).min((index.level() as i32) - 1);
+        }
         match index {
             Index::Branch(index) => {
                 let mut index = index.clone();
@@ -1217,8 +1240,8 @@ where
                         let mut children = node.children.clone();
                         let mut changed = false;
                         for (i, child) in node.children.iter().enumerate() {
-                            let child1 = self.repairr(child, report).await?;
-                            if child1.cid().is_none() != child.cid().is_none() {
+                            let child1 = self.repairr(child, report, level).await?;
+                            if child1.cid() != child.cid() {
                                 children[i] = child1;
                                 changed = true;
                             }
@@ -1237,6 +1260,8 @@ where
                         report.push(format!("forgetting branch {} due to {}", cid_txt, cause));
                         if !index.sealed {
                             report.push(format!("warning: forgetting unsealed branch!"));
+                        } else if index.level as i32 > *level {
+                            report.push(format!("warning: forgetting branch in unpacked part!"));
                         }
                         index.cid = None;
                     }
@@ -1251,6 +1276,8 @@ where
                     report.push(format!("forgetting leaf {} due to {}", cid_txt, cause));
                     if !index.sealed {
                         report.push(format!("warning: forgetting unsealed leaf!"));
+                    } else if *level < 0 {
+                        report.push(format!("warning: forgetting leaf in unpacked part!"));
                     }
                     index.cid = None;
                 }
@@ -1264,25 +1291,32 @@ where
         &'a self,
         index: &'a Index<T>,
         report: &'a mut Vec<String>,
+        level: &'a mut i32,
     ) -> FutureResult<'a, Index<T>> {
-        self.repair(index, report).boxed_local()
+        self.repair(index, report, level).boxed_local()
     }
 
     async fn dump(&self, index: &Index<T>, prefix: &str) -> Result<()> {
         match self.load_node(index).await? {
             NodeInfo::Leaf(index, _) => {
                 println!(
-                    "{}Leaf(count={}, key_bytes={}, sealed={})",
+                    "{}Leaf(count={}, key_bytes={}, sealed={}, cid={})",
                     prefix,
                     index.keys.count(),
                     index.value_bytes,
                     index.sealed,
+                    index.cid.is_some(),
                 );
             }
             NodeInfo::Branch(index, branch) => {
                 println!(
-                    "{}Branch(count={}, key_bytes={}, value_bytes={}, sealed={})",
-                    prefix, index.count, index.key_bytes, index.value_bytes, index.sealed,
+                    "{}Branch(count={}, key_bytes={}, value_bytes={}, sealed={}, cid={})",
+                    prefix,
+                    index.count,
+                    index.key_bytes,
+                    index.value_bytes,
+                    index.sealed,
+                    index.cid.is_some(),
                 );
                 let prefix = prefix.to_string() + "  ";
                 for x in branch.children.iter() {

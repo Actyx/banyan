@@ -21,11 +21,9 @@ impl TreeTypes for TT {
     type Seq = SimpleCompactSeq<Key>;
     type Link = ipfs::Cid;
 
-    fn to_ipld(links: &[&Self::Link], data: Vec<u8>, w: impl io::Write<>) -> anyhow::Result<()> {
-        serde_cbor::to_writer(
-            w,
-            &(links, serde_cbor::Value::Bytes(data))
-        ).map_err(|e| anyhow::Error::new(e))
+    fn to_ipld(links: &[&Self::Link], data: Vec<u8>, w: impl io::Write) -> anyhow::Result<()> {
+        serde_cbor::to_writer(w, &(links, serde_cbor::Value::Bytes(data)))
+            .map_err(|e| anyhow::Error::new(e))
     }
     fn from_ipld(reader: impl io::Read) -> anyhow::Result<(Vec<Self::Link>, Vec<u8>)> {
         let (links, data): (Vec<Self::Link>, serde_cbor::Value) = serde_cbor::from_reader(reader)?;
@@ -186,7 +184,6 @@ async fn build_pack(xss: Vec<Vec<(Key, u64)>>) -> quickcheck::TestResult {
         let mut tree = Tree::<TT, u64>::empty(forest);
         // flattened xss for reference
         let xs = xss.iter().cloned().flatten().collect::<Vec<_>>();
-        println!("{}", xs.len());
         // build complex unbalanced tree
         for xs in xss.iter() {
             tree.extend_unpacked(xs.clone()).await.unwrap();
@@ -195,12 +192,38 @@ async fn build_pack(xss: Vec<Vec<(Key, u64)>>) -> quickcheck::TestResult {
         let actual: Vec<_> = tree.collect().await?;
         let unpacked_matches = xs == actual;
 
-        let packed = tree.pack().await?;
-        assert!(packed.is_packed().await?);
-        let actual: Vec<_> = packed.collect().await?;
+        tree.pack().await?;
+        assert!(tree.is_packed().await?);
+        let actual: Vec<_> = tree.collect().await?;
         let packed_matches = xs == actual;
 
         Ok(unpacked_matches && packed_matches)
+    })
+    .await
+}
+
+#[quickcheck_async::tokio]
+async fn retain(xss: Vec<Vec<(Key, u64)>>) -> quickcheck::TestResult {
+    test(|| async {
+        let store = Arc::new(MemStore::new());
+        let forest = Arc::new(Forest::<TT>::new(store, Config::debug()));
+        let mut tree = Tree::<TT, u64>::empty(forest);
+        // flattened xss for reference
+        let xs = xss.iter().cloned().flatten().collect::<Vec<_>>();
+        // build complex unbalanced tree
+        for xs in xss.iter() {
+            tree.extend_unpacked(xs.clone()).await.unwrap();
+        }
+        println!("*******************************************");
+        tree.retain(&OffsetRangeQuery::from(xs.len() as u64..))
+            .await?;
+        tree.dump().await?;
+        tree.pack().await?;
+        tree.retain(&OffsetRangeQuery::from(xs.len() as u64..))
+            .await?;
+        tree.dump().await?;
+        println!("*******************************************\n\n\n\n");
+        Ok(true)
     })
     .await
 }
@@ -225,7 +248,8 @@ async fn stream_test_simple() -> anyhow::Result<()> {
         trees.push(tree.root().unwrap());
     }
     println!("{:?}", trees);
-    let res = forest.query(AllQuery)
+    let res = forest
+        .query(AllQuery)
         .stream::<u64>(stream::iter(trees).boxed_local());
     let res = res.collect::<Vec<_>>().await;
     println!("{:?}", res);
