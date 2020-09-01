@@ -16,6 +16,7 @@ use salsa20::{
 use serde::{de::DeserializeOwned, Serialize};
 use std::fmt::Debug;
 use std::{
+    io,
     fmt,
     hash::Hash,
     iter::FromIterator,
@@ -38,7 +39,10 @@ pub trait TreeTypes: Debug {
     /// compact sequence type to be used for indices
     type Seq: CompactSeq<Item = Self::Key> + Serialize + DeserializeOwned + Clone + Debug;
     /// link type to use over block boundaries
-    type Link: ToString + Hash + Eq + Serialize + DeserializeOwned + Clone + Debug;
+    type Link: ToString + Hash + Eq + Clone + Debug;
+
+    fn to_ipld(links: &[&Self::Link], data: Vec<u8>, w: impl io::Write<>) -> anyhow::Result<()>;
+    fn from_ipld(reader: impl io::Read) -> anyhow::Result<(Vec<Self::Link>, Vec<u8>)>;
 }
 
 /// A number of trees that are grouped together, sharing common key type, caches, and config

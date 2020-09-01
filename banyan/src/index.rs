@@ -444,35 +444,27 @@ pub fn serialize_compressed<T: TreeTypes>(
     writer.write_all(&[CBOR_BREAK])?;
     writer.finish()?;
     salsa20::XSalsa20::new(key, nonce).apply_keystream(&mut compressed[24..]);
-    Ok(serde_cbor::to_writer(
-        into,
-        &(cids, serde_cbor::Value::Bytes(compressed)),
-    )?)
+    T::to_ipld(&cids, compressed, into)?;
+    Ok(())
 }
 
 pub fn deserialize_compressed<T: TreeTypes>(
     key: &salsa20::Key,
     ipld: &[u8],
 ) -> Result<Vec<Index<T>>> {
-    let (mut cids, compressed): (VecDeque<T::Link>, serde_cbor::Value) =
-        serde_cbor::from_slice(ipld)?;
-    if let serde_cbor::Value::Bytes(mut compressed) = compressed {
-        if compressed.len() < 24 {
-            return Err(anyhow!("nonce missing"));
-        }
-        let (nonce, compressed) = compressed.split_at_mut(24);
-        XSalsa20::new(key, (&*nonce).into()).apply_keystream(compressed);
-        let reader = zstd::stream::read::Decoder::new(Cursor::new(compressed))?;
-
-        let data: Vec<IndexRC<T::Seq>> = serde_cbor::from_reader(reader)?;
-        let result = data
-            .into_iter()
-            .map(|data| data.to_index(&mut cids))
-            .collect::<Vec<_>>();
-        Ok(result)
-    } else {
-        Err(anyhow!(
-            "expected a byte array containing zstd compressed cbor"
-        ))
+    let (cids, mut compressed) = T::from_ipld(ipld)?;
+    let mut cids = cids.into();
+    if compressed.len() < 24 {
+        return Err(anyhow!("nonce missing"));
     }
+    let (nonce, compressed) = compressed.split_at_mut(24);
+    XSalsa20::new(key, (&*nonce).into()).apply_keystream(compressed);
+    let reader = zstd::stream::read::Decoder::new(Cursor::new(compressed))?;
+
+    let data: Vec<IndexRC<T::Seq>> = serde_cbor::from_reader(reader)?;
+    let result = data
+        .into_iter()
+        .map(|data| data.to_index(&mut cids))
+        .collect::<Vec<_>>();
+    Ok(result)
 }
