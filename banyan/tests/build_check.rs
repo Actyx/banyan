@@ -21,11 +21,15 @@ impl TreeTypes for TT {
     type Seq = SimpleCompactSeq<Key>;
     type Link = ipfs::Cid;
 
-    fn to_ipld(links: &[&Self::Link], data: Vec<u8>, w: impl io::Write) -> anyhow::Result<()> {
+    fn serialize_branch(
+        links: &[&Self::Link],
+        data: Vec<u8>,
+        w: impl io::Write,
+    ) -> anyhow::Result<()> {
         serde_cbor::to_writer(w, &(links, serde_cbor::Value::Bytes(data)))
             .map_err(|e| anyhow::Error::new(e))
     }
-    fn from_ipld(reader: impl io::Read) -> anyhow::Result<(Vec<Self::Link>, Vec<u8>)> {
+    fn deserialize_branch(reader: impl io::Read) -> anyhow::Result<(Vec<Self::Link>, Vec<u8>)> {
         let (links, data): (Vec<Self::Link>, serde_cbor::Value) = serde_cbor::from_reader(reader)?;
         if let serde_cbor::Value::Bytes(data) = data {
             Ok((links, data))

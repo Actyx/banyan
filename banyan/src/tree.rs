@@ -41,8 +41,12 @@ pub trait TreeTypes: Debug {
     /// link type to use over block boundaries
     type Link: ToString + Hash + Eq + Clone + Debug;
 
-    fn to_ipld(links: &[&Self::Link], data: Vec<u8>, w: impl io::Write) -> anyhow::Result<()>;
-    fn from_ipld(reader: impl io::Read) -> anyhow::Result<(Vec<Self::Link>, Vec<u8>)>;
+    fn serialize_branch(
+        links: &[&Self::Link],
+        data: Vec<u8>,
+        w: impl io::Write,
+    ) -> anyhow::Result<()>;
+    fn deserialize_branch(reader: impl io::Read) -> anyhow::Result<(Vec<Self::Link>, Vec<u8>)>;
 }
 
 /// A number of trees that are grouped together, sharing common key type, caches, and config
@@ -130,7 +134,7 @@ impl<T: TreeTypes, V> fmt::Debug for Tree<T, V> {
             Some(root) => write!(
                 f,
                 "Tree(root={:?},key_bytes={},value_bytes={})",
-                root.cid(),
+                root.link(),
                 root.key_bytes(),
                 root.value_bytes()
             ),
@@ -142,7 +146,7 @@ impl<T: TreeTypes, V> fmt::Debug for Tree<T, V> {
 impl<T: TreeTypes, V> fmt::Display for Tree<T, V> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.root {
-            Some(root) => write!(f, "{:?}", root.cid(),),
+            Some(root) => write!(f, "{:?}", root.link(),),
             None => write!(f, "empty tree"),
         }
     }
@@ -163,15 +167,15 @@ impl<
         T: TreeTypes + 'static,
     > Tree<T, V>
 {
-    pub async fn from_cid(cid: T::Link, forest: Arc<Forest<T>>) -> Result<Self> {
+    pub async fn from_link(cid: T::Link, forest: Arc<Forest<T>>) -> Result<Self> {
         Ok(Self {
             root: Some(forest.load_branch_from_cid(cid).await?),
             forest,
             _t: PhantomData,
         })
     }
-    pub fn cid(&self) -> Option<T::Link> {
-        self.root.as_ref().and_then(|r| r.cid().clone())
+    pub fn link(&self) -> Option<T::Link> {
+        self.root.as_ref().and_then(|r| r.link().clone())
     }
     pub fn level(&self) -> i32 {
         self.root.as_ref().map(|x| x.level() as i32).unwrap_or(-1)
@@ -443,7 +447,7 @@ impl<
 
     /// root of a non-empty tree
     pub fn root(self) -> Option<T::Link> {
-        self.root.and_then(|index| index.cid().clone())
+        self.root.and_then(|index| index.link().clone())
     }
 }
 
@@ -499,7 +503,7 @@ where
 
     /// load a leaf given a leaf index
     async fn load_leaf(&self, index: &LeafIndex<T>) -> Result<Option<Leaf>> {
-        Ok(if let Some(cid) = &index.cid {
+        Ok(if let Some(cid) = &index.link {
             let data = &self.store().get(cid).await?;
             if data.len() < 24 {
                 return Err(anyhow!("leaf data without nonce"));
@@ -561,7 +565,7 @@ where
         // store leaf
         let cid = self.store.put(&tmp, true).await?;
         let index: LeafIndex<T> = LeafIndex {
-            cid: Some(cid),
+            link: Some(cid),
             value_bytes: leaf.as_ref().compressed().len() as u64,
             sealed: self.leaf_sealed(leaf.as_ref().compressed().len() as u64, keys.count()),
             keys,
@@ -681,7 +685,7 @@ where
             level,
             count,
             sealed,
-            cid: Some(cid),
+            link: Some(cid),
             summaries,
             key_bytes,
             value_bytes,
@@ -846,7 +850,7 @@ where
 
     /// load a branch given a branch index
     async fn load_branch(&self, index: &BranchIndex<T>) -> Result<Option<Branch<T>>> {
-        Ok(if let Some(cid) = &index.cid {
+        Ok(if let Some(cid) = &index.link {
             let bytes = self.store.get(&cid).await?;
             let children: Vec<_> = deserialize_compressed(&self.index_key(), &bytes)?;
             // let children = CborZstdArrayRef::new(bytes.as_ref()).items()?;
@@ -865,7 +869,7 @@ where
         let key_bytes = children.iter().map(|x| x.key_bytes()).sum::<u64>() + (bytes.len() as u64);
         let summaries = T::Seq::new(children.iter().map(|x| x.data().summarize()))?;
         let result = BranchIndex {
-            cid: Some(cid),
+            link: Some(cid),
             level,
             count,
             summaries,
@@ -879,7 +883,7 @@ where
 
     /// load a branch given a branch index, from the cache
     async fn load_branch_cached(&self, index: &BranchIndex<T>) -> Result<Option<Branch<T>>> {
-        if let Some(cid) = &index.cid {
+        if let Some(cid) = &index.link {
             match self.branch_cache().write().unwrap().pop(cid) {
                 Some(branch) => Ok(Some(branch)),
                 None => self.load_branch(index).await,
@@ -918,7 +922,7 @@ where
 
     /// store a leaf in the cache, and return it wrapped into a generic index
     fn cache_leaf(&self, index: LeafIndex<T>, node: Leaf) -> LeafIndex<T> {
-        if let Some(cid) = &index.cid {
+        if let Some(cid) = &index.link {
             self.leaf_cache().write().unwrap().put(cid.clone(), node);
         }
         index
@@ -1249,12 +1253,12 @@ where
                 // only do the check unless we are already purged
                 let mut matching = BitVec::repeat(true, index.summaries.len());
                 query.intersecting(offset, &index, &mut matching);
-                if index.cid.is_some()
+                if index.link.is_some()
                     && index.sealed
                     && !matching.any()
                     && index.level as i32 <= *level
                 {
-                    index.cid = None;
+                    index.link = None;
                 }
                 // this will only be executed unless we are already purged
                 if let Some(node) = self.load_branch(&index).await? {
@@ -1264,7 +1268,7 @@ where
                     for (i, (child, offset)) in offsets.enumerate() {
                         // TODO: ensure we only purge children that are in the packed part!
                         let child1 = self.retainr(offset, query, child, level).await?;
-                        if child1.cid() != child.cid() {
+                        if child1.link() != child.link() {
                             children[i] = child1;
                             changed = true;
                         }
@@ -1273,7 +1277,7 @@ where
                     if changed {
                         let (cid, _) = self.persist_branch(&children).await?;
                         // todo: update size data
-                        index.cid = Some(cid);
+                        index.link = Some(cid);
                     }
                 }
                 Ok(index.into())
@@ -1281,11 +1285,11 @@ where
             Index::Leaf(index) => {
                 // only do the check unless we are already purged
                 let mut index = index.clone();
-                if index.sealed && index.cid.is_some() && *level >= 0 {
+                if index.sealed && index.link.is_some() && *level >= 0 {
                     let mut matching = BitVec::repeat(true, index.keys.len());
                     query.containing(offset, &index, &mut matching);
                     if !matching.any() {
-                        index.cid = None
+                        index.link = None
                     }
                 }
                 Ok(index.into())
@@ -1325,7 +1329,7 @@ where
                         let mut changed = false;
                         for (i, child) in node.children.iter().enumerate() {
                             let child1 = self.repairr(child, report, level).await?;
-                            if child1.cid() != child.cid() {
+                            if child1.link() != child.link() {
                                 children[i] = child1;
                                 changed = true;
                             }
@@ -1333,21 +1337,21 @@ where
                         // rewrite the node and update the cid if children have changed
                         if changed {
                             let (cid, _) = self.persist_branch(&children).await?;
-                            index.cid = Some(cid);
+                            index.link = Some(cid);
                         }
                     }
                     Ok(None) => {
                         // already purged, nothing to do
                     }
                     Err(cause) => {
-                        let cid_txt = index.cid.map(|x| x.to_string()).unwrap_or("".into());
+                        let cid_txt = index.link.map(|x| x.to_string()).unwrap_or("".into());
                         report.push(format!("forgetting branch {} due to {}", cid_txt, cause));
                         if !index.sealed {
                             report.push(format!("warning: forgetting unsealed branch!"));
                         } else if index.level as i32 > *level {
                             report.push(format!("warning: forgetting branch in unpacked part!"));
                         }
-                        index.cid = None;
+                        index.link = None;
                     }
                 }
                 Ok(index.into())
@@ -1356,14 +1360,14 @@ where
                 let mut index = index.clone();
                 // important not to hit the cache here!
                 if let Err(cause) = self.load_leaf(&index).await {
-                    let cid_txt = index.cid.map(|x| x.to_string()).unwrap_or("".into());
+                    let cid_txt = index.link.map(|x| x.to_string()).unwrap_or("".into());
                     report.push(format!("forgetting leaf {} due to {}", cid_txt, cause));
                     if !index.sealed {
                         report.push(format!("warning: forgetting unsealed leaf!"));
                     } else if *level < 0 {
                         report.push(format!("warning: forgetting leaf in unpacked part!"));
                     }
-                    index.cid = None;
+                    index.link = None;
                 }
                 Ok(index.into())
             }

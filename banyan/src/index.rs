@@ -115,7 +115,7 @@ pub struct LeafIndex<T: TreeTypes> {
     // block is sealed
     pub sealed: bool,
     // link to the block
-    pub cid: Option<T::Link>,
+    pub link: Option<T::Link>,
     /// A sequence of keys with the same number of values as the data block the cid points to.
     pub keys: T::Seq,
     // serialized size of the data
@@ -127,7 +127,7 @@ impl<T: TreeTypes> Clone for LeafIndex<T> {
         Self {
             sealed: self.sealed,
             value_bytes: self.value_bytes,
-            cid: self.cid.clone(),
+            link: self.link.clone(),
             keys: self.keys.clone(),
         }
     }
@@ -152,7 +152,7 @@ pub struct BranchIndex<T: TreeTypes> {
     // block is sealed
     pub sealed: bool,
     // link to the branch node
-    pub cid: Option<T::Link>,
+    pub link: Option<T::Link>,
     // extra data
     pub summaries: T::Seq,
     // serialized size of the children
@@ -169,7 +169,7 @@ impl<T: TreeTypes> Clone for BranchIndex<T> {
             sealed: self.sealed,
             value_bytes: self.value_bytes,
             key_bytes: self.key_bytes,
-            cid: self.cid.clone(),
+            link: self.link.clone(),
             summaries: self.summaries.clone(),
         }
     }
@@ -205,10 +205,10 @@ impl<T: TreeTypes> Index<T> {
         }
     }
 
-    pub fn cid(&self) -> &Option<T::Link> {
+    pub fn link(&self) -> &Option<T::Link> {
         match self {
-            Index::Leaf(x) => &x.cid,
-            Index::Branch(x) => &x.cid,
+            Index::Leaf(x) => &x.link,
+            Index::Branch(x) => &x.link,
         }
     }
     pub fn count(&self) -> u64 {
@@ -347,7 +347,7 @@ impl<'a, T: TreeTypes> From<&'a Index<T>> for IndexWC<'a, T::Seq> {
         match value {
             Index::Branch(i) => Self {
                 sealed: i.sealed,
-                purged: i.cid.is_none(),
+                purged: i.link.is_none(),
                 data: &i.summaries,
                 value_bytes: i.value_bytes,
                 count: Some(i.count),
@@ -356,7 +356,7 @@ impl<'a, T: TreeTypes> From<&'a Index<T>> for IndexWC<'a, T::Seq> {
             },
             Index::Leaf(i) => Self {
                 sealed: i.sealed,
-                purged: i.cid.is_none(),
+                purged: i.link.is_none(),
                 data: &i.keys,
                 value_bytes: i.value_bytes,
                 count: None,
@@ -398,7 +398,7 @@ impl<I: Semigroup + Eq + Debug, X: CompactSeq<Item = I> + Clone + Debug> IndexRC
                 key_bytes,
                 count,
                 level,
-                cid,
+                link: cid,
             }
             .into()
         } else {
@@ -406,7 +406,7 @@ impl<I: Semigroup + Eq + Debug, X: CompactSeq<Item = I> + Clone + Debug> IndexRC
                 keys: self.data,
                 sealed: self.sealed,
                 value_bytes: self.value_bytes,
-                cid,
+                link: cid,
             }
             .into()
         }
@@ -436,7 +436,7 @@ pub fn serialize_compressed<T: TreeTypes>(
     let mut writer = zstd::stream::write::Encoder::new(compressed.by_ref(), level)?;
     writer.write_all(&[CBOR_ARRAY_START])?;
     for item in items.iter() {
-        if let Some(cid) = item.cid() {
+        if let Some(cid) = item.link() {
             cids.push(cid);
         }
         serde_cbor::to_writer(writer.by_ref(), &IndexWC::from(item))?;
@@ -444,7 +444,7 @@ pub fn serialize_compressed<T: TreeTypes>(
     writer.write_all(&[CBOR_BREAK])?;
     writer.finish()?;
     salsa20::XSalsa20::new(key, nonce).apply_keystream(&mut compressed[24..]);
-    T::to_ipld(&cids, compressed, into)?;
+    T::serialize_branch(&cids, compressed, into)?;
     Ok(())
 }
 
@@ -452,7 +452,7 @@ pub fn deserialize_compressed<T: TreeTypes>(
     key: &salsa20::Key,
     ipld: &[u8],
 ) -> Result<Vec<Index<T>>> {
-    let (cids, mut compressed) = T::from_ipld(ipld)?;
+    let (cids, mut compressed) = T::deserialize_branch(ipld)?;
     let mut cids = cids.into();
     if compressed.len() < 24 {
         return Err(anyhow!("nonce missing"));

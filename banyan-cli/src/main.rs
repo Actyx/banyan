@@ -215,7 +215,7 @@ async fn build_tree(
         }
     };
     let mut tree = match base {
-        Some(root) => Tree::<TT, String>::from_cid(root, forest.clone()).await?,
+        Some(root) => Tree::<TT, String>::from_link(root, forest.clone()).await?,
         None => Tree::<TT, String>::empty(forest.clone()),
     };
     let mut offset: u64 = 0;
@@ -267,7 +267,7 @@ async fn bench_build(
         }
     };
     let mut tree = match base {
-        Some(root) => Tree::<TT, String>::from_cid(root, forest.clone()).await?,
+        Some(root) => Tree::<TT, String>::from_link(root, forest.clone()).await?,
         None => Tree::<TT, String>::empty(forest.clone()),
     };
     let mut offset: u64 = 0;
@@ -346,7 +346,7 @@ async fn main() -> Result<()> {
                 .value_of("root")
                 .ok_or(anyhow!("root must be provided"))?,
         )?;
-        let tree = Tree::<TT, serde_cbor::Value>::from_cid(root, forest).await?;
+        let tree = Tree::<TT, serde_cbor::Value>::from_link(root, forest).await?;
         tree.dump().await?;
         return Ok(());
     } else if let Some(matches) = matches.subcommand_matches("stream") {
@@ -355,7 +355,7 @@ async fn main() -> Result<()> {
                 .value_of("root")
                 .ok_or(anyhow!("root must be provided"))?,
         )?;
-        let tree = Tree::<TT, serde_cbor::Value>::from_cid(root, forest).await?;
+        let tree = Tree::<TT, serde_cbor::Value>::from_link(root, forest).await?;
         let mut stream = tree.stream().enumerate();
         while let Some((i, Ok(v))) = stream.next().await {
             if i % 1000 == 0 {
@@ -393,7 +393,7 @@ async fn main() -> Result<()> {
                 .value_of("root")
                 .ok_or(anyhow!("root must be provided"))?,
         )?;
-        let mut tree = Tree::<TT, serde_cbor::Value>::from_cid(root, forest).await?;
+        let mut tree = Tree::<TT, serde_cbor::Value>::from_link(root, forest).await?;
         tree.dump().await?;
         tree.pack().await?;
         tree.assert_invariants().await?;
@@ -412,7 +412,7 @@ async fn main() -> Result<()> {
             .map(|tag| Key::filter_tags(Tags(btreeset! {Tag::new(tag)})))
             .collect::<Vec<_>>();
         let query = DnfQuery(tags);
-        let tree = Tree::<TT, serde_cbor::Value>::from_cid(root, forest).await?;
+        let tree = Tree::<TT, serde_cbor::Value>::from_link(root, forest).await?;
         tree.dump().await?;
         let mut stream = tree.stream_filtered(&query).enumerate();
         while let Some((i, Ok(v))) = stream.next().await {
@@ -426,7 +426,7 @@ async fn main() -> Result<()> {
                 .value_of("root")
                 .ok_or(anyhow!("root must be provided"))?,
         )?;
-        let mut tree = Tree::<TT, serde_cbor::Value>::from_cid(root, forest).await?;
+        let mut tree = Tree::<TT, serde_cbor::Value>::from_link(root, forest).await?;
         tree.repair().await?;
         tree.dump().await?;
         println!("{:?}", tree);
@@ -440,7 +440,7 @@ async fn main() -> Result<()> {
             .value_of("before")
             .ok_or(anyhow!("required arg before not provided"))?
             .parse()?;
-        let mut tree = Tree::<TT, serde_cbor::Value>::from_cid(root, forest).await?;
+        let mut tree = Tree::<TT, serde_cbor::Value>::from_link(root, forest).await?;
         tree.retain(&OffsetRangeQuery::from(offset..)).await?;
         tree.dump().await?;
         println!("{:?}", tree);
@@ -459,7 +459,7 @@ async fn main() -> Result<()> {
                 tree.pack().await?;
             }
             offset += 1;
-            if let Some(cid) = tree.cid() {
+            if let Some(cid) = tree.link() {
                 println!("publishing {} to {}", cid, topic);
                 pubsub_pub(topic, cid.to_string().as_bytes()).await?;
             }

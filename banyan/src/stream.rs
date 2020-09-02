@@ -16,7 +16,7 @@ impl<TT: TreeTypes + 'static, Q: Query<TT> + Clone + 'static> SourceStream<TT, Q
         let query = self.1;
         let forest = self.0;
         roots
-            .filter_map(move |cid| Tree::<TT, V>::from_cid(cid, forest.clone()).map(|r| r.ok()))
+            .filter_map(move |cid| Tree::<TT, V>::from_link(cid, forest.clone()).map(|r| r.ok()))
             .flat_map(move |tree: Tree<TT, V>| {
                 // create an intersection of a range query and the main query
                 // and wrap it in an rc so it is cheap to clone
@@ -48,7 +48,7 @@ impl<TT: TreeTypes + 'static, Q: Query<TT> + Clone + 'static> SourceStream<TT, Q
         let query = self.1;
         let forest = self.0;
         roots
-            .filter_map(move |cid| Tree::<TT, V>::from_cid(cid, forest.clone()).map(|r| r.ok()))
+            .filter_map(move |cid| Tree::<TT, V>::from_link(cid, forest.clone()).map(|r| r.ok()))
             .flat_map(move |tree: Tree<TT, V>| {
                 // create an intersection of a range query and the main query
                 // and wrap it in an rc so it is cheap to clone
