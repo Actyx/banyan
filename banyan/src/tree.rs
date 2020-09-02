@@ -1,4 +1,5 @@
 use super::index::*;
+use crate::stream::SourceStream;
 use crate::{
     query::{AllQuery, OffsetRangeQuery, Query},
     store::ArcStore,
@@ -18,12 +19,12 @@ use std::fmt::Debug;
 use std::{
     fmt,
     hash::Hash,
+    io,
     iter::FromIterator,
     marker::PhantomData,
     sync::{Arc, RwLock},
 };
 use tracing::*;
-use crate::stream::SourceStream;
 
 type FutureResult<'a, T> = LocalBoxFuture<'a, Result<T>>;
 
@@ -38,7 +39,14 @@ pub trait TreeTypes: Debug {
     /// compact sequence type to be used for indices
     type Seq: CompactSeq<Item = Self::Key> + Serialize + DeserializeOwned + Clone + Debug;
     /// link type to use over block boundaries
-    type Link: ToString + Hash + Eq + Serialize + DeserializeOwned + Clone + Debug;
+    type Link: ToString + Hash + Eq + Clone + Debug;
+
+    fn serialize_branch(
+        links: &[&Self::Link],
+        data: Vec<u8>,
+        w: impl io::Write,
+    ) -> anyhow::Result<()>;
+    fn deserialize_branch(reader: impl io::Read) -> anyhow::Result<(Vec<Self::Link>, Vec<u8>)>;
 }
 
 /// A number of trees that are grouped together, sharing common key type, caches, and config
@@ -126,7 +134,7 @@ impl<T: TreeTypes, V> fmt::Debug for Tree<T, V> {
             Some(root) => write!(
                 f,
                 "Tree(root={:?},key_bytes={},value_bytes={})",
-                root.cid(),
+                root.link(),
                 root.key_bytes(),
                 root.value_bytes()
             ),
@@ -138,7 +146,7 @@ impl<T: TreeTypes, V> fmt::Debug for Tree<T, V> {
 impl<T: TreeTypes, V> fmt::Display for Tree<T, V> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.root {
-            Some(root) => write!(f, "{:?}", root.cid(),),
+            Some(root) => write!(f, "{:?}", root.link(),),
             None => write!(f, "empty tree"),
         }
     }
@@ -159,15 +167,15 @@ impl<
         T: TreeTypes + 'static,
     > Tree<T, V>
 {
-    pub async fn from_cid(cid: T::Link, forest: Arc<Forest<T>>) -> Result<Self> {
+    pub async fn from_link(cid: T::Link, forest: Arc<Forest<T>>) -> Result<Self> {
         Ok(Self {
             root: Some(forest.load_branch_from_cid(cid).await?),
             forest,
             _t: PhantomData,
         })
     }
-    pub fn cid(&self) -> Option<T::Link> {
-        self.root.as_ref().and_then(|r| r.cid().clone())
+    pub fn link(&self) -> Option<T::Link> {
+        self.root.as_ref().and_then(|r| r.link().clone())
     }
     pub fn level(&self) -> i32 {
         self.root.as_ref().map(|x| x.level() as i32).unwrap_or(-1)
@@ -261,12 +269,13 @@ impl<
     }
 
     /// packs the tree to the left
-    pub async fn pack(&self) -> Result<Self> {
+    pub async fn pack(&mut self) -> Result<()> {
         let roots = self.roots().await?;
         let mut filled = Tree::<T, V>::from_roots(self.forest.clone(), roots).await?;
         let remainder: Vec<_> = self.collect_from(filled.count()).await?;
         filled.extend(remainder).await?;
-        Ok(filled)
+        *self = filled;
+        Ok(())
     }
 
     /// append a single element. This is just a shortcut for extend.
@@ -376,6 +385,19 @@ impl<
         }
     }
 
+    pub fn stream_filtered_static_chunked_reverse(
+        self,
+        query: impl Query<T> + Clone + 'static,
+    ) -> impl Stream<Item = Result<FilteredChunk<T, V>>> + 'static {
+        match &self.root {
+            Some(index) => self
+                .forest
+                .stream_filtered_static_chunked_reverse(0, query, index.clone())
+                .left_stream(),
+            None => stream::empty().right_stream(),
+        }
+    }
+
     /// forget all data except the one matching the query
     ///
     /// this is done as best effort and will not be precise. E.g. if a chunk of data contains
@@ -386,9 +408,11 @@ impl<
     ///
     /// note that offsets will not be affected by this. Also, unsealed nodes will not be forgotten
     /// even if they do not match the query.
-    pub async fn forget_except<'a, Q: Query<T>>(&'a mut self, query: &'a Q) -> Result<()> {
+    pub async fn retain<'a, Q: Query<T>>(&'a mut self, query: &'a Q) -> Result<()> {
         if let Some(index) = &self.root {
-            self.root = Some(self.forest.forget_except(0, query, index).await?);
+            let mut level: i32 = i32::max_value();
+            let res = self.forest.retain(0, query, index, &mut level).await?;
+            self.root = Some(res);
         }
         Ok(())
     }
@@ -405,7 +429,8 @@ impl<
     pub async fn repair<'a>(&mut self) -> Result<Vec<String>> {
         let mut report = Vec::new();
         if let Some(index) = &self.root {
-            self.root = Some(self.forest.repair(index, &mut report).await?);
+            let mut level: i32 = i32::max_value();
+            self.root = Some(self.forest.repair(index, &mut report, &mut level).await?);
         }
         Ok(report)
     }
@@ -422,7 +447,7 @@ impl<
 
     /// root of a non-empty tree
     pub fn root(self) -> Option<T::Link> {
-        self.root.and_then(|index| index.cid().clone())
+        self.root.and_then(|index| index.link().clone())
     }
 }
 
@@ -478,7 +503,7 @@ where
 
     /// load a leaf given a leaf index
     async fn load_leaf(&self, index: &LeafIndex<T>) -> Result<Option<Leaf>> {
-        Ok(if let Some(cid) = &index.cid {
+        Ok(if let Some(cid) = &index.link {
             let data = &self.store().get(cid).await?;
             if data.len() < 24 {
                 return Err(anyhow!("leaf data without nonce"));
@@ -540,7 +565,7 @@ where
         // store leaf
         let cid = self.store.put(&tmp, true).await?;
         let index: LeafIndex<T> = LeafIndex {
-            cid: Some(cid),
+            link: Some(cid),
             value_bytes: leaf.as_ref().compressed().len() as u64,
             sealed: self.leaf_sealed(leaf.as_ref().compressed().len() as u64, keys.count()),
             keys,
@@ -660,7 +685,7 @@ where
             level,
             count,
             sealed,
-            cid: Some(cid),
+            link: Some(cid),
             summaries,
             key_bytes,
             value_bytes,
@@ -825,7 +850,7 @@ where
 
     /// load a branch given a branch index
     async fn load_branch(&self, index: &BranchIndex<T>) -> Result<Option<Branch<T>>> {
-        Ok(if let Some(cid) = &index.cid {
+        Ok(if let Some(cid) = &index.link {
             let bytes = self.store.get(&cid).await?;
             let children: Vec<_> = deserialize_compressed(&self.index_key(), &bytes)?;
             // let children = CborZstdArrayRef::new(bytes.as_ref()).items()?;
@@ -844,7 +869,7 @@ where
         let key_bytes = children.iter().map(|x| x.key_bytes()).sum::<u64>() + (bytes.len() as u64);
         let summaries = T::Seq::new(children.iter().map(|x| x.data().summarize()))?;
         let result = BranchIndex {
-            cid: Some(cid),
+            link: Some(cid),
             level,
             count,
             summaries,
@@ -858,7 +883,7 @@ where
 
     /// load a branch given a branch index, from the cache
     async fn load_branch_cached(&self, index: &BranchIndex<T>) -> Result<Option<Branch<T>>> {
-        if let Some(cid) = &index.cid {
+        if let Some(cid) = &index.link {
             match self.branch_cache().write().unwrap().pop(cid) {
                 Some(branch) => Ok(Some(branch)),
                 None => self.load_branch(index).await,
@@ -897,7 +922,7 @@ where
 
     /// store a leaf in the cache, and return it wrapped into a generic index
     fn cache_leaf(&self, index: LeafIndex<T>, node: Leaf) -> LeafIndex<T> {
-        if let Some(cid) = &index.cid {
+        if let Some(cid) = &index.link {
             self.leaf_cache().write().unwrap().put(cid.clone(), node);
         }
         index
@@ -1129,6 +1154,77 @@ where
         Box::pin(s)
     }
 
+    fn stream_filtered_static_chunked_reverse<
+        V: DeserializeOwned,
+        Q: Query<T> + Clone + 'static,
+    >(
+        self: Arc<Self>,
+        offset: u64,
+        query: Q,
+        index: Index<T>,
+    ) -> LocalBoxStream<'static, Result<FilteredChunk<T, V>>> {
+        let s =
+            async move {
+                Ok(match self.load_node(&index).await? {
+                    NodeInfo::Leaf(index, node) => {
+                        // todo: don't get the node here, since we might not need it
+                        let mut matching = BitVec::repeat(true, index.keys.len());
+                        query.containing(offset, index, &mut matching);
+                        let keys = index.select_keys(&matching);
+                        let elems: Vec<V> = node.as_ref().select(&matching)?;
+                        let mut pairs = keys
+                            .zip(elems)
+                            .map(|((o, k), v)| (o + offset, k, v))
+                            .collect::<Vec<_>>();
+                        pairs.reverse();
+                        let chunk = FilteredChunk {
+                            min: offset,
+                            max: offset + index.keys.count(),
+                            data: pairs,
+                        };
+                        stream::once(future::ready(chunk))
+                            .map(Ok)
+                            .left_stream()
+                            .left_stream()
+                    }
+                    NodeInfo::Branch(index, node) => {
+                        // todo: don't get the node here, since we might not need it
+                        let mut matching = BitVec::repeat(true, index.summaries.len());
+                        query.intersecting(offset, index, &mut matching);
+                        let offsets = zip_with_offset(node.children.into_iter(), offset);
+                        let children: Vec<_> = matching.into_iter().zip(offsets).collect();
+                        let iter = children.into_iter().rev().map(
+                            move |(is_matching, (child, offset))| {
+                                if is_matching {
+                                    self.clone()
+                                        .stream_filtered_static_chunked_reverse(
+                                            offset,
+                                            query.clone(),
+                                            child,
+                                        )
+                                        .right_stream()
+                                } else {
+                                    let placeholder = FilteredChunk {
+                                        min: offset,
+                                        max: offset + child.count(),
+                                        data: Vec::new(),
+                                    };
+                                    stream::once(future::ok(placeholder)).left_stream()
+                                }
+                            },
+                        );
+                        let stream = stream::iter(iter).flatten().right_stream().left_stream();
+                        stream
+                    }
+                    NodeInfo::PurgedBranch(_) | NodeInfo::PurgedLeaf(_) => {
+                        stream::empty().right_stream()
+                    }
+                })
+            }
+            .try_flatten_stream();
+        Box::pin(s)
+    }
+
     async fn persist_branch(&self, children: &[Index<T>]) -> Result<(T::Link, u64)> {
         let mut cbor = Vec::new();
         serialize_compressed(
@@ -1141,20 +1237,28 @@ where
         Ok((self.store.put(&cbor, false).await?, cbor.len() as u64))
     }
 
-    async fn forget_except<Q: Query<T>>(
+    async fn retain<Q: Query<T>>(
         &self,
         offset: u64,
         query: &Q,
         index: &Index<T>,
+        level: &mut i32,
     ) -> Result<Index<T>> {
+        if !index.sealed() {
+            *level = (*level).min((index.level() as i32) - 1);
+        }
         match index {
             Index::Branch(index) => {
                 let mut index = index.clone();
                 // only do the check unless we are already purged
                 let mut matching = BitVec::repeat(true, index.summaries.len());
                 query.intersecting(offset, &index, &mut matching);
-                if index.cid.is_some() && index.sealed && !matching.any() {
-                    index.cid = None;
+                if index.link.is_some()
+                    && index.sealed
+                    && !matching.any()
+                    && index.level as i32 <= *level
+                {
+                    index.link = None;
                 }
                 // this will only be executed unless we are already purged
                 if let Some(node) = self.load_branch(&index).await? {
@@ -1163,8 +1267,8 @@ where
                     let offsets = zip_with_offset_ref(node.children.iter(), offset);
                     for (i, (child, offset)) in offsets.enumerate() {
                         // TODO: ensure we only purge children that are in the packed part!
-                        let child1 = self.forget_exceptr(offset, query, child).await?;
-                        if child1.cid().is_none() != child.cid().is_none() {
+                        let child1 = self.retainr(offset, query, child, level).await?;
+                        if child1.link() != child.link() {
                             children[i] = child1;
                             changed = true;
                         }
@@ -1173,18 +1277,20 @@ where
                     if changed {
                         let (cid, _) = self.persist_branch(&children).await?;
                         // todo: update size data
-                        index.cid = Some(cid);
+                        index.link = Some(cid);
                     }
                 }
                 Ok(index.into())
             }
             Index::Leaf(index) => {
-                let mut index = index.clone();
-                let mut matching = BitVec::repeat(true, index.keys.len());
-                query.containing(offset, &index, &mut matching);
                 // only do the check unless we are already purged
-                if index.cid.is_some() && index.sealed && !matching.any() {
-                    index.cid = None
+                let mut index = index.clone();
+                if index.sealed && index.link.is_some() && *level >= 0 {
+                    let mut matching = BitVec::repeat(true, index.keys.len());
+                    query.containing(offset, &index, &mut matching);
+                    if !matching.any() {
+                        index.link = None
+                    }
                 }
                 Ok(index.into())
             }
@@ -1192,17 +1298,26 @@ where
     }
 
     // all these stubs could be replaced with https://docs.rs/async-recursion/
-    /// recursion helper for forget_except
-    fn forget_exceptr<'a, Q: Query<T>>(
+    /// recursion helper for retain
+    fn retainr<'a, Q: Query<T>>(
         &'a self,
         offset: u64,
         query: &'a Q,
         index: &'a Index<T>,
+        level: &'a mut i32,
     ) -> FutureResult<'a, Index<T>> {
-        self.forget_except(offset, query, index).boxed_local()
+        self.retain(offset, query, index, level).boxed_local()
     }
 
-    async fn repair(&self, index: &Index<T>, report: &mut Vec<String>) -> Result<Index<T>> {
+    async fn repair(
+        &self,
+        index: &Index<T>,
+        report: &mut Vec<String>,
+        level: &mut i32,
+    ) -> Result<Index<T>> {
+        if !index.sealed() {
+            *level = (*level).min((index.level() as i32) - 1);
+        }
         match index {
             Index::Branch(index) => {
                 let mut index = index.clone();
@@ -1213,8 +1328,8 @@ where
                         let mut children = node.children.clone();
                         let mut changed = false;
                         for (i, child) in node.children.iter().enumerate() {
-                            let child1 = self.repairr(child, report).await?;
-                            if child1.cid().is_none() != child.cid().is_none() {
+                            let child1 = self.repairr(child, report, level).await?;
+                            if child1.link() != child.link() {
                                 children[i] = child1;
                                 changed = true;
                             }
@@ -1222,19 +1337,21 @@ where
                         // rewrite the node and update the cid if children have changed
                         if changed {
                             let (cid, _) = self.persist_branch(&children).await?;
-                            index.cid = Some(cid);
+                            index.link = Some(cid);
                         }
                     }
                     Ok(None) => {
                         // already purged, nothing to do
                     }
                     Err(cause) => {
-                        let cid_txt = index.cid.map(|x| x.to_string()).unwrap_or("".into());
+                        let cid_txt = index.link.map(|x| x.to_string()).unwrap_or("".into());
                         report.push(format!("forgetting branch {} due to {}", cid_txt, cause));
                         if !index.sealed {
                             report.push(format!("warning: forgetting unsealed branch!"));
+                        } else if index.level as i32 > *level {
+                            report.push(format!("warning: forgetting branch in unpacked part!"));
                         }
-                        index.cid = None;
+                        index.link = None;
                     }
                 }
                 Ok(index.into())
@@ -1243,12 +1360,14 @@ where
                 let mut index = index.clone();
                 // important not to hit the cache here!
                 if let Err(cause) = self.load_leaf(&index).await {
-                    let cid_txt = index.cid.map(|x| x.to_string()).unwrap_or("".into());
+                    let cid_txt = index.link.map(|x| x.to_string()).unwrap_or("".into());
                     report.push(format!("forgetting leaf {} due to {}", cid_txt, cause));
                     if !index.sealed {
                         report.push(format!("warning: forgetting unsealed leaf!"));
+                    } else if *level < 0 {
+                        report.push(format!("warning: forgetting leaf in unpacked part!"));
                     }
-                    index.cid = None;
+                    index.link = None;
                 }
                 Ok(index.into())
             }
@@ -1260,8 +1379,9 @@ where
         &'a self,
         index: &'a Index<T>,
         report: &'a mut Vec<String>,
+        level: &'a mut i32,
     ) -> FutureResult<'a, Index<T>> {
-        self.repair(index, report).boxed_local()
+        self.repair(index, report, level).boxed_local()
     }
 
     async fn dump(&self, index: &Index<T>, prefix: &str) -> Result<()> {

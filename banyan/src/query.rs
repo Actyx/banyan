@@ -4,7 +4,7 @@ use crate::{
     util::RangeBoundsExt,
 };
 use bitvec::prelude::BitVec;
-use std::{fmt::Debug, ops::{RangeBounds}, sync::Arc, rc::Rc};
+use std::{fmt::Debug, ops::RangeBounds, rc::Rc, sync::Arc};
 
 /// A query
 ///

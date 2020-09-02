@@ -7,7 +7,7 @@ use futures::prelude::*;
 use ipfs::MemStore;
 use quickcheck::{Arbitrary, Gen, TestResult};
 use serde::{Deserialize, Serialize};
-use std::{ops::Range, sync::Arc};
+use std::{io, ops::Range, sync::Arc};
 mod ipfs;
 
 #[derive(Debug)]
@@ -20,6 +20,23 @@ impl TreeTypes for TT {
     type Key = Key;
     type Seq = SimpleCompactSeq<Key>;
     type Link = ipfs::Cid;
+
+    fn serialize_branch(
+        links: &[&Self::Link],
+        data: Vec<u8>,
+        w: impl io::Write,
+    ) -> anyhow::Result<()> {
+        serde_cbor::to_writer(w, &(links, serde_cbor::Value::Bytes(data)))
+            .map_err(|e| anyhow::Error::new(e))
+    }
+    fn deserialize_branch(reader: impl io::Read) -> anyhow::Result<(Vec<Self::Link>, Vec<u8>)> {
+        let (links, data): (Vec<Self::Link>, serde_cbor::Value) = serde_cbor::from_reader(reader)?;
+        if let serde_cbor::Value::Bytes(data) = data {
+            Ok((links, data))
+        } else {
+            Err(anyhow::anyhow!("expected cbor bytes"))
+        }
+    }
 }
 
 impl Semigroup for Key {
@@ -110,6 +127,35 @@ async fn compare_filtered_chunked(xs: Vec<(Key, u64)>, range: Range<u64>) -> any
 }
 
 /// checks that stream_filtered_static_chunked returns the same elements as filtering each element manually
+async fn compare_filtered_chunked_reverse(
+    xs: Vec<(Key, u64)>,
+    range: Range<u64>,
+) -> anyhow::Result<bool> {
+    let range = range.clone();
+    let tree = create_test_tree(xs.clone()).await?;
+    let actual = tree
+        .stream_filtered_static_chunked_reverse(OffsetRangeQuery::from(range.clone()))
+        .map(|chunk_result| chunk_result.map(|chunk| stream::iter(chunk.data.into_iter().map(Ok))))
+        .try_flatten()
+        .collect::<Vec<_>>()
+        .await
+        .into_iter()
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    let expected = xs
+        .iter()
+        .cloned()
+        .enumerate()
+        .rev()
+        .map(|(i, (k, v))| (i as u64, k, v))
+        .filter(|(offset, _, _)| range.contains(offset))
+        .collect::<Vec<_>>();
+    if actual != expected {
+        println!("{:?} {:?}", actual, expected);
+    }
+    Ok(actual == expected)
+}
+
+/// checks that stream_filtered_static_chunked returns the same elements as filtering each element manually
 async fn filtered_chunked_no_holes(xs: Vec<(Key, u64)>, range: Range<u64>) -> anyhow::Result<bool> {
     let range = range.clone();
     let tree = create_test_tree(xs.clone()).await?;
@@ -143,6 +189,14 @@ async fn build_stream_filtered_chunked(
 }
 
 #[quickcheck_async::tokio]
+async fn build_stream_filtered_chunked_reverse(
+    xs: Vec<(Key, u64)>,
+    range: Range<u64>,
+) -> quickcheck::TestResult {
+    test(|| compare_filtered_chunked_reverse(xs.clone(), range.clone())).await
+}
+
+#[quickcheck_async::tokio]
 async fn build_stream_filtered_chunked_no_holes(
     xs: Vec<(Key, u64)>,
     range: Range<u64>,
@@ -171,7 +225,6 @@ async fn build_pack(xss: Vec<Vec<(Key, u64)>>) -> quickcheck::TestResult {
         let mut tree = Tree::<TT, u64>::empty(forest);
         // flattened xss for reference
         let xs = xss.iter().cloned().flatten().collect::<Vec<_>>();
-        println!("{}", xs.len());
         // build complex unbalanced tree
         for xs in xss.iter() {
             tree.extend_unpacked(xs.clone()).await.unwrap();
@@ -180,12 +233,36 @@ async fn build_pack(xss: Vec<Vec<(Key, u64)>>) -> quickcheck::TestResult {
         let actual: Vec<_> = tree.collect().await?;
         let unpacked_matches = xs == actual;
 
-        let packed = tree.pack().await?;
-        assert!(packed.is_packed().await?);
-        let actual: Vec<_> = packed.collect().await?;
+        tree.pack().await?;
+        assert!(tree.is_packed().await?);
+        let actual: Vec<_> = tree.collect().await?;
         let packed_matches = xs == actual;
 
         Ok(unpacked_matches && packed_matches)
+    })
+    .await
+}
+
+#[quickcheck_async::tokio]
+async fn retain(xss: Vec<Vec<(Key, u64)>>) -> quickcheck::TestResult {
+    test(|| async {
+        let store = Arc::new(MemStore::new());
+        let forest = Arc::new(Forest::<TT>::new(store, Config::debug()));
+        let mut tree = Tree::<TT, u64>::empty(forest);
+        // flattened xss for reference
+        let xs = xss.iter().cloned().flatten().collect::<Vec<_>>();
+        // build complex unbalanced tree
+        for xs in xss.iter() {
+            tree.extend_unpacked(xs.clone()).await.unwrap();
+        }
+        tree.retain(&OffsetRangeQuery::from(xs.len() as u64..))
+            .await?;
+        tree.assert_invariants().await?;
+        tree.pack().await?;
+        tree.retain(&OffsetRangeQuery::from(xs.len() as u64..))
+            .await?;
+        tree.assert_invariants().await?;
+        Ok(true)
     })
     .await
 }
@@ -210,7 +287,8 @@ async fn stream_test_simple() -> anyhow::Result<()> {
         trees.push(tree.root().unwrap());
     }
     println!("{:?}", trees);
-    let res = forest.query(AllQuery)
+    let res = forest
+        .query(AllQuery)
         .stream::<u64>(stream::iter(trees).boxed_local());
     let res = res.collect::<Vec<_>>().await;
     println!("{:?}", res);
