@@ -381,6 +381,19 @@ impl<
         }
     }
 
+    pub fn stream_filtered_static_chunked_reverse(
+        self,
+        query: impl Query<T> + Clone + 'static,
+    ) -> impl Stream<Item = Result<FilteredChunk<T, V>>> + 'static {
+        match &self.root {
+            Some(index) => self
+                .forest
+                .stream_filtered_static_chunked_reverse(0, query, index.clone())
+                .left_stream(),
+            None => stream::empty().right_stream(),
+        }
+    }
+
     /// forget all data except the one matching the query
     ///
     /// this is done as best effort and will not be precise. E.g. if a chunk of data contains
@@ -1137,6 +1150,77 @@ where
         Box::pin(s)
     }
 
+    fn stream_filtered_static_chunked_reverse<
+        V: DeserializeOwned,
+        Q: Query<T> + Clone + 'static,
+    >(
+        self: Arc<Self>,
+        offset: u64,
+        query: Q,
+        index: Index<T>,
+    ) -> LocalBoxStream<'static, Result<FilteredChunk<T, V>>> {
+        let s =
+            async move {
+                Ok(match self.load_node(&index).await? {
+                    NodeInfo::Leaf(index, node) => {
+                        // todo: don't get the node here, since we might not need it
+                        let mut matching = BitVec::repeat(true, index.keys.len());
+                        query.containing(offset, index, &mut matching);
+                        let keys = index.select_keys(&matching);
+                        let elems: Vec<V> = node.as_ref().select(&matching)?;
+                        let mut pairs = keys
+                            .zip(elems)
+                            .map(|((o, k), v)| (o + offset, k, v))
+                            .collect::<Vec<_>>();
+                        pairs.reverse();
+                        let chunk = FilteredChunk {
+                            min: offset,
+                            max: offset + index.keys.count(),
+                            data: pairs,
+                        };
+                        stream::once(future::ready(chunk))
+                            .map(Ok)
+                            .left_stream()
+                            .left_stream()
+                    }
+                    NodeInfo::Branch(index, node) => {
+                        // todo: don't get the node here, since we might not need it
+                        let mut matching = BitVec::repeat(true, index.summaries.len());
+                        query.intersecting(offset, index, &mut matching);
+                        let offsets = zip_with_offset(node.children.into_iter(), offset);
+                        let children: Vec<_> = matching.into_iter().zip(offsets).collect();
+                        let iter = children.into_iter().rev().map(
+                            move |(is_matching, (child, offset))| {
+                                if is_matching {
+                                    self.clone()
+                                        .stream_filtered_static_chunked_reverse(
+                                            offset,
+                                            query.clone(),
+                                            child,
+                                        )
+                                        .right_stream()
+                                } else {
+                                    let placeholder = FilteredChunk {
+                                        min: offset,
+                                        max: offset + child.count(),
+                                        data: Vec::new(),
+                                    };
+                                    stream::once(future::ok(placeholder)).left_stream()
+                                }
+                            },
+                        );
+                        let stream = stream::iter(iter).flatten().right_stream().left_stream();
+                        stream
+                    }
+                    NodeInfo::PurgedBranch(_) | NodeInfo::PurgedLeaf(_) => {
+                        stream::empty().right_stream()
+                    }
+                })
+            }
+            .try_flatten_stream();
+        Box::pin(s)
+    }
+
     async fn persist_branch(&self, children: &[Index<T>]) -> Result<(T::Link, u64)> {
         let mut cbor = Vec::new();
         serialize_compressed(
@@ -1300,23 +1384,17 @@ where
         match self.load_node(index).await? {
             NodeInfo::Leaf(index, _) => {
                 println!(
-                    "{}Leaf(count={}, key_bytes={}, sealed={}, cid={})",
+                    "{}Leaf(count={}, key_bytes={}, sealed={})",
                     prefix,
                     index.keys.count(),
                     index.value_bytes,
                     index.sealed,
-                    index.cid.is_some(),
                 );
             }
             NodeInfo::Branch(index, branch) => {
                 println!(
-                    "{}Branch(count={}, key_bytes={}, value_bytes={}, sealed={}, cid={})",
-                    prefix,
-                    index.count,
-                    index.key_bytes,
-                    index.value_bytes,
-                    index.sealed,
-                    index.cid.is_some(),
+                    "{}Branch(count={}, key_bytes={}, value_bytes={}, sealed={})",
+                    prefix, index.count, index.key_bytes, index.value_bytes, index.sealed,
                 );
                 let prefix = prefix.to_string() + "  ";
                 for x in branch.children.iter() {

@@ -123,6 +123,35 @@ async fn compare_filtered_chunked(xs: Vec<(Key, u64)>, range: Range<u64>) -> any
 }
 
 /// checks that stream_filtered_static_chunked returns the same elements as filtering each element manually
+async fn compare_filtered_chunked_reverse(
+    xs: Vec<(Key, u64)>,
+    range: Range<u64>,
+) -> anyhow::Result<bool> {
+    let range = range.clone();
+    let tree = create_test_tree(xs.clone()).await?;
+    let actual = tree
+        .stream_filtered_static_chunked_reverse(OffsetRangeQuery::from(range.clone()))
+        .map(|chunk_result| chunk_result.map(|chunk| stream::iter(chunk.data.into_iter().map(Ok))))
+        .try_flatten()
+        .collect::<Vec<_>>()
+        .await
+        .into_iter()
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    let expected = xs
+        .iter()
+        .cloned()
+        .enumerate()
+        .rev()
+        .map(|(i, (k, v))| (i as u64, k, v))
+        .filter(|(offset, _, _)| range.contains(offset))
+        .collect::<Vec<_>>();
+    if actual != expected {
+        println!("{:?} {:?}", actual, expected);
+    }
+    Ok(actual == expected)
+}
+
+/// checks that stream_filtered_static_chunked returns the same elements as filtering each element manually
 async fn filtered_chunked_no_holes(xs: Vec<(Key, u64)>, range: Range<u64>) -> anyhow::Result<bool> {
     let range = range.clone();
     let tree = create_test_tree(xs.clone()).await?;
@@ -153,6 +182,14 @@ async fn build_stream_filtered_chunked(
     range: Range<u64>,
 ) -> quickcheck::TestResult {
     test(|| compare_filtered_chunked(xs.clone(), range.clone())).await
+}
+
+#[quickcheck_async::tokio]
+async fn build_stream_filtered_chunked_reverse(
+    xs: Vec<(Key, u64)>,
+    range: Range<u64>,
+) -> quickcheck::TestResult {
+    test(|| compare_filtered_chunked_reverse(xs.clone(), range.clone())).await
 }
 
 #[quickcheck_async::tokio]
@@ -214,15 +251,13 @@ async fn retain(xss: Vec<Vec<(Key, u64)>>) -> quickcheck::TestResult {
         for xs in xss.iter() {
             tree.extend_unpacked(xs.clone()).await.unwrap();
         }
-        println!("*******************************************");
         tree.retain(&OffsetRangeQuery::from(xs.len() as u64..))
             .await?;
-        tree.dump().await?;
+        tree.assert_invariants().await?;
         tree.pack().await?;
         tree.retain(&OffsetRangeQuery::from(xs.len() as u64..))
             .await?;
-        tree.dump().await?;
-        println!("*******************************************\n\n\n\n");
+        tree.assert_invariants().await?;
         Ok(true)
     })
     .await
