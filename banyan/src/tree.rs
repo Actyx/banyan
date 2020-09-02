@@ -1,3 +1,4 @@
+//! creation and traversal of banyan trees
 use super::index::*;
 use crate::stream::SourceStream;
 use crate::{

@@ -1,4 +1,4 @@
-//! This module provides some utilities to work with zstd compressed arrays of cbor values
+//! Utilities to work with zstd compressed arrays of cbor values
 use anyhow::Result;
 use bitvec::prelude::*;
 use ref_cast::RefCast;

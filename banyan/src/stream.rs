@@ -1,3 +1,4 @@
+//! helper methods to stream trees
 use super::query::*;
 use super::tree::*;
 use futures::prelude::*;

@@ -1,4 +1,43 @@
 //! The index data structures for the tree
+//!
+//! In order to have good storage and query efficiency, indexes contain sequences of keys instead of on individual keys.
+//! To support a key type in banyan trees, you need to define how a sequence of keys is stored in memory and on persistent storage,
+//! by implementing [CompactSeq] for the key type, and define how keys are combined to compute summaries,
+//! by implementing [Semigroup] for the key type.
+//!
+//! If you just want to quickly get things working, you can use [SimpleCompactSeq], which is just a vec.
+//!
+//! Indexes are structured in such a way that key data is stored closer to the root than value data.
+//!
+//! # Indexes
+//!
+//! Indexes contain an optional link to children/data, and some additonal information. An index
+//! that no longer has a link to its children/data is called *purged*.
+//!
+//! There are two kinds of indexes.
+//!
+//! ## Leaf indexes
+//!
+//! Leaf indexes contain *the actual keys* for a leaf. This is not redundant data that can be recomputed from the values.
+//! Leaf indexes have a level of `0`.
+//!
+//! ### Invariants
+//!
+//! A leaf index must contain exactly the same number of keys as there are values.
+//!
+//! ## Branch indexes
+//!
+//! Branch indices contain *summaries* for their children. This is redundant data that can be recomputed from the children.
+//! Branch indexes have a level of `max(level of children) + 1`.
+//!
+//! ### Invariants
+//!
+//! For a sealed branch, the level of all its children is exactly `level-1`.
+//! For an unsealed branch, the level of all children must be smaller than the level of the branch.
+//!
+//! [CompactSeq]: trait.CompactSeq.html
+//! [Semigroup]: trait.Semigroup.html
+//! [SimpleCompactSeq]: struct.SimpleCompactSeq.html
 use super::zstd_array::{ZstdArray, ZstdArrayBuilder, ZstdArrayRef};
 use anyhow::{anyhow, Result};
 use bitvec::prelude::*;
@@ -109,7 +148,7 @@ impl<T: Serialize + DeserializeOwned + Semigroup + Clone> CompactSeq for SimpleC
     }
 }
 
-/// index for a leaf of n events
+/// index for a leaf node, containing keys and some statistics data for its children
 #[derive(Debug)]
 pub struct LeafIndex<T: TreeTypes> {
     // block is sealed
@@ -142,7 +181,7 @@ impl<T: TreeTypes> LeafIndex<T> {
     }
 }
 
-/// index for a branch node
+/// index for a branch node, containing summary data for its children
 #[derive(Debug)]
 pub struct BranchIndex<T: TreeTypes> {
     // number of events
@@ -181,7 +220,7 @@ impl<T: TreeTypes> BranchIndex<T> {
     }
 }
 
-/// index
+/// enum for a leaf or branch index
 #[derive(Debug, From)]
 pub enum Index<T: TreeTypes> {
     Leaf(LeafIndex<T>),
@@ -245,6 +284,8 @@ impl<T: TreeTypes> Index<T> {
 
 #[derive(Debug, Clone)]
 /// fully in memory representation of a branch node
+///
+/// This is a wrapper around a non-empty sequence of child indices.
 pub struct Branch<T: TreeTypes> {
     // index data for the children
     pub children: Vec<Index<T>>,
@@ -268,6 +309,8 @@ impl<T: TreeTypes> Branch<T> {
 }
 
 /// fully in memory representation of a leaf node
+///
+/// This is a wrapper around a cbor encoded and zstd compressed sequence of values
 #[derive(Debug)]
 pub struct Leaf(ZstdArray);
 
@@ -309,21 +352,24 @@ impl Leaf {
     pub fn as_ref(&self) -> &ZstdArrayRef {
         &self.0
     }
-}
 
-pub(crate) enum NodeInfo<'a, T: TreeTypes> {
-    Branch(&'a BranchIndex<T>, Branch<T>),
-    Leaf(&'a LeafIndex<T>, Leaf),
-    PurgedBranch(&'a BranchIndex<T>),
-    PurgedLeaf(&'a LeafIndex<T>),
-}
-
-impl Leaf {
     pub fn child_at<T: DeserializeOwned>(&self, offset: u64) -> Result<T> {
         self.as_ref()
             .get(offset)?
             .ok_or_else(|| anyhow!("index out of bounds {}", offset).into())
     }
+}
+
+/// enum that combines index and corrsponding data
+pub(crate) enum NodeInfo<'a, T: TreeTypes> {
+    // Branch with index and data
+    Branch(&'a BranchIndex<T>, Branch<T>),
+    /// Leaf with index and data
+    Leaf(&'a LeafIndex<T>, Leaf),
+    /// Purged branch, with just the index
+    PurgedBranch(&'a BranchIndex<T>),
+    /// Purged leaf, with just the index
+    PurgedLeaf(&'a LeafIndex<T>),
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -423,7 +469,7 @@ use std::{
 const CBOR_ARRAY_START: u8 = (4 << 5) | 31;
 const CBOR_BREAK: u8 = 255;
 
-pub fn serialize_compressed<T: TreeTypes>(
+pub(crate) fn serialize_compressed<T: TreeTypes>(
     key: &salsa20::Key,
     nonce: &salsa20::XNonce,
     items: &[Index<T>],
@@ -448,7 +494,7 @@ pub fn serialize_compressed<T: TreeTypes>(
     Ok(())
 }
 
-pub fn deserialize_compressed<T: TreeTypes>(
+pub(crate) fn deserialize_compressed<T: TreeTypes>(
     key: &salsa20::Key,
     ipld: &[u8],
 ) -> Result<Vec<Index<T>>> {

@@ -1,3 +1,9 @@
+//! types for querying banyan trees
+//!
+//! To implement querying for a new key type, implement the [Query] trait. Queries can be combined
+//! using boolean combinators.
+//!
+//! [Query]: trait.Query.html
 use crate::{
     index::{BranchIndex, CompactSeq, LeafIndex},
     tree::TreeTypes,
@@ -46,6 +52,7 @@ impl<T: TreeTypes> Query<T> for Arc<dyn Query<T>> {
     }
 }
 
+/// The only information that does not require
 #[derive(Debug, Clone)]
 pub struct OffsetRangeQuery<R>(R);
 
@@ -81,6 +88,7 @@ impl<T: TreeTypes, R: RangeBounds<u64> + Debug> Query<T> for OffsetRangeQuery<R>
     }
 }
 
+/// A query that matches nothing
 #[derive(Debug, Clone)]
 pub struct EmptyQuery;
 
@@ -94,6 +102,7 @@ impl<T: TreeTypes> Query<T> for EmptyQuery {
     }
 }
 
+/// A query that matches everything
 #[derive(Debug, Clone)]
 pub struct AllQuery;
 
@@ -107,6 +116,9 @@ impl<T: TreeTypes> Query<T> for AllQuery {
     }
 }
 
+/// An intersection of two queries.
+///
+/// This is equivalent to performing the two sub-queries and performing a boolean and on the results.
 #[derive(Debug, Clone)]
 pub struct AndQuery<A, B>(pub A, pub B);
 
@@ -121,6 +133,10 @@ impl<T: TreeTypes, A: Query<T>, B: Query<T>> Query<T> for AndQuery<A, B> {
         self.1.intersecting(offset, index, res);
     }
 }
+
+/// Union of two subqueries
+///
+/// This is equivalent to performing the two sub-queries and performing a boolean or on the results.
 #[derive(Debug, Clone)]
 pub struct OrQuery<A, B>(pub A, pub B);
 

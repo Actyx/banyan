@@ -1,4 +1,4 @@
-//! the interface to a content-addressed store, and a memory implementation for testing
+//! interface to a content-addressed store
 use anyhow::Result;
 use futures::future::BoxFuture;
 use std::sync::Arc;
