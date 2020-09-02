@@ -63,7 +63,7 @@ impl<TT: TreeTypes + 'static, Q: Query<TT> + Clone + 'static> SourceStream<TT, Q
                     .take_while(move |result| {
                         if let Ok(chunk) = result {
                             // update the offset
-                            offset.set(chunk.max)
+                            offset.set(chunk.range.end)
                         }
                         // abort at the first non-ok offset
                         future::ready(result.is_ok())

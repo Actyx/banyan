@@ -166,8 +166,8 @@ async fn filtered_chunked_no_holes(xs: Vec<(Key, u64)>, range: Range<u64>) -> an
         .into_iter()
         .collect::<anyhow::Result<Vec<_>>>()?;
     let max_offset = chunks.iter().fold(0, |offset, chunk| {
-        if offset == chunk.min {
-            chunk.max
+        if offset == chunk.range.start {
+            chunk.range.end
         } else {
             offset
         }

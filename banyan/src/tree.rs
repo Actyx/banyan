@@ -1113,8 +1113,7 @@ where
                         .map(|((o, k), v)| (o + offset, k, v))
                         .collect::<Vec<_>>();
                     let chunk = FilteredChunk {
-                        min: offset,
-                        max: offset + index.keys.count(),
+                        range: offset..offset + index.keys.count(),
                         data: pairs,
                     };
                     stream::once(future::ready(chunk))
@@ -1135,8 +1134,7 @@ where
                                     .right_stream()
                             } else {
                                 let placeholder = FilteredChunk {
-                                    min: offset,
-                                    max: offset + child.count(),
+                                    range: offset..offset + child.count(),
                                     data: Vec::new(),
                                 };
                                 stream::once(future::ok(placeholder)).left_stream()
@@ -1179,8 +1177,7 @@ where
                             .collect::<Vec<_>>();
                         pairs.reverse();
                         let chunk = FilteredChunk {
-                            min: offset,
-                            max: offset + index.keys.count(),
+                            range: offset..offset + index.keys.count(),
                             data: pairs,
                         };
                         stream::once(future::ready(chunk))
@@ -1206,8 +1203,7 @@ where
                                         .right_stream()
                                 } else {
                                     let placeholder = FilteredChunk {
-                                        min: offset,
-                                        max: offset + child.count(),
+                                        range: offset..offset + child.count(),
                                         data: Vec::new(),
                                     };
                                     stream::once(future::ok(placeholder)).left_stream()
@@ -1612,10 +1608,8 @@ enum CreateMode {
 /// Contains both data and information about the offsets the data resulted from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FilteredChunk<T: TreeTypes, V> {
-    // inclusive
-    pub min: u64,
-    // exclusive
-    pub max: u64,
+    /// index range for this chunk
+    pub range: std::ops::Range<u64>,
     // data
     pub data: Vec<(u64, T::Key, V)>,
 }
