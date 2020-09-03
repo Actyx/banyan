@@ -1,6 +1,6 @@
 # Banyan
 
-![](https://i.imgur.com/6icLbdz.jpg)
+![banyan tree](https://ipfs.io/ipfs/QmaEDTjHSdCKyGQ3cFMCf73kE67NvffLA5agquLW5qSEVn/banyan.jpg)
 
 Banyan trees are the trees with the widest canopy. They also sprout new roots, which after some time can become indistinguishable from the original root. Seems appropriate.
 
