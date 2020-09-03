@@ -1,7 +1,8 @@
 use banyan::index::{Semigroup, SimpleCompactSeq};
 use banyan::{
+    forest::{Config, Forest, TreeTypes},
     query::{AllQuery, OffsetRangeQuery},
-    tree::{Config, Forest, Tree, TreeTypes},
+    tree::Tree,
 };
 use futures::prelude::*;
 use ipfs::MemStore;
