@@ -306,6 +306,9 @@ impl<T: TreeTypes> Branch<T> {
             .last_mut()
             .expect("branch can never have 0 children")
     }
+    pub fn count(&self) -> u64 {
+        self.children.len() as u64
+    }
 }
 
 /// fully in memory representation of a leaf node
@@ -459,7 +462,7 @@ impl<I: Semigroup + Eq + Debug, X: CompactSeq<Item = I> + Clone + Debug> IndexRC
     }
 }
 
-use crate::tree::TreeTypes;
+use crate::forest::TreeTypes;
 use std::{
     collections::VecDeque,
     fmt::Debug,

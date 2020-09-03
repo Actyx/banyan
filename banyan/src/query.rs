@@ -5,8 +5,8 @@
 //!
 //! [Query]: trait.Query.html
 use crate::{
+    forest::TreeTypes,
     index::{BranchIndex, CompactSeq, LeafIndex},
-    tree::TreeTypes,
     util::RangeBoundsExt,
 };
 use bitvec::prelude::BitVec;

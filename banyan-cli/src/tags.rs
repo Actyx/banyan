@@ -1,6 +1,6 @@
 use crate::ipfs::Cid;
 use banyan::index::*;
-use banyan::{query::Query, tree::*};
+use banyan::{query::Query, forest::*};
 use bitvec::prelude::*;
 use maplit::btreeset;
 use serde::{Deserialize, Serialize};

@@ -56,6 +56,7 @@
 //! [salsa20]: https://en.wikipedia.org/wiki/Salsa20
 //! [ipfs]: https://ipfs.io/
 //! [B-Trees]: https://en.wikipedia.org/wiki/B-tree
+pub mod forest;
 pub mod index;
 pub mod query;
 pub mod store;
