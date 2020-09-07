@@ -4,7 +4,7 @@ use banyan::{forest::*, query::Query};
 use bitvec::prelude::*;
 use maplit::btreeset;
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeSet, io, sync::Arc};
+use std::{collections::BTreeSet, io, iter::FromIterator, sync::Arc};
 
 #[derive(Debug)]
 pub struct TT {}
@@ -164,25 +164,6 @@ pub struct KeySeq {
 impl CompactSeq for KeySeq {
     type Item = Key;
 
-    fn new(items: impl IntoIterator<Item = Self::Item>) -> KeySeq {
-        let mut min_lamport = Vec::new();
-        let mut min_time = Vec::new();
-        let mut max_time = Vec::new();
-        let mut tags = Vec::new();
-        for value in items.into_iter() {
-            min_lamport.push(value.min_lamport);
-            min_time.push(value.min_time);
-            max_time.push(value.max_time);
-            tags.push(value.tags.clone());
-        }
-        Self {
-            min_lamport,
-            min_time,
-            max_time,
-            tags,
-        }
-    }
-
     fn get(&self, index: usize) -> Option<Key> {
         if let (Some(min_lamport), Some(min_time), Some(max_time), Some(tags)) = (
             self.min_lamport.get(index),
@@ -211,5 +192,26 @@ impl CompactSeq for KeySeq {
             result.combine(&self.get(i).unwrap());
         }
         result
+    }
+}
+
+impl FromIterator<Key> for KeySeq {
+    fn from_iter<T: IntoIterator<Item = Key>>(iter: T) -> Self {
+        let mut min_lamport = Vec::new();
+        let mut min_time = Vec::new();
+        let mut max_time = Vec::new();
+        let mut tags = Vec::new();
+        for value in iter.into_iter() {
+            min_lamport.push(value.min_lamport);
+            min_time.push(value.min_time);
+            max_time.push(value.max_time);
+            tags.push(value.tags.clone());
+        }
+        Self {
+            min_lamport,
+            min_time,
+            max_time,
+            tags,
+        }
     }
 }

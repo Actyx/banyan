@@ -38,7 +38,12 @@ pub trait TreeTypes: Debug {
     /// key type. This also doubles as the type for a combination (union) of keys
     type Key: Semigroup + Debug + Eq;
     /// compact sequence type to be used for indices
-    type Seq: CompactSeq<Item = Self::Key> + Serialize + DeserializeOwned + Clone + Debug;
+    type Seq: CompactSeq<Item = Self::Key>
+        + Serialize
+        + DeserializeOwned
+        + Clone
+        + Debug
+        + FromIterator<Self::Key>;
     /// link type to use over block boundaries
     type Link: ToString + Hash + Eq + Clone + Debug;
 
@@ -221,7 +226,7 @@ where
             self.config().target_leaf_size,
         )?;
         let leaf = Leaf::from_builder(builder)?;
-        let keys = T::Seq::new(keys);
+        let keys = keys.into_iter().collect::<T::Seq>();
         // encrypt leaf
         let mut tmp: Vec<u8> = Vec::with_capacity(leaf.as_ref().compressed().len() + 24);
         let nonce = self.random_nonce();
@@ -346,7 +351,7 @@ where
         let value_bytes = children.iter().map(|x| x.value_bytes()).sum();
         let key_bytes = children.iter().map(|x| x.key_bytes()).sum::<u64>() + encoded_children_len;
         let sealed = self.branch_sealed(&children, level);
-        let summaries: T::Seq = T::Seq::new(summaries.into_iter());
+        let summaries: T::Seq = summaries.into_iter().collect();
         Ok(BranchIndex {
             level,
             count,
@@ -537,7 +542,7 @@ where
         let count = children.iter().map(|x| x.count()).sum();
         let value_bytes = children.iter().map(|x| x.value_bytes()).sum();
         let key_bytes = children.iter().map(|x| x.key_bytes()).sum::<u64>() + (bytes.len() as u64);
-        let summaries = T::Seq::new(children.iter().map(|x| x.data().summarize()));
+        let summaries = children.iter().map(|x| x.data().summarize()).collect();
         let result = BranchIndex {
             link: Some(cid),
             level,

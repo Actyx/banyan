@@ -63,24 +63,12 @@ pub trait Semigroup {
 pub trait CompactSeq: Serialize + DeserializeOwned {
     /// item type
     type Item: Semigroup;
-    // /// Creates a sequence with a single element
-    // fn empty() -> Self;
-    // /// Creates a sequence with a single element
-    // fn single(item: &Self::Item) -> Self;
-    // /// pushes an additional element to the end
-    // fn push(&mut self, value: &Self::Item);
     /// number of elements
     fn count(&self) -> u64;
-    /// number of elements, as an usize, for convenience
-    fn len(&self) -> usize {
-        self.count() as usize
-    }
     /// get nth element. Guaranteed to succeed with Some for index < count.
     fn get(&self, index: usize) -> Option<Self::Item>;
     /// combines all elements with the semigroup op
     fn summarize(&self) -> Self::Item;
-
-    fn new(items: impl IntoIterator<Item = Self::Item>) -> Self;
 
     /// utility function to get all items for a compactseq.
     fn to_vec(&self) -> Vec<Self::Item> {
@@ -98,6 +86,10 @@ pub trait CompactSeq: Serialize + DeserializeOwned {
                 }
             })
             .collect()
+    }
+    /// number of elements, as an usize, for convenience
+    fn len(&self) -> usize {
+        self.count() as usize
     }
 }
 
@@ -122,8 +114,11 @@ impl<T: Serialize + DeserializeOwned + Semigroup + Clone> CompactSeq for SimpleC
         }
         res
     }
-    fn new(items: impl IntoIterator<Item = Self::Item>) -> Self {
-        SimpleCompactSeq(items.into_iter().collect())
+}
+
+impl<A> FromIterator<A> for SimpleCompactSeq<A> {
+    fn from_iter<T: IntoIterator<Item = A>>(iter: T) -> Self {
+        SimpleCompactSeq(iter.into_iter().collect())
     }
 }
 
@@ -413,7 +408,9 @@ struct IndexRC<T> {
     key_bytes: Option<u64>,
 }
 
-impl<I: Semigroup + Eq + Debug, X: CompactSeq<Item = I> + Clone + Debug> IndexRC<X> {
+impl<I: Semigroup + Eq + Debug, X: CompactSeq<Item = I> + Clone + Debug + FromIterator<I>>
+    IndexRC<X>
+{
     fn to_index<T: TreeTypes<Seq = X, Key = I>>(self, cids: &mut VecDeque<T::Link>) -> Index<T> {
         let cid = if !self.purged { cids.pop_front() } else { None };
         if let (Some(level), Some(count), Some(key_bytes)) =
@@ -446,6 +443,7 @@ use std::{
     collections::VecDeque,
     fmt::Debug,
     io::{Cursor, Write},
+    iter::FromIterator,
 };
 
 const CBOR_ARRAY_START: u8 = (4 << 5) | 31;
