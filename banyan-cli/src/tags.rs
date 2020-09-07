@@ -1,6 +1,6 @@
 use crate::ipfs::Cid;
 use banyan::index::*;
-use banyan::{query::Query, forest::*};
+use banyan::{forest::*, query::Query};
 use bitvec::prelude::*;
 use maplit::btreeset;
 use serde::{Deserialize, Serialize};
@@ -164,29 +164,23 @@ pub struct KeySeq {
 impl CompactSeq for KeySeq {
     type Item = Key;
 
-    fn empty() -> Self {
-        Self {
-            min_lamport: Vec::new(),
-            min_time: Vec::new(),
-            max_time: Vec::new(),
-            tags: Vec::new(),
+    fn new(items: impl IntoIterator<Item = Self::Item>) -> KeySeq {
+        let mut min_lamport = Vec::new();
+        let mut min_time = Vec::new();
+        let mut max_time = Vec::new();
+        let mut tags = Vec::new();
+        for value in items.into_iter() {
+            min_lamport.push(value.min_lamport);
+            min_time.push(value.min_time);
+            max_time.push(value.max_time);
+            tags.push(value.tags.clone());
         }
-    }
-
-    fn single(value: &Key) -> Self {
         Self {
-            min_lamport: vec![value.min_lamport],
-            min_time: vec![value.min_time],
-            max_time: vec![value.max_time],
-            tags: vec![value.tags.clone()],
+            min_lamport,
+            min_time,
+            max_time,
+            tags,
         }
-    }
-
-    fn push(&mut self, value: &Key) {
-        self.min_lamport.push(value.min_lamport);
-        self.min_time.push(value.min_time);
-        self.max_time.push(value.max_time);
-        self.tags.push(value.tags.clone());
     }
 
     fn get(&self, index: usize) -> Option<Key> {

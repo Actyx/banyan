@@ -192,12 +192,8 @@ where
         from: &mut std::iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
     ) -> Result<LeafIndex<T>> {
         assert!(from.peek().is_some());
-        self.extend_leaf(
-            T::Seq::empty(),
-            ZstdArrayBuilder::new(self.config().zstd_level)?,
-            from,
-        )
-        .await
+        self.extend_leaf(None, ZstdArrayBuilder::new(self.config().zstd_level)?, from)
+            .await
     }
 
     /// Creates a leaf from a sequence that either contains all items from the sequence, or is full
@@ -205,16 +201,17 @@ where
     /// The result is the index of the leaf. The iterator will contain the elements that did not fit.
     async fn extend_leaf<V: Serialize + Debug>(
         &self,
-        mut keys: T::Seq,
+        keys: Option<T::Seq>,
         builder: ZstdArrayBuilder,
         from: &mut std::iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
     ) -> Result<LeafIndex<T>> {
         assert!(from.peek().is_some());
+        let mut keys = keys.map(|x| x.to_vec()).unwrap_or_default();
         let builder = builder.fill(
             || {
-                if keys.count() < self.config().max_leaf_count {
+                if (keys.len() as u64) < self.config().max_leaf_count {
                     from.next().map(|(k, v)| {
-                        keys.push(&k);
+                        keys.push(k);
                         v
                     })
                 } else {
@@ -224,6 +221,7 @@ where
             self.config().target_leaf_size,
         )?;
         let leaf = Leaf::from_builder(builder)?;
+        let keys = T::Seq::new(keys);
         // encrypt leaf
         let mut tmp: Vec<u8> = Vec::with_capacity(leaf.as_ref().compressed().len() + 24);
         let nonce = self.random_nonce();
@@ -348,7 +346,7 @@ where
         let value_bytes = children.iter().map(|x| x.value_bytes()).sum();
         let key_bytes = children.iter().map(|x| x.key_bytes()).sum::<u64>() + encoded_children_len;
         let sealed = self.branch_sealed(&children, level);
-        let summaries: T::Seq = T::Seq::new(summaries.into_iter())?;
+        let summaries: T::Seq = T::Seq::new(summaries.into_iter());
         Ok(BranchIndex {
             level,
             count,
@@ -415,7 +413,7 @@ where
                 info!("extending existing leaf");
                 let keys = index.keys.clone();
                 let builder = leaf.builder(self.config().zstd_level)?;
-                self.extend_leaf(keys, builder, from).await?.into()
+                self.extend_leaf(Some(keys), builder, from).await?.into()
             }
             NodeInfo::Branch(index, branch) => {
                 info!("extending existing branch");
@@ -539,7 +537,7 @@ where
         let count = children.iter().map(|x| x.count()).sum();
         let value_bytes = children.iter().map(|x| x.value_bytes()).sum();
         let key_bytes = children.iter().map(|x| x.key_bytes()).sum::<u64>() + (bytes.len() as u64);
-        let summaries = T::Seq::new(children.iter().map(|x| x.data().summarize()))?;
+        let summaries = T::Seq::new(children.iter().map(|x| x.data().summarize()));
         let result = BranchIndex {
             link: Some(cid),
             level,

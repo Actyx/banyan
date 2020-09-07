@@ -63,12 +63,12 @@ pub trait Semigroup {
 pub trait CompactSeq: Serialize + DeserializeOwned {
     /// item type
     type Item: Semigroup;
-    /// Creates a sequence with a single element
-    fn empty() -> Self;
-    /// Creates a sequence with a single element
-    fn single(item: &Self::Item) -> Self;
-    /// pushes an additional element to the end
-    fn push(&mut self, value: &Self::Item);
+    // /// Creates a sequence with a single element
+    // fn empty() -> Self;
+    // /// Creates a sequence with a single element
+    // fn single(item: &Self::Item) -> Self;
+    // /// pushes an additional element to the end
+    // fn push(&mut self, value: &Self::Item);
     /// number of elements
     fn count(&self) -> u64;
     /// number of elements, as an usize, for convenience
@@ -80,18 +80,7 @@ pub trait CompactSeq: Serialize + DeserializeOwned {
     /// combines all elements with the semigroup op
     fn summarize(&self) -> Self::Item;
 
-    fn new(items: impl IntoIterator<Item = Self::Item>) -> Result<Self> {
-        let mut items = items.into_iter();
-        let mut result = Self::single(
-            &items
-                .next()
-                .ok_or(anyhow!("iterator must have at least one item"))?,
-        );
-        for item in items {
-            result.push(&item);
-        }
-        Ok(result)
-    }
+    fn new(items: impl IntoIterator<Item = Self::Item>) -> Self;
 
     /// utility function to get all items for a compactseq.
     fn to_vec(&self) -> Vec<Self::Item> {
@@ -120,15 +109,6 @@ pub struct SimpleCompactSeq<T>(Vec<T>);
 
 impl<T: Serialize + DeserializeOwned + Semigroup + Clone> CompactSeq for SimpleCompactSeq<T> {
     type Item = T;
-    fn empty() -> Self {
-        Self(Vec::new())
-    }
-    fn single(item: &T) -> Self {
-        Self(vec![item.clone()])
-    }
-    fn push(&mut self, item: &T) {
-        self.0.push(item.clone())
-    }
     fn get(&self, index: usize) -> Option<T> {
         self.0.get(index).cloned()
     }
@@ -141,6 +121,9 @@ impl<T: Serialize + DeserializeOwned + Semigroup + Clone> CompactSeq for SimpleC
             res.combine(&self.0[i]);
         }
         res
+    }
+    fn new(items: impl IntoIterator<Item = Self::Item>) -> Self {
+        SimpleCompactSeq(items.into_iter().collect())
     }
 }
 

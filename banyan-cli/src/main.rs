@@ -15,9 +15,9 @@ mod ipfs;
 mod tags;
 
 use banyan::{
+    forest::*,
     query::{AllQuery, OffsetRangeQuery, Query},
     tree::*,
-    forest::*,
 };
 use ipfs::{pubsub_pub, pubsub_sub, Cid, IpfsStore, MemStore};
 use tags::{DnfQuery, Key, Tag, Tags, TT};
