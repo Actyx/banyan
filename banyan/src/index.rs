@@ -69,8 +69,6 @@ pub trait CompactSeq: Serialize + DeserializeOwned {
     fn single(item: &Self::Item) -> Self;
     /// pushes an additional element to the end
     fn push(&mut self, value: &Self::Item);
-    /// extends the last element with the item
-    fn extend(&mut self, value: &Self::Item);
     /// number of elements
     fn count(&self) -> u64;
     /// number of elements, as an usize, for convenience
@@ -82,7 +80,8 @@ pub trait CompactSeq: Serialize + DeserializeOwned {
     /// combines all elements with the semigroup op
     fn summarize(&self) -> Self::Item;
 
-    fn new(mut items: impl Iterator<Item = Self::Item>) -> Result<Self> {
+    fn new(items: impl IntoIterator<Item = Self::Item>) -> Result<Self> {
+        let mut items = items.into_iter();
         let mut result = Self::single(
             &items
                 .next()
@@ -129,9 +128,6 @@ impl<T: Serialize + DeserializeOwned + Semigroup + Clone> CompactSeq for SimpleC
     }
     fn push(&mut self, item: &T) {
         self.0.push(item.clone())
-    }
-    fn extend(&mut self, item: &T) {
-        self.0.last_mut().unwrap().combine(item);
     }
     fn get(&self, index: usize) -> Option<T> {
         self.0.get(index).cloned()

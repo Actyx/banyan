@@ -189,17 +189,6 @@ impl CompactSeq for KeySeq {
         self.tags.push(value.tags.clone());
     }
 
-    fn extend(&mut self, value: &Key) {
-        let min_lamport = self.min_lamport.last_mut().unwrap();
-        let min_time = self.min_time.last_mut().unwrap();
-        let max_time = self.max_time.last_mut().unwrap();
-        let tags = self.tags.last_mut().unwrap();
-        *min_lamport = value.min_lamport.min(*min_lamport);
-        *min_time = value.min_time.min(*min_time);
-        *max_time = value.max_time.min(*max_time);
-        tags.0.extend(value.tags.0.iter().cloned());
-    }
-
     fn get(&self, index: usize) -> Option<Key> {
         if let (Some(min_lamport), Some(min_time), Some(max_time), Some(tags)) = (
             self.min_lamport.get(index),
