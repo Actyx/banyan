@@ -36,7 +36,7 @@ type FutureResult<'a, T> = LocalBoxFuture<'a, Result<T>>;
 /// code base.
 pub trait TreeTypes: Debug {
     /// key type. This also doubles as the type for a combination (union) of keys
-    type Key: Semigroup + Debug + Eq;
+    type Key: Debug + Eq;
     /// compact sequence type to be used for indices
     type Seq: CompactSeq<Item = Self::Key>
         + Serialize

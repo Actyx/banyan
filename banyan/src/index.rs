@@ -49,20 +49,13 @@ use salsa20::{
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{convert::From, sync::Arc};
 
-/// trait for items that can be combined in an associative way
-///
-/// Currently all examples I can think of are also commutative, so it would be an [abelian semigroup](https://mathworld.wolfram.com/AbelianSemigroup.html).
-/// But I am not sure we need to require that as of now.
-pub trait Semigroup {
-    fn combine(&mut self, b: &Self);
-}
 /// a compact representation of a sequence of 1 or more items
 ///
 /// in general, this will have a different internal representation than just a bunch of values that is more compact and
 /// makes it easier to query an entire sequence for matching indices.
 pub trait CompactSeq: Serialize + DeserializeOwned {
     /// item type
-    type Item: Semigroup;
+    type Item;
     /// number of elements
     fn count(&self) -> u64;
     /// get nth element. Guaranteed to succeed with Some for index < count.
@@ -90,35 +83,6 @@ pub trait CompactSeq: Serialize + DeserializeOwned {
     /// number of elements, as an usize, for convenience
     fn len(&self) -> usize {
         self.count() as usize
-    }
-}
-
-/// A trivial implementation of a CompactSeq as just a Seq.
-///
-/// This is useful mostly as a reference impl and for testing.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SimpleCompactSeq<T>(Vec<T>);
-
-impl<T: Serialize + DeserializeOwned + Semigroup + Clone> CompactSeq for SimpleCompactSeq<T> {
-    type Item = T;
-    fn get(&self, index: usize) -> Option<T> {
-        self.0.get(index).cloned()
-    }
-    fn count(&self) -> u64 {
-        self.0.len() as u64
-    }
-    fn summarize(&self) -> T {
-        let mut res = self.0[0].clone();
-        for i in 1..self.0.len() {
-            res.combine(&self.0[i]);
-        }
-        res
-    }
-}
-
-impl<A> FromIterator<A> for SimpleCompactSeq<A> {
-    fn from_iter<T: IntoIterator<Item = A>>(iter: T) -> Self {
-        SimpleCompactSeq(iter.into_iter().collect())
     }
 }
 
@@ -408,7 +372,7 @@ struct IndexRC<T> {
     key_bytes: Option<u64>,
 }
 
-impl<I: Semigroup + Eq + Debug, X: CompactSeq<Item = I> + Clone + Debug + FromIterator<I>>
+impl<I: Eq + Debug, X: CompactSeq<Item = I> + Clone + Debug + FromIterator<I>>
     IndexRC<X>
 {
     fn to_index<T: TreeTypes<Seq = X, Key = I>>(self, cids: &mut VecDeque<T::Link>) -> Index<T> {

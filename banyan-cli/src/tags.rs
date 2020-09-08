@@ -115,7 +115,7 @@ impl Key {
     }
 }
 
-impl Semigroup for Key {
+impl Key {
     fn combine(&mut self, b: &Self) {
         self.min_lamport = self.min_lamport.min(b.min_lamport);
         self.min_time = self.min_time.min(b.min_time);

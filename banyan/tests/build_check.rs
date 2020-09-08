@@ -1,4 +1,4 @@
-use banyan::index::{Semigroup, SimpleCompactSeq};
+use banyan::index::CompactSeq;
 use banyan::{
     forest::{Config, Forest, TreeTypes},
     query::{AllQuery, OffsetRangeQuery},
@@ -7,8 +7,8 @@ use banyan::{
 use futures::prelude::*;
 use ipfs::MemStore;
 use quickcheck::{Arbitrary, Gen, TestResult};
-use serde::{Deserialize, Serialize};
-use std::{io, ops::Range, sync::Arc};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use std::{io, ops::Range, sync::Arc, iter::FromIterator};
 mod ipfs;
 
 #[derive(Debug)]
@@ -16,10 +16,38 @@ struct TT;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct Key(u64);
+/// A trivial implementation of a CompactSeq as just a Seq.
+///
+/// This is useful mostly as a reference impl and for testing.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct KeySeq(Vec<Key>);
+
+impl CompactSeq for KeySeq {
+    type Item = Key;
+    fn get(&self, index: usize) -> Option<Key> {
+        self.0.get(index).cloned()
+    }
+    fn count(&self) -> u64 {
+        self.0.len() as u64
+    }
+    fn summarize(&self) -> Key {
+        let mut res = self.0[0].clone();
+        for i in 1..self.0.len() {
+            res.combine(&self.0[i]);
+        }
+        res
+    }
+}
+
+impl FromIterator<Key> for KeySeq {
+    fn from_iter<T: IntoIterator<Item = Key>>(iter: T) -> Self {
+        KeySeq(iter.into_iter().collect())
+    }
+}
 
 impl TreeTypes for TT {
     type Key = Key;
-    type Seq = SimpleCompactSeq<Key>;
+    type Seq = KeySeq;
     type Link = ipfs::Cid;
 
     fn serialize_branch(
@@ -40,9 +68,9 @@ impl TreeTypes for TT {
     }
 }
 
-impl Semigroup for Key {
+impl Key {
     fn combine(&mut self, rhs: &Key) {
-        self.0 |= rhs.0;
+        self.0 |= rhs.0
     }
 }
 
