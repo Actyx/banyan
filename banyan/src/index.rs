@@ -57,7 +57,7 @@ pub trait CompactSeq: Serialize + DeserializeOwned {
     /// item type
     type Item;
     /// number of elements
-    fn count(&self) -> u64;
+    fn len(&self) -> usize;
     /// get nth element. Guaranteed to succeed with Some for index < count.
     fn get(&self, index: usize) -> Option<Self::Item>;
     /// combines all elements with the semigroup op
@@ -80,9 +80,9 @@ pub trait CompactSeq: Serialize + DeserializeOwned {
             })
             .collect()
     }
-    /// number of elements, as an usize, for convenience
-    fn len(&self) -> usize {
-        self.count() as usize
+    /// number of elements as an u64, for convenience
+    fn count(&self) -> u64 {
+        self.len() as u64
     }
 }
 

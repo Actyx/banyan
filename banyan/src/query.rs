@@ -9,8 +9,8 @@ use crate::{
     index::{BranchIndex, CompactSeq, LeafIndex},
     util::RangeBoundsExt,
 };
-use bitvec::prelude::BitVec;
 use std::{fmt::Debug, ops::RangeBounds, rc::Rc, sync::Arc};
+pub use bitvec::vec::BitVec;
 
 /// A query
 ///

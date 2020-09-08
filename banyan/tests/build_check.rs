@@ -27,8 +27,8 @@ impl CompactSeq for KeySeq {
     fn get(&self, index: usize) -> Option<Key> {
         self.0.get(index).cloned()
     }
-    fn count(&self) -> u64 {
-        self.0.len() as u64
+    fn len(&self) -> usize {
+        self.0.len()
     }
     fn summarize(&self) -> Key {
         let mut res = self.0[0].clone();

@@ -182,8 +182,8 @@ impl CompactSeq for KeySeq {
         }
     }
 
-    fn count(&self) -> u64 {
-        self.tags.len() as u64
+    fn len(&self) -> usize {
+        self.tags.len()
     }
 
     fn summarize(&self) -> Key {

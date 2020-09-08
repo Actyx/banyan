@@ -1,4 +1,11 @@
-# Banyan
+# Banyan &emsp; [![Build Status]][travis] [![Latest Version]][crates.io] [![Docs Badge]][docs.rs]
+
+[Build Status]: https://api.travis-ci.org/actyx/banyan.svg?branch=master
+[travis]: https://travis-ci.org/actyx/banyan
+[Latest Version]: https://img.shields.io/crates/v/banyan.svg
+[crates.io]: https://crates.io/crates/banyan
+[Docs Badge]: https://img.shields.io/badge/docs-docs.rs-green
+[docs.rs]: https://docs.rs/banyan
 
 ![banyan tree](https://ipfs.io/ipfs/QmaEDTjHSdCKyGQ3cFMCf73kE67NvffLA5agquLW5qSEVn/banyan.jpg)
 
