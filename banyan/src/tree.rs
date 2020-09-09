@@ -1,29 +1,18 @@
 //! creation and traversal of banyan trees
 use super::index::*;
-use crate::forest::{Config, CreateMode, FilteredChunk, Forest, TreeTypes};
-use crate::stream::SourceStream;
+use crate::forest::{CreateMode, FilteredChunk, Forest, TreeTypes};
 use crate::{
     query::{AllQuery, OffsetRangeQuery, Query},
-    store::ArcStore,
-    zstd_array::ZstdArrayBuilder,
 };
-use anyhow::{anyhow, Result};
-use bitvec::prelude::*;
-use futures::{prelude::*, stream::LocalBoxStream};
-use rand::RngCore;
-use salsa20::{
-    stream_cipher::{NewStreamCipher, SyncStreamCipher},
-    XSalsa20,
-};
+use anyhow::Result;
+use futures::prelude::*;
 use serde::{de::DeserializeOwned, Serialize};
 use std::fmt::Debug;
 use std::{
     fmt,
-    hash::Hash,
-    io,
     iter::FromIterator,
     marker::PhantomData,
-    sync::{Arc, RwLock},
+    sync::Arc,
 };
 use tracing::*;
 
@@ -373,30 +362,6 @@ impl<
     pub fn root(self) -> Option<T::Link> {
         self.root.and_then(|index| index.link().clone())
     }
-}
-
-/// Utility method to zip a number of indices with an offset that is increased by each index value
-fn zip_with_offset<'a, I: Iterator<Item = Index<T>> + 'a, T: TreeTypes + 'a>(
-    value: I,
-    offset: u64,
-) -> impl Iterator<Item = (Index<T>, u64)> + 'a {
-    value.scan(offset, |offset, x| {
-        let o0 = *offset;
-        *offset += x.count();
-        Some((x, o0))
-    })
-}
-
-/// Utility method to zip a number of indices with an offset that is increased by each index value
-fn zip_with_offset_ref<'a, I: Iterator<Item = &'a Index<T>> + 'a, T: TreeTypes + 'a>(
-    value: I,
-    offset: u64,
-) -> impl Iterator<Item = (&'a Index<T>, u64)> + 'a {
-    value.scan(offset, |offset, x| {
-        let o0 = *offset;
-        *offset += x.count();
-        Some((x, o0))
-    })
 }
 
 fn is_sorted<T: Ord>(iter: impl Iterator<Item = T>) -> bool {

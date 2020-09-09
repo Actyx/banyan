@@ -2,23 +2,21 @@
 use super::index::*;
 use crate::stream::SourceStream;
 use crate::{
-    query::{AllQuery, OffsetRangeQuery, Query},
+    query::Query,
     store::ArcStore,
     zstd_array::ZstdArrayBuilder,
 };
 use anyhow::{anyhow, Result};
 use bitvec::prelude::*;
-use future::BoxFuture;
-use futures::{prelude::*, stream::LocalBoxStream};
+use futures::{prelude::*, stream::LocalBoxStream, future::BoxFuture};
 use rand::RngCore;
 use salsa20::{
     stream_cipher::{NewStreamCipher, SyncStreamCipher},
     XSalsa20,
 };
 use serde::{de::DeserializeOwned, Serialize};
-use std::fmt::Debug;
 use std::{
-    fmt,
+    fmt::Debug,
     hash::Hash,
     io,
     iter::FromIterator,
@@ -64,7 +62,6 @@ pub struct Forest<T: TreeTypes> {
     store: ArcStore<T::Link>,
     config: Config,
     branch_cache: Arc<RwLock<lru::LruCache<T::Link, Branch<T>>>>,
-    leaf_cache: Arc<RwLock<lru::LruCache<T::Link, Leaf>>>,
     _tt: PhantomData<T>,
 }
 /// Configuration for a forest. Includes settings for when a node is considered full
@@ -127,11 +124,11 @@ impl Config {
 }
 
 /// Utility method to zip a number of indices with an offset that is increased by each index value
-fn zip_with_offset<'a, I: Iterator<Item = Index<T>> + 'a, T: TreeTypes + 'a>(
+fn zip_with_offset<'a, I: IntoIterator<Item = Index<T>> + 'a, T: TreeTypes + 'a>(
     value: I,
     offset: u64,
 ) -> impl Iterator<Item = (Index<T>, u64)> + 'a {
-    value.scan(offset, |offset, x| {
+    value.into_iter().scan(offset, |offset, x| {
         let o0 = *offset;
         *offset += x.count();
         Some((x, o0))
@@ -139,11 +136,11 @@ fn zip_with_offset<'a, I: Iterator<Item = Index<T>> + 'a, T: TreeTypes + 'a>(
 }
 
 /// Utility method to zip a number of indices with an offset that is increased by each index value
-fn zip_with_offset_ref<'a, I: Iterator<Item = &'a Index<T>> + 'a, T: TreeTypes + 'a>(
+fn zip_with_offset_ref<'a, I: IntoIterator<Item = &'a Index<T>> + 'a, T: TreeTypes + 'a>(
     value: I,
     offset: u64,
 ) -> impl Iterator<Item = (&'a Index<T>, u64)> + 'a {
-    value.scan(offset, |offset, x| {
+    value.into_iter().scan(offset, |offset, x| {
         let o0 = *offset;
         *offset += x.count();
         Some((x, o0))
@@ -249,7 +246,7 @@ where
             index.value_bytes,
             index.sealed
         );
-        Ok(self.cache_leaf(index, leaf))
+        Ok(index)
     }
 
     /// given some children and some additional elements, creates a node with the given
@@ -424,7 +421,7 @@ where
             }
             NodeInfo::Branch(index, branch) => {
                 info!("extending existing branch");
-                let mut children = branch.children;
+                let mut children = branch.children.to_vec();
                 if let Some(last_child) = children.last_mut() {
                     *last_child = self
                         .extend_above(Some(last_child), index.level - 1, from)
@@ -598,14 +595,6 @@ where
         })
     }
 
-    /// store a leaf in the cache, and return it wrapped into a generic index
-    fn cache_leaf(&self, index: LeafIndex<T>, node: Leaf) -> LeafIndex<T> {
-        if let Some(cid) = &index.link {
-            self.leaf_cache().write().unwrap().put(cid.clone(), node);
-        }
-        index
-    }
-
     pub(crate) async fn get<V: DeserializeOwned>(
         &self,
         index: &Index<T>,
@@ -657,7 +646,7 @@ where
                 }
                 NodeInfo::Branch(_, node) => {
                     info!("streaming branch {} {}", index.level(), node.children.len());
-                    stream::iter(node.children)
+                    stream::iter(node.children.to_vec())
                         .map(move |child| self.stream(child))
                         .flatten()
                         .right_stream()
@@ -696,7 +685,7 @@ where
                     // todo: don't get the node here, since we might not need it
                     let mut matching = BitVec::repeat(true, index.summaries.len());
                     query.intersecting(offset, index, &mut matching);
-                    let offsets = zip_with_offset(node.children.into_iter(), offset);
+                    let offsets = zip_with_offset(node.children.to_vec(), offset);
                     let children = matching.into_iter().zip(offsets).filter_map(|(m, c)| {
                         // use bool::then_some in case it gets stabilized
                         if m {
@@ -744,7 +733,7 @@ where
                     // todo: don't get the node here, since we might not need it
                     let mut matching = BitVec::repeat(true, index.summaries.len());
                     query.intersecting(offset, index, &mut matching);
-                    let offsets = zip_with_offset(node.children.into_iter(), offset);
+                    let offsets = zip_with_offset(node.children.to_vec(), offset);
                     let children = matching.into_iter().zip(offsets).filter_map(|(m, c)| {
                         // use bool::then_some in case it gets stabilized
                         if m {
@@ -802,7 +791,7 @@ where
                     // todo: don't get the node here, since we might not need it
                     let mut matching = BitVec::repeat(true, index.summaries.len());
                     query.intersecting(offset, index, &mut matching);
-                    let offsets = zip_with_offset(node.children.into_iter(), offset);
+                    let offsets = zip_with_offset(node.children.to_vec(), offset);
                     let iter = matching.into_iter().zip(offsets).map(
                         move |(is_matching, (child, offset))| {
                             if is_matching {
@@ -863,7 +852,7 @@ where
                         // todo: don't get the node here, since we might not need it
                         let mut matching = BitVec::repeat(true, index.summaries.len());
                         query.intersecting(offset, index, &mut matching);
-                        let offsets = zip_with_offset(node.children.into_iter(), offset);
+                        let offsets = zip_with_offset(node.children.to_vec(), offset);
                         let children: Vec<_> = matching.into_iter().zip(offsets).collect();
                         let iter = children.into_iter().rev().map(
                             move |(is_matching, (child, offset))| {
@@ -933,7 +922,7 @@ where
                 }
                 // this will only be executed unless we are already purged
                 if let Some(node) = self.load_branch(&index).await? {
-                    let mut children = node.children.clone();
+                    let mut children = node.children.to_vec();
                     let mut changed = false;
                     let offsets = zip_with_offset_ref(node.children.iter(), offset);
                     for (i, (child, offset)) in offsets.enumerate() {
@@ -996,7 +985,7 @@ where
                 let branch = self.load_branch(&index).await;
                 match branch {
                     Ok(Some(node)) => {
-                        let mut children = node.children.clone();
+                        let mut children = node.children.to_vec();
                         let mut changed = false;
                         for (i, child) in node.children.iter().enumerate() {
                             let child1 = self.repairr(child, report, level).await?;
@@ -1165,7 +1154,7 @@ where
             }
             NodeInfo::Branch(index, branch) => {
                 check!(branch.count() == index.summaries.count());
-                for child in &branch.children {
+                for child in &branch.children.to_vec() {
                     if index.sealed {
                         check!(child.level() == index.level - 1);
                     } else {
@@ -1178,7 +1167,7 @@ where
                 }
                 let branch_sealed = self.branch_sealed(&branch.children, index.level);
                 check!(index.sealed == branch_sealed);
-                for child in &branch.children {
+                for child in &branch.children.to_vec() {
                     self.check_invariantsr(child, level, msgs).await?;
                 }
             }
@@ -1236,10 +1225,6 @@ where
         self.is_packed(index).boxed()
     }
 
-    fn leaf_cache(&self) -> &Arc<RwLock<lru::LruCache<T::Link, Leaf>>> {
-        &self.leaf_cache
-    }
-
     fn branch_cache(&self) -> &Arc<RwLock<lru::LruCache<T::Link, Branch<T>>>> {
         &self.branch_cache
     }
@@ -1247,12 +1232,10 @@ where
     /// creates a new forest
     pub fn new(store: ArcStore<T::Link>, config: Config) -> Self {
         let branch_cache = Arc::new(RwLock::new(lru::LruCache::<T::Link, Branch<T>>::new(1000)));
-        let leaf_cache = Arc::new(RwLock::new(lru::LruCache::<T::Link, Leaf>::new(1000)));
         Self {
             store,
             config,
             branch_cache,
-            leaf_cache,
             _tt: PhantomData,
         }
     }

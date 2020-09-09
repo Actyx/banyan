@@ -7,7 +7,7 @@ use banyan::{
 use futures::prelude::*;
 use ipfs::MemStore;
 use quickcheck::{Arbitrary, Gen, TestResult};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 use std::{io, iter::FromIterator, ops::Range, sync::Arc};
 mod ipfs;
 
