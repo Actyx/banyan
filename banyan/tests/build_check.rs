@@ -7,8 +7,8 @@ use banyan::{
 use futures::prelude::*;
 use ipfs::MemStore;
 use quickcheck::{Arbitrary, Gen, TestResult};
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use std::{io, ops::Range, sync::Arc, iter::FromIterator};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use std::{io, iter::FromIterator, ops::Range, sync::Arc};
 mod ipfs;
 
 #[derive(Debug)]
@@ -80,9 +80,11 @@ impl Arbitrary for Key {
     }
 }
 
-async fn create_test_tree(
-    xs: impl IntoIterator<Item = (Key, u64)>,
-) -> anyhow::Result<Tree<TT, u64>> {
+async fn create_test_tree<I>(xs: I) -> anyhow::Result<Tree<TT, u64>>
+where
+    I: IntoIterator<Item = (Key, u64)>,
+    I::IntoIter: Send,
+{
     let store = Arc::new(MemStore::new());
     let forest = Arc::new(Forest::<TT>::new(store, Config::debug()));
     let mut tree = Tree::<TT, u64>::empty(forest);

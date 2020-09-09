@@ -9,7 +9,6 @@ use crate::{
 };
 use anyhow::{anyhow, Result};
 use bitvec::prelude::*;
-use future::LocalBoxFuture;
 use futures::{prelude::*, stream::LocalBoxStream};
 use rand::RngCore;
 use salsa20::{
@@ -27,8 +26,6 @@ use std::{
     sync::{Arc, RwLock},
 };
 use tracing::*;
-
-type FutureResult<'a, T> = LocalBoxFuture<'a, Result<T>>;
 
 /// A tree. This is mostly an user friendly handle.
 ///
@@ -206,7 +203,11 @@ impl<
     /// extend the node with the given iterator of key/value pairs
     ///    
     /// ![extend illustration](https://ipfs.io/ipfs/QmaEDTjHSdCKyGQ3cFMCf73kE67NvffLA5agquLW5qSEVn/extend.jpg)
-    pub async fn extend(&mut self, from: impl IntoIterator<Item = (T::Key, V)>) -> Result<()> {
+    pub async fn extend<I>(&mut self, from: I) -> Result<()>
+    where
+        I: IntoIterator<Item = (T::Key, V)>,
+        I::IntoIter: Send,
+    {
         let mut from = from.into_iter().peekable();
         if from.peek().is_none() {
             // nothing to do
@@ -229,10 +230,11 @@ impl<
     /// To pack a tree, use the pack method.
     ///    
     /// ![extend_unpacked illustration](https://ipfs.io/ipfs/QmaEDTjHSdCKyGQ3cFMCf73kE67NvffLA5agquLW5qSEVn/extend_unpacked.jpg)
-    pub async fn extend_unpacked(
-        &mut self,
-        from: impl IntoIterator<Item = (T::Key, V)>,
-    ) -> Result<()> {
+    pub async fn extend_unpacked<I>(&mut self, from: I) -> Result<()>
+    where
+        I: IntoIterator<Item = (T::Key, V)>,
+        I::IntoIter: Send,
+    {
         let mut from = from.into_iter();
         let mut tree = Tree::empty(self.forest.clone());
         tree.extend(from.by_ref()).await?;
@@ -332,7 +334,7 @@ impl<
     ///
     /// note that offsets will not be affected by this. Also, unsealed nodes will not be forgotten
     /// even if they do not match the query.
-    pub async fn retain<'a, Q: Query<T>>(&'a mut self, query: &'a Q) -> Result<()> {
+    pub async fn retain<'a, Q: Query<T> + Send + Sync>(&'a mut self, query: &'a Q) -> Result<()> {
         if let Some(index) = &self.root {
             let mut level: i32 = i32::max_value();
             let res = self.forest.retain(0, query, index, &mut level).await?;

@@ -22,7 +22,7 @@ impl<TT: TreeTypes + 'static, Q: Query<TT> + Clone + 'static> SourceStream<TT, Q
             .flat_map(move |tree: Tree<TT, V>| {
                 // create an intersection of a range query and the main query
                 // and wrap it in an rc so it is cheap to clone
-                let query: Rc<dyn Query<TT>> = Rc::new(AndQuery(
+                let query: Arc<dyn Query<TT>> = Arc::new(AndQuery(
                     OffsetRangeQuery::from(offset.get()..),
                     query.clone(),
                 ));
@@ -54,7 +54,7 @@ impl<TT: TreeTypes + 'static, Q: Query<TT> + Clone + 'static> SourceStream<TT, Q
             .flat_map(move |tree: Tree<TT, V>| {
                 // create an intersection of a range query and the main query
                 // and wrap it in an rc so it is cheap to clone
-                let query: Rc<dyn Query<TT>> = Rc::new(AndQuery(
+                let query: Arc<dyn Query<TT>> = Arc::new(AndQuery(
                     OffsetRangeQuery::from(offset.get()..),
                     query.clone(),
                 ));

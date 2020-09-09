@@ -220,13 +220,21 @@ impl<T: TreeTypes> Index<T> {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 /// fully in memory representation of a branch node
 ///
 /// This is a wrapper around a non-empty sequence of child indices.
 pub struct Branch<T: TreeTypes> {
     // index data for the children
     pub children: Vec<Index<T>>,
+}
+
+impl<T: TreeTypes> Clone for Branch<T> {
+    fn clone(&self) -> Self {
+        Self {
+            children: self.children.clone(),
+        }
+    }
 }
 
 impl<T: TreeTypes> Branch<T> {
@@ -372,8 +380,10 @@ struct IndexRC<T> {
     key_bytes: Option<u64>,
 }
 
-impl<I: Eq + Debug, X: CompactSeq<Item = I> + Clone + Debug + FromIterator<I>>
-    IndexRC<X>
+impl<
+        I: Eq + Debug + Send,
+        X: CompactSeq<Item = I> + Clone + Debug + FromIterator<I> + Send + Sync,
+    > IndexRC<X>
 {
     fn to_index<T: TreeTypes<Seq = X, Key = I>>(self, cids: &mut VecDeque<T::Link>) -> Index<T> {
         let cid = if !self.purged { cids.pop_front() } else { None };

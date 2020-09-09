@@ -8,7 +8,7 @@ use crate::{
 };
 use anyhow::{anyhow, Result};
 use bitvec::prelude::*;
-use future::LocalBoxFuture;
+use future::BoxFuture;
 use futures::{prelude::*, stream::LocalBoxStream};
 use rand::RngCore;
 use salsa20::{
@@ -27,25 +27,27 @@ use std::{
 };
 use tracing::*;
 
-type FutureResult<'a, T> = LocalBoxFuture<'a, Result<T>>;
+type FutureResult<'a, T> = BoxFuture<'a, Result<T>>;
 
 /// Trees can be parametrized with the key type and the sequence type. Also, to avoid a dependency
 /// on a link type with all its baggage, we parameterize the link type.
 ///
 /// There might be more types in the future, so this essentially acts as a module for the entire
 /// code base.
-pub trait TreeTypes: Debug {
+pub trait TreeTypes: Debug + Send + Sync {
     /// key type. This also doubles as the type for a combination (union) of keys
-    type Key: Debug + Eq;
+    type Key: Debug + Eq + Send;
     /// compact sequence type to be used for indices
     type Seq: CompactSeq<Item = Self::Key>
         + Serialize
         + DeserializeOwned
         + Clone
         + Debug
-        + FromIterator<Self::Key>;
+        + FromIterator<Self::Key>
+        + Send
+        + Sync;
     /// link type to use over block boundaries
-    type Link: ToString + Hash + Eq + Clone + Debug;
+    type Link: ToString + Hash + Eq + Clone + Debug + Send + Sync;
 
     fn serialize_branch(
         links: &[&Self::Link],
@@ -61,8 +63,8 @@ pub trait TreeTypes: Debug {
 pub struct Forest<T: TreeTypes> {
     store: ArcStore<T::Link>,
     config: Config,
-    branch_cache: RwLock<lru::LruCache<T::Link, Branch<T>>>,
-    leaf_cache: RwLock<lru::LruCache<T::Link, Leaf>>,
+    branch_cache: Arc<RwLock<lru::LruCache<T::Link, Branch<T>>>>,
+    leaf_cache: Arc<RwLock<lru::LruCache<T::Link, Leaf>>>,
     _tt: PhantomData<T>,
 }
 /// Configuration for a forest. Includes settings for when a node is considered full
@@ -252,11 +254,11 @@ where
 
     /// given some children and some additional elements, creates a node with the given
     /// children and new children from `from` until it is full
-    pub(crate) async fn extend_branch<V: Serialize + Debug>(
+    pub(crate) async fn extend_branch<V: Serialize + Debug + Send>(
         &self,
         mut children: Vec<Index<T>>,
         level: u32,
-        from: &mut std::iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
+        from: &mut std::iter::Peekable<impl Iterator<Item = (T::Key, V)> + Send>,
         mode: CreateMode,
     ) -> Result<BranchIndex<T>> {
         assert!(
@@ -309,10 +311,10 @@ where
     /// Given an iterator of values and a level, consume from the iterator until either
     /// the iterator is consumed or the node is "filled". At the end of this call, the
     /// iterator will contain the remaining elements that did not "fit".
-    async fn fill_node<V: Serialize + Debug>(
+    async fn fill_node<V: Serialize + Debug + Send>(
         &self,
         level: u32,
-        from: &mut std::iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
+        from: &mut std::iter::Peekable<impl Iterator<Item = (T::Key, V)> + Send>,
     ) -> Result<Index<T>> {
         assert!(from.peek().is_some());
         Ok(if level == 0 {
@@ -325,12 +327,12 @@ where
     }
 
     /// recursion helper for fill_node
-    fn fill_noder<'a, V: Serialize + Debug + 'a>(
+    fn fill_noder<'a, V: Serialize + Debug + Send + 'a>(
         &'a self,
         level: u32,
-        from: &'a mut std::iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
+        from: &'a mut std::iter::Peekable<impl Iterator<Item = (T::Key, V)> + Send>,
     ) -> FutureResult<'a, Index<T>> {
-        self.fill_node(level, from).boxed_local()
+        self.fill_node(level, from).boxed()
     }
 
     /// creates a new branch from the given children and returns the branch index as a result.
@@ -366,11 +368,11 @@ where
     /// extends an existing node with some values
     ///
     /// The result will have the max level `level`. `from` will contain all elements that did not fit.
-    pub(crate) async fn extend_above<V: Serialize + Debug>(
+    pub(crate) async fn extend_above<V: Serialize + Debug + Send>(
         &self,
         node: Option<&Index<T>>,
         level: u32,
-        from: &mut std::iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
+        from: &mut std::iter::Peekable<impl Iterator<Item = (T::Key, V)> + Send>,
     ) -> Result<Index<T>> {
         assert!(from.peek().is_some());
         assert!(node.map(|node| level >= node.level()).unwrap_or(true));
@@ -398,10 +400,10 @@ where
     /// extends an existing node with some values
     ///
     /// The result will have the same level as the input. `from` will contain all elements that did not fit.        
-    async fn extend<V: Serialize + Debug>(
+    async fn extend<V: Serialize + Debug + Send>(
         &self,
         index: &Index<T>,
-        from: &mut std::iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
+        from: &mut std::iter::Peekable<impl Iterator<Item = (T::Key, V)> + Send>,
     ) -> Result<Index<T>> {
         info!(
             "extend {} {} {} {}",
@@ -440,12 +442,12 @@ where
     }
 
     /// recursion helper for extend
-    fn extendr<'a, V: Serialize + Debug + 'a>(
+    fn extendr<'a, V: Serialize + Debug + Send + 'a>(
         &'a self,
         node: &'a Index<T>,
-        from: &'a mut std::iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
+        from: &'a mut std::iter::Peekable<impl Iterator<Item = (T::Key, V)> + Send>,
     ) -> FutureResult<'a, Index<T>> {
-        self.extend(node, from).boxed_local()
+        self.extend(node, from).boxed()
     }
 
     /// Find a valid branch in an array of children.
@@ -499,7 +501,7 @@ where
         roots: &'a mut Vec<Index<T>>,
         from: usize,
     ) -> FutureResult<'a, ()> {
-        self.simplify_roots(roots, from).boxed_local()
+        self.simplify_roots(roots, from).boxed()
     }
 
     /// predicate to determine if a leaf is sealed, based on the config
@@ -559,7 +561,8 @@ where
     /// load a branch given a branch index, from the cache
     async fn load_branch_cached(&self, index: &BranchIndex<T>) -> Result<Option<Branch<T>>> {
         if let Some(cid) = &index.link {
-            match self.branch_cache().write().unwrap().pop(cid) {
+            let res = self.branch_cache().write().unwrap().get(cid).cloned();
+            match res {
                 Some(branch) => Ok(Some(branch)),
                 None => self.load_branch(index).await,
             }
@@ -635,7 +638,7 @@ where
         node: &'a Index<T>,
         offset: u64,
     ) -> FutureResult<'a, Option<(T::Key, V)>> {
-        self.get(node, offset).boxed_local()
+        self.get(node, offset).boxed()
     }
 
     pub(crate) fn stream<'a, V: DeserializeOwned + Debug>(
@@ -905,7 +908,7 @@ where
         Ok((self.store.put(&cbor, false).await?, cbor.len() as u64))
     }
 
-    pub(crate) async fn retain<Q: Query<T>>(
+    pub(crate) async fn retain<Q: Query<T> + Send + Sync>(
         &self,
         offset: u64,
         query: &Q,
@@ -967,14 +970,14 @@ where
 
     // all these stubs could be replaced with https://docs.rs/async-recursion/
     /// recursion helper for retain
-    fn retainr<'a, Q: Query<T>>(
+    fn retainr<'a, Q: Query<T> + Send + Sync>(
         &'a self,
         offset: u64,
         query: &'a Q,
         index: &'a Index<T>,
         level: &'a mut i32,
     ) -> FutureResult<'a, Index<T>> {
-        self.retain(offset, query, index, level).boxed_local()
+        self.retain(offset, query, index, level).boxed()
     }
 
     pub(crate) async fn repair(
@@ -1049,7 +1052,7 @@ where
         report: &'a mut Vec<String>,
         level: &'a mut i32,
     ) -> FutureResult<'a, Index<T>> {
-        self.repair(index, report, level).boxed_local()
+        self.repair(index, report, level).boxed()
     }
 
     pub(crate) async fn dump(&self, index: &Index<T>, prefix: &str) -> Result<()> {
@@ -1094,7 +1097,7 @@ where
 
     /// recursion helper for dump
     fn dumpr<'a>(&'a self, index: &'a Index<T>, prefix: &'a str) -> FutureResult<'a, ()> {
-        self.dump(index, prefix).boxed_local()
+        self.dump(index, prefix).boxed()
     }
 
     pub(crate) async fn roots(&self, index: &Index<T>) -> Result<Vec<Index<T>>> {
@@ -1133,7 +1136,7 @@ where
         level: &'a mut i32,
         res: &'a mut Vec<Index<T>>,
     ) -> FutureResult<'a, ()> {
-        self.roots0(index, level, res).boxed_local()
+        self.roots0(index, level, res).boxed()
     }
 
     pub(crate) async fn check_invariants(
@@ -1196,7 +1199,7 @@ where
         level: &'a mut i32,
         msgs: &'a mut Vec<String>,
     ) -> FutureResult<'a, ()> {
-        self.check_invariants(index, level, msgs).boxed_local()
+        self.check_invariants(index, level, msgs).boxed()
     }
 
     /// Checks if a node is packed to the left
@@ -1230,21 +1233,21 @@ where
 
     /// Recursion helper for is_packed
     fn is_packedr<'a>(&'a self, index: &'a Index<T>) -> FutureResult<'a, bool> {
-        self.is_packed(index).boxed_local()
+        self.is_packed(index).boxed()
     }
 
-    fn leaf_cache(&self) -> &RwLock<lru::LruCache<T::Link, Leaf>> {
+    fn leaf_cache(&self) -> &Arc<RwLock<lru::LruCache<T::Link, Leaf>>> {
         &self.leaf_cache
     }
 
-    fn branch_cache(&self) -> &RwLock<lru::LruCache<T::Link, Branch<T>>> {
+    fn branch_cache(&self) -> &Arc<RwLock<lru::LruCache<T::Link, Branch<T>>>> {
         &self.branch_cache
     }
 
     /// creates a new forest
     pub fn new(store: ArcStore<T::Link>, config: Config) -> Self {
-        let branch_cache = RwLock::new(lru::LruCache::<T::Link, Branch<T>>::new(1000));
-        let leaf_cache = RwLock::new(lru::LruCache::<T::Link, Leaf>::new(1000));
+        let branch_cache = Arc::new(RwLock::new(lru::LruCache::<T::Link, Branch<T>>::new(1000)));
+        let leaf_cache = Arc::new(RwLock::new(lru::LruCache::<T::Link, Leaf>::new(1000)));
         Self {
             store,
             config,
