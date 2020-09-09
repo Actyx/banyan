@@ -9,8 +9,8 @@ use crate::{
     index::{BranchIndex, CompactSeq, LeafIndex},
     util::RangeBoundsExt,
 };
-use std::{fmt::Debug, ops::RangeBounds, rc::Rc, sync::Arc};
 pub use bitvec::vec::BitVec;
+use std::{fmt::Debug, ops::RangeBounds, sync::Arc};
 
 /// A query
 ///
@@ -23,16 +23,6 @@ pub trait Query<T: TreeTypes>: Debug {
 }
 
 impl<T: TreeTypes> Query<T> for Box<dyn Query<T>> {
-    fn containing(&self, offset: u64, x: &LeafIndex<T>, res: &mut BitVec) {
-        self.as_ref().containing(offset, x, res);
-    }
-
-    fn intersecting(&self, offset: u64, x: &BranchIndex<T>, res: &mut BitVec) {
-        self.as_ref().intersecting(offset, x, res);
-    }
-}
-
-impl<T: TreeTypes> Query<T> for Rc<dyn Query<T>> {
     fn containing(&self, offset: u64, x: &LeafIndex<T>, res: &mut BitVec) {
         self.as_ref().containing(offset, x, res);
     }
@@ -62,7 +52,7 @@ impl<R: RangeBounds<u64>> From<R> for OffsetRangeQuery<R> {
     }
 }
 
-impl<T: TreeTypes, R: RangeBounds<u64> + Debug> Query<T> for OffsetRangeQuery<R> {
+impl<T: TreeTypes, R: RangeBounds<u64> + Debug + Sync + Send> Query<T> for OffsetRangeQuery<R> {
     fn containing(&self, mut offset: u64, index: &LeafIndex<T>, res: &mut BitVec) {
         let range = offset..offset + index.keys.count();
         // shortcut test
