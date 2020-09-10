@@ -1,14 +1,10 @@
 //! creation and traversal of banyan trees
 use super::index::*;
 use crate::stream::SourceStream;
-use crate::{
-    query::Query,
-    store::ArcStore,
-    zstd_array::ZstdArrayBuilder,
-};
+use crate::{query::Query, store::ArcStore, zstd_array::ZstdArrayBuilder};
 use anyhow::{anyhow, Result};
 use bitvec::prelude::*;
-use futures::{prelude::*, stream::LocalBoxStream, future::BoxFuture};
+use futures::{future::BoxFuture, prelude::*, stream::LocalBoxStream};
 use rand::RngCore;
 use salsa20::{
     stream_cipher::{NewStreamCipher, SyncStreamCipher},
@@ -182,7 +178,7 @@ where
             }
             let (nonce, data) = data.split_at(24);
             let mut data = data.to_vec();
-            XSalsa20::new(&self.value_key().into(), nonce.into()).apply_keystream(&mut data);
+            XSalsa20::new(&self.value_key(), nonce.into()).apply_keystream(&mut data);
             // cipher.apply_keystream(data)
             Some(Leaf::new(data.into()))
         } else {
@@ -231,7 +227,7 @@ where
         let nonce = self.random_nonce();
         tmp.extend(nonce.as_slice());
         tmp.extend(leaf.as_ref().compressed());
-        XSalsa20::new(&self.value_key().into(), &nonce.into()).apply_keystream(&mut tmp[24..]);
+        XSalsa20::new(&self.value_key(), &nonce).apply_keystream(&mut tmp[24..]);
         // store leaf
         let cid = self.store.put(&tmp, true).await?;
         let index: LeafIndex<T> = LeafIndex {
@@ -259,7 +255,7 @@ where
         mode: CreateMode,
     ) -> Result<BranchIndex<T>> {
         assert!(
-            children.iter().all(|child| child.level() <= level - 1),
+            children.iter().all(|child| child.level() < level),
             "All children must be below the level of the branch to be created."
         );
         if mode == CreateMode::Packed {
@@ -576,6 +572,7 @@ where
     }
 
     /// load a node, returning a structure containing the index and value for convenient matching
+    #[allow(clippy::needless_lifetimes)]
     async fn load_node<'a>(&self, index: &'a Index<T>) -> Result<NodeInfo<'a, T>> {
         Ok(match index {
             Index::Branch(index) => {
@@ -807,8 +804,7 @@ where
                             }
                         },
                     );
-                    let stream = stream::iter(iter).flatten().right_stream().left_stream();
-                    stream
+                    stream::iter(iter).flatten().right_stream().left_stream()
                 }
                 NodeInfo::PurgedBranch(_) | NodeInfo::PurgedLeaf(_) => {
                     stream::empty().right_stream()
@@ -873,8 +869,7 @@ where
                                 }
                             },
                         );
-                        let stream = stream::iter(iter).flatten().right_stream().left_stream();
-                        stream
+                        stream::iter(iter).flatten().right_stream().left_stream()
                     }
                     NodeInfo::PurgedBranch(_) | NodeInfo::PurgedLeaf(_) => {
                         stream::empty().right_stream()
@@ -1004,12 +999,12 @@ where
                         // already purged, nothing to do
                     }
                     Err(cause) => {
-                        let cid_txt = index.link.map(|x| x.to_string()).unwrap_or("".into());
+                        let cid_txt = index.link.map(|x| x.to_string()).unwrap_or_default();
                         report.push(format!("forgetting branch {} due to {}", cid_txt, cause));
                         if !index.sealed {
-                            report.push(format!("warning: forgetting unsealed branch!"));
+                            report.push("warning: forgetting unsealed branch!".into());
                         } else if index.level as i32 > *level {
-                            report.push(format!("warning: forgetting branch in unpacked part!"));
+                            report.push("warning: forgetting branch in unpacked part!".into());
                         }
                         index.link = None;
                     }
@@ -1020,12 +1015,12 @@ where
                 let mut index = index.clone();
                 // important not to hit the cache here!
                 if let Err(cause) = self.load_leaf(&index).await {
-                    let cid_txt = index.link.map(|x| x.to_string()).unwrap_or("".into());
+                    let cid_txt = index.link.map(|x| x.to_string()).unwrap_or_default();
                     report.push(format!("forgetting leaf {} due to {}", cid_txt, cause));
                     if !index.sealed {
-                        report.push(format!("warning: forgetting unsealed leaf!"));
+                        report.push("warning: forgetting unsealed leaf!".into());
                     } else if *level < 0 {
-                        report.push(format!("warning: forgetting leaf in unpacked part!"));
+                        report.push("warning: forgetting leaf in unpacked part!".into());
                     }
                     index.link = None;
                 }
@@ -1198,21 +1193,19 @@ where
                 if index.sealed {
                     // sealed nodes, for themselves, are packed
                     true
+                } else if let Some((last, rest)) = branch.children.split_last() {
+                    // for the first n-1 children, they must all be sealed and at exactly 1 level below
+                    let first_ok = rest
+                        .iter()
+                        .all(|child| child.sealed() && child.level() == index.level - 1);
+                    // for the last child, it can be at any level below, and does not have to be sealed,
+                    let last_ok = last.level() < index.level;
+                    // but it must itself be packed
+                    let rec_ok = self.is_packedr(last).await?;
+                    first_ok && last_ok && rec_ok
                 } else {
-                    if let Some((last, rest)) = branch.children.split_last() {
-                        // for the first n-1 children, they must all be sealed and at exactly 1 level below
-                        let first_ok = rest
-                            .iter()
-                            .all(|child| child.sealed() && child.level() == index.level - 1);
-                        // for the last child, it can be at any level below, and does not have to be sealed,
-                        let last_ok = last.level() <= index.level - 1;
-                        // but it must itself be packed
-                        let rec_ok = self.is_packedr(last).await?;
-                        first_ok && last_ok && rec_ok
-                    } else {
-                        // this should not happen, but a branch with no children can be considered packed
-                        true
-                    }
+                    // this should not happen, but a branch with no children can be considered packed
+                    true
                 }
             } else {
                 true
@@ -1253,16 +1246,6 @@ where
 
 fn is_sorted<T: Ord>(iter: impl Iterator<Item = T>) -> bool {
     iter.collect::<Vec<_>>().windows(2).all(|x| x[0] <= x[1])
-}
-
-fn show_levels<T: TreeTypes>(children: &[Index<T>]) -> String {
-    format!(
-        "{:?}",
-        children
-            .iter()
-            .map(|x| (x.level(), x.sealed()))
-            .collect::<Vec<_>>()
-    )
 }
 
 /// Helper enum for finding a valid branch in a sequence of nodes

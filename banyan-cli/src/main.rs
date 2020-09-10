@@ -273,7 +273,7 @@ async fn bench_build(
     };
     let mut offset: u64 = 0;
     let data = (0..batches)
-        .map(|b| {
+        .map(|_b| {
             let v = (0..count)
                 .map(|_| {
                     let result = (
@@ -487,7 +487,7 @@ async fn main() -> Result<()> {
         config.index_key = index_key;
         config.value_key = value_key;
         let forest = Arc::new(Forest::<TT>::new(store, config));
-        let t0 = std::time::Instant::now();
+        let _t0 = std::time::Instant::now();
         let base = None;
         let batches = 1;
         let count: u64 = matches
@@ -497,7 +497,7 @@ async fn main() -> Result<()> {
         let unbalanced = false;
         let (tree, tcreate) = bench_build(forest.clone(), base, batches, count, unbalanced).await?;
         let t0 = std::time::Instant::now();
-        let values: Vec<_> = tree.collect().await?;
+        let _values: Vec<_> = tree.collect().await?;
         let t1 = std::time::Instant::now();
         let tcollect = t1 - t0;
         let t0 = std::time::Instant::now();

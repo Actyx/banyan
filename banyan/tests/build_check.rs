@@ -366,9 +366,7 @@ async fn build_converges(data: Vec<u32>) -> bool {
     v.sort();
     v.reverse();
     while v.len() > 1 {
-        println!("{:?}", v);
         build(&mut v);
     }
-    println!("{:?}", v);
     true
 }

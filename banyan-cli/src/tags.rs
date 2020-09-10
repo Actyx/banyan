@@ -44,9 +44,6 @@ impl Tag {
 pub struct Tags(pub BTreeSet<Tag>);
 
 impl Tags {
-    fn empty() -> Self {
-        Self(BTreeSet::new())
-    }
     pub fn single(text: &str) -> Self {
         Self(btreeset! { Tag(text.into()) })
     }

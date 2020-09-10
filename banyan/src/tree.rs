@@ -1,19 +1,12 @@
 //! creation and traversal of banyan trees
 use super::index::*;
 use crate::forest::{CreateMode, FilteredChunk, Forest, TreeTypes};
-use crate::{
-    query::{AllQuery, OffsetRangeQuery, Query},
-};
+use crate::query::{AllQuery, OffsetRangeQuery, Query};
 use anyhow::Result;
 use futures::prelude::*;
 use serde::{de::DeserializeOwned, Serialize};
 use std::fmt::Debug;
-use std::{
-    fmt,
-    iter::FromIterator,
-    marker::PhantomData,
-    sync::Arc,
-};
+use std::{fmt, iter::FromIterator, marker::PhantomData, sync::Arc};
 use tracing::*;
 
 /// A tree. This is mostly an user friendly handle.
@@ -366,14 +359,4 @@ impl<
 
 fn is_sorted<T: Ord>(iter: impl Iterator<Item = T>) -> bool {
     iter.collect::<Vec<_>>().windows(2).all(|x| x[0] <= x[1])
-}
-
-fn show_levels<T: TreeTypes>(children: &[Index<T>]) -> String {
-    format!(
-        "{:?}",
-        children
-            .iter()
-            .map(|x| (x.level(), x.sealed()))
-            .collect::<Vec<_>>()
-    )
 }

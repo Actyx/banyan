@@ -84,6 +84,9 @@ pub trait CompactSeq: Serialize + DeserializeOwned {
     fn count(&self) -> u64 {
         self.len() as u64
     }
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 }
 
 /// index for a leaf node, containing keys and some statistics data for its children
@@ -240,7 +243,9 @@ impl<T: TreeTypes> Clone for Branch<T> {
 impl<T: TreeTypes> Branch<T> {
     pub fn new(children: Vec<Index<T>>) -> Self {
         assert!(!children.is_empty());
-        Self { children: Arc::new(children) }
+        Self {
+            children: Arc::new(children),
+        }
     }
     pub fn last_child(&mut self) -> &Index<T> {
         self.children
@@ -293,14 +298,16 @@ impl Leaf {
         Leaf::from_builder(self.builder(level)?.fill(from, compressed_size)?)
     }
 
-    pub fn as_ref(&self) -> &ZstdArrayRef {
-        &self.0
-    }
-
     pub fn child_at<T: DeserializeOwned>(&self, offset: u64) -> Result<T> {
         self.as_ref()
             .get(offset)?
-            .ok_or_else(|| anyhow!("index out of bounds {}", offset).into())
+            .ok_or_else(|| anyhow!("index out of bounds {}", offset))
+    }
+}
+
+impl AsRef<ZstdArrayRef> for Leaf {
+    fn as_ref(&self) -> &ZstdArrayRef {
+        &self.0
     }
 }
 
@@ -380,7 +387,7 @@ impl<
         X: CompactSeq<Item = I> + Clone + Debug + FromIterator<I> + Send + Sync,
     > IndexRC<X>
 {
-    fn to_index<T: TreeTypes<Seq = X, Key = I>>(self, cids: &mut VecDeque<T::Link>) -> Index<T> {
+    fn into_index<T: TreeTypes<Seq = X, Key = I>>(self, cids: &mut VecDeque<T::Link>) -> Index<T> {
         let cid = if !self.purged { cids.pop_front() } else { None };
         if let (Some(level), Some(count), Some(key_bytes)) =
             (self.level, self.count, self.key_bytes)
@@ -459,7 +466,7 @@ pub(crate) fn deserialize_compressed<T: TreeTypes>(
     let data: Vec<IndexRC<T::Seq>> = serde_cbor::from_reader(reader)?;
     let result = data
         .into_iter()
-        .map(|data| data.to_index(&mut cids))
+        .map(|data| data.into_index(&mut cids))
         .collect::<Vec<_>>();
     Ok(result)
 }
