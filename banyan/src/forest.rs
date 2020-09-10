@@ -1,6 +1,5 @@
 //! creation and traversal of banyan trees
 use super::index::*;
-use crate::stream::SourceStream;
 use crate::{query::Query, store::ArcStore, zstd_array::ZstdArrayBuilder};
 use anyhow::{anyhow, Result};
 use bitvec::prelude::*;
@@ -54,11 +53,11 @@ pub trait TreeTypes: Debug + Send + Sync {
 /// A number of trees that are grouped together, sharing common key type, caches, and config
 ///
 /// They not necessarily share the same values. Trees with different value types can be grouped together.
-pub struct Forest<T: TreeTypes> {
+pub struct Forest<T: TreeTypes, V> {
     store: ArcStore<T::Link>,
     config: Config,
     branch_cache: Arc<RwLock<lru::LruCache<T::Link, Branch<T>>>>,
-    _tt: PhantomData<T>,
+    _tt: PhantomData<(T, V)>,
 }
 /// Configuration for a forest. Includes settings for when a node is considered full
 pub struct Config {
@@ -144,9 +143,10 @@ fn zip_with_offset_ref<'a, I: IntoIterator<Item = &'a Index<T>> + 'a, T: TreeTyp
 }
 
 /// basic random access append only async tree
-impl<T> Forest<T>
+impl<T, V> Forest<T, V>
 where
     T: TreeTypes + 'static,
+    V: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static,
 {
     fn value_key(&self) -> salsa20::Key {
         self.config().value_key
@@ -187,7 +187,7 @@ where
     }
 
     /// create a leaf from scratch from an interator
-    async fn leaf_from_iter<V: Serialize + Debug>(
+    async fn leaf_from_iter(
         &self,
         from: &mut std::iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
     ) -> Result<LeafIndex<T>> {
@@ -199,7 +199,7 @@ where
     /// Creates a leaf from a sequence that either contains all items from the sequence, or is full
     ///
     /// The result is the index of the leaf. The iterator will contain the elements that did not fit.
-    async fn extend_leaf<V: Serialize + Debug>(
+    async fn extend_leaf(
         &self,
         keys: Option<T::Seq>,
         builder: ZstdArrayBuilder,
@@ -247,7 +247,7 @@ where
 
     /// given some children and some additional elements, creates a node with the given
     /// children and new children from `from` until it is full
-    pub(crate) async fn extend_branch<V: Serialize + Debug + Send>(
+    pub(crate) async fn extend_branch(
         &self,
         mut children: Vec<Index<T>>,
         level: u32,
@@ -304,7 +304,7 @@ where
     /// Given an iterator of values and a level, consume from the iterator until either
     /// the iterator is consumed or the node is "filled". At the end of this call, the
     /// iterator will contain the remaining elements that did not "fit".
-    async fn fill_node<V: Serialize + Debug + Send>(
+    async fn fill_node(
         &self,
         level: u32,
         from: &mut std::iter::Peekable<impl Iterator<Item = (T::Key, V)> + Send>,
@@ -320,7 +320,7 @@ where
     }
 
     /// recursion helper for fill_node
-    fn fill_noder<'a, V: Serialize + Debug + Send + 'a>(
+    fn fill_noder<'a>(
         &'a self,
         level: u32,
         from: &'a mut std::iter::Peekable<impl Iterator<Item = (T::Key, V)> + Send>,
@@ -361,7 +361,7 @@ where
     /// extends an existing node with some values
     ///
     /// The result will have the max level `level`. `from` will contain all elements that did not fit.
-    pub(crate) async fn extend_above<V: Serialize + Debug + Send>(
+    pub(crate) async fn extend_above(
         &self,
         node: Option<&Index<T>>,
         level: u32,
@@ -393,7 +393,7 @@ where
     /// extends an existing node with some values
     ///
     /// The result will have the same level as the input. `from` will contain all elements that did not fit.        
-    async fn extend<V: Serialize + Debug + Send>(
+    async fn extend(
         &self,
         index: &Index<T>,
         from: &mut std::iter::Peekable<impl Iterator<Item = (T::Key, V)> + Send>,
@@ -435,7 +435,7 @@ where
     }
 
     /// recursion helper for extend
-    fn extendr<'a, V: Serialize + Debug + Send + 'a>(
+    fn extendr<'a>(
         &'a self,
         node: &'a Index<T>,
         from: &'a mut std::iter::Peekable<impl Iterator<Item = (T::Key, V)> + Send>,
@@ -592,7 +592,7 @@ where
         })
     }
 
-    pub(crate) async fn get<V: DeserializeOwned>(
+    pub(crate) async fn get(
         &self,
         index: &Index<T>,
         mut offset: u64,
@@ -619,7 +619,7 @@ where
     }
 
     /// recursion helper for get
-    fn getr<'a, V: DeserializeOwned + 'a>(
+    fn getr<'a>(
         &'a self,
         node: &'a Index<T>,
         offset: u64,
@@ -627,10 +627,7 @@ where
         self.get(node, offset).boxed()
     }
 
-    pub(crate) fn stream<'a, V: DeserializeOwned + Debug>(
-        &'a self,
-        index: Index<T>,
-    ) -> LocalBoxStream<'a, Result<(T::Key, V)>> {
+    pub(crate) fn stream<'a>(&'a self, index: Index<T>) -> LocalBoxStream<'a, Result<(T::Key, V)>> {
         let s = async move {
             Ok(match self.load_node(&index).await? {
                 NodeInfo::Leaf(index, node) => {
@@ -658,7 +655,7 @@ where
         Box::pin(s)
     }
 
-    pub(crate) fn stream_filtered<'a, V: DeserializeOwned, Q: Query<T> + Debug>(
+    pub(crate) fn stream_filtered<'a, Q: Query<T> + Debug>(
         &'a self,
         offset: u64,
         query: &'a Q,
@@ -706,7 +703,7 @@ where
         Box::pin(s)
     }
 
-    pub(crate) fn stream_filtered_static<V: DeserializeOwned, Q: Query<T> + Clone + 'static>(
+    pub(crate) fn stream_filtered_static<Q: Query<T> + Clone + 'static>(
         self: Arc<Self>,
         offset: u64,
         query: Q,
@@ -757,10 +754,7 @@ where
         Box::pin(s)
     }
 
-    pub(crate) fn stream_filtered_static_chunked<
-        V: DeserializeOwned,
-        Q: Query<T> + Clone + 'static,
-    >(
+    pub(crate) fn stream_filtered_static_chunked<Q: Query<T> + Clone + 'static>(
         self: Arc<Self>,
         offset: u64,
         query: Q,
@@ -815,10 +809,7 @@ where
         Box::pin(s)
     }
 
-    pub(crate) fn stream_filtered_static_chunked_reverse<
-        V: DeserializeOwned,
-        Q: Query<T> + Clone + 'static,
-    >(
+    pub(crate) fn stream_filtered_static_chunked_reverse<Q: Query<T> + Clone + 'static>(
         self: Arc<Self>,
         offset: u64,
         query: Q,
@@ -1231,16 +1222,6 @@ where
             branch_cache,
             _tt: PhantomData,
         }
-    }
-
-    /// Creates a query object that can be used to translate a stream of roots
-    /// to a stream of filtered values.
-    ///
-    /// This is done in a two step process to have two separate methods, one for
-    /// which the type parameter can be inferred (Q), and one for which the type
-    /// parameter must be provided (V)
-    pub fn query<Q>(self: Arc<Self>, query: Q) -> SourceStream<T, Q> {
-        SourceStream(self, query)
     }
 }
 

@@ -7,22 +7,24 @@ use serde::{de::DeserializeOwned, Serialize};
 use std::{cell::Cell, fmt::Debug, rc::Rc, sync::Arc};
 use stream::LocalBoxStream;
 
-pub struct SourceStream<TT: TreeTypes + 'static, Q>(pub Arc<Forest<TT>>, pub Q);
-
-impl<TT: TreeTypes + 'static, Q: Query<TT> + Clone + 'static> SourceStream<TT, Q> {
-    pub fn stream<V: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static>(
-        self,
-        roots: LocalBoxStream<'static, TT::Link>,
-    ) -> impl Stream<Item = anyhow::Result<(u64, TT::Key, V)>> {
+impl<
+        T: TreeTypes + 'static,
+        V: Clone + Send + Sync + Debug + Serialize + DeserializeOwned + 'static,
+    > Forest<T, V>
+{
+    pub fn stream_roots<Q: Query<T> + Clone + 'static>(
+        self: Arc<Self>,
+        query: Q,
+        roots: LocalBoxStream<'static, T::Link>,
+    ) -> impl Stream<Item = anyhow::Result<(u64, T::Key, V)>> {
         let offset = Rc::new(Cell::new(0u64));
-        let query = self.1;
-        let forest = self.0;
+        let forest = self;
         roots
-            .filter_map(move |cid| Tree::<TT, V>::from_link(cid, forest.clone()).map(|r| r.ok()))
-            .flat_map(move |tree: Tree<TT, V>| {
+            .filter_map(move |cid| Tree::<T, V>::from_link(cid, forest.clone()).map(|r| r.ok()))
+            .flat_map(move |tree: Tree<T, V>| {
                 // create an intersection of a range query and the main query
                 // and wrap it in an rc so it is cheap to clone
-                let query: Arc<dyn Query<TT>> = Arc::new(AndQuery(
+                let query: Arc<dyn Query<T>> = Arc::new(AndQuery(
                     OffsetRangeQuery::from(offset.get()..),
                     query.clone(),
                 ));
@@ -40,21 +42,18 @@ impl<TT: TreeTypes + 'static, Q: Query<TT> + Clone + 'static> SourceStream<TT, Q
             })
     }
 
-    pub fn stream_chunked<
-        V: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static,
-    >(
-        self,
-        roots: LocalBoxStream<'static, TT::Link>,
-    ) -> impl Stream<Item = anyhow::Result<FilteredChunk<TT, V>>> {
+    pub fn stream_roots_chunked<Q: Query<T> + Clone + 'static>(
+        self: Arc<Self>,
+        query: Q,
+        roots: LocalBoxStream<'static, T::Link>,
+    ) -> impl Stream<Item = anyhow::Result<FilteredChunk<T, V>>> {
         let offset = Rc::new(Cell::new(0u64));
-        let query = self.1;
-        let forest = self.0;
         roots
-            .filter_map(move |cid| Tree::<TT, V>::from_link(cid, forest.clone()).map(|r| r.ok()))
-            .flat_map(move |tree: Tree<TT, V>| {
+            .filter_map(move |cid| Tree::<T, V>::from_link(cid, self.clone()).map(|r| r.ok()))
+            .flat_map(move |tree: Tree<T, V>| {
                 // create an intersection of a range query and the main query
                 // and wrap it in an rc so it is cheap to clone
-                let query: Arc<dyn Query<TT>> = Arc::new(AndQuery(
+                let query: Arc<dyn Query<T>> = Arc::new(AndQuery(
                     OffsetRangeQuery::from(offset.get()..),
                     query.clone(),
                 ));
