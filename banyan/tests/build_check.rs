@@ -86,7 +86,7 @@ where
     I::IntoIter: Send,
 {
     let store = Arc::new(MemStore::new());
-    let forest = Arc::new(Forest::<TT>::new(store, Config::debug()));
+    let forest = Arc::new(Forest::<TT, u64>::new(store, Config::debug()));
     let mut tree = Tree::<TT, u64>::empty(forest);
     tree.extend(xs).await?;
     tree.assert_invariants().await?;
@@ -252,7 +252,7 @@ async fn build_get(xs: Vec<(Key, u64)>) -> quickcheck::TestResult {
 async fn build_pack(xss: Vec<Vec<(Key, u64)>>) -> quickcheck::TestResult {
     test(|| async {
         let store = Arc::new(MemStore::new());
-        let forest = Arc::new(Forest::<TT>::new(store, Config::debug()));
+        let forest = Arc::new(Forest::<TT, u64>::new(store, Config::debug()));
         let mut tree = Tree::<TT, u64>::empty(forest);
         // flattened xss for reference
         let xs = xss.iter().cloned().flatten().collect::<Vec<_>>();
@@ -278,7 +278,7 @@ async fn build_pack(xss: Vec<Vec<(Key, u64)>>) -> quickcheck::TestResult {
 async fn retain(xss: Vec<Vec<(Key, u64)>>) -> quickcheck::TestResult {
     test(|| async {
         let store = Arc::new(MemStore::new());
-        let forest = Arc::new(Forest::<TT>::new(store, Config::debug()));
+        let forest = Arc::new(Forest::<TT, u64>::new(store, Config::debug()));
         let mut tree = Tree::<TT, u64>::empty(forest);
         // flattened xss for reference
         let xs = xss.iter().cloned().flatten().collect::<Vec<_>>();
@@ -309,7 +309,7 @@ async fn filter_test_simple() -> anyhow::Result<()> {
 #[tokio::test]
 async fn stream_test_simple() -> anyhow::Result<()> {
     let store = Arc::new(MemStore::new());
-    let forest = Arc::new(Forest::<TT>::new(store, Config::debug()));
+    let forest = Arc::new(Forest::<TT, u64>::new(store, Config::debug()));
     let mut trees = Vec::new();
     for n in 1..=10u64 {
         let mut tree = Tree::<TT, u64>::empty(forest.clone());
@@ -318,9 +318,7 @@ async fn stream_test_simple() -> anyhow::Result<()> {
         trees.push(tree.root().unwrap());
     }
     println!("{:?}", trees);
-    let res = forest
-        .query(AllQuery)
-        .stream::<u64>(stream::iter(trees).boxed_local());
+    let res = forest.stream_roots(AllQuery, stream::iter(trees).boxed_local());
     let res = res.collect::<Vec<_>>().await;
     println!("{:?}", res);
     Ok(())

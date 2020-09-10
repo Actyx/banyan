@@ -193,7 +193,7 @@ fn create_salsa_key(text: &str) -> salsa20::Key {
 }
 
 async fn build_tree(
-    forest: Arc<Forest<TT>>,
+    forest: Arc<Forest<TT, String>>,
     base: Option<Cid>,
     batches: u64,
     count: u64,
@@ -246,7 +246,7 @@ async fn build_tree(
 }
 
 async fn bench_build(
-    forest: Arc<Forest<TT>>,
+    forest: Arc<Forest<TT, String>>,
     base: Option<Cid>,
     batches: u64,
     count: u64,
@@ -340,14 +340,14 @@ async fn main() -> Result<()> {
     let mut config = Config::debug_fast();
     config.index_key = index_key;
     config.value_key = value_key;
-    let forest = Arc::new(Forest::<TT>::new(store, config));
+    let forest = Arc::new(Forest::<TT, String>::new(store, config));
     if let Some(matches) = matches.subcommand_matches("dump") {
         let root = Cid::from_str(
             matches
                 .value_of("root")
                 .ok_or(anyhow!("root must be provided"))?,
         )?;
-        let tree = Tree::<TT, serde_cbor::Value>::from_link(root, forest).await?;
+        let tree = Tree::<TT, String>::from_link(root, forest).await?;
         tree.dump().await?;
         return Ok(());
     } else if let Some(matches) = matches.subcommand_matches("stream") {
@@ -356,7 +356,7 @@ async fn main() -> Result<()> {
                 .value_of("root")
                 .ok_or(anyhow!("root must be provided"))?,
         )?;
-        let tree = Tree::<TT, serde_cbor::Value>::from_link(root, forest).await?;
+        let tree = Tree::<TT, String>::from_link(root, forest).await?;
         let mut stream = tree.stream().enumerate();
         while let Some((i, Ok(v))) = stream.next().await {
             if i % 1000 == 0 {
@@ -383,7 +383,7 @@ async fn main() -> Result<()> {
         tree.dump().await?;
         let roots = tree.roots().await?;
         let levels = roots.iter().map(|x| x.level()).collect::<Vec<_>>();
-        let tree2 = Tree::<TT, i32>::from_roots(forest, roots).await?;
+        let tree2 = Tree::<TT, String>::from_roots(forest, roots).await?;
         println!("{:?}", tree);
         println!("{}", tree);
         println!("{:?}", levels);
@@ -394,7 +394,7 @@ async fn main() -> Result<()> {
                 .value_of("root")
                 .ok_or(anyhow!("root must be provided"))?,
         )?;
-        let mut tree = Tree::<TT, serde_cbor::Value>::from_link(root, forest).await?;
+        let mut tree = Tree::<TT, String>::from_link(root, forest).await?;
         tree.dump().await?;
         tree.pack().await?;
         tree.assert_invariants().await?;
@@ -413,7 +413,7 @@ async fn main() -> Result<()> {
             .map(|tag| Key::filter_tags(Tags(btreeset! {Tag::new(tag)})))
             .collect::<Vec<_>>();
         let query = DnfQuery(tags);
-        let tree = Tree::<TT, serde_cbor::Value>::from_link(root, forest).await?;
+        let tree = Tree::<TT, String>::from_link(root, forest).await?;
         tree.dump().await?;
         let mut stream = tree.stream_filtered(&query).enumerate();
         while let Some((i, Ok(v))) = stream.next().await {
@@ -427,7 +427,7 @@ async fn main() -> Result<()> {
                 .value_of("root")
                 .ok_or(anyhow!("root must be provided"))?,
         )?;
-        let mut tree = Tree::<TT, serde_cbor::Value>::from_link(root, forest).await?;
+        let mut tree = Tree::<TT, String>::from_link(root, forest).await?;
         tree.repair().await?;
         tree.dump().await?;
         println!("{:?}", tree);
@@ -441,7 +441,7 @@ async fn main() -> Result<()> {
             .value_of("before")
             .ok_or(anyhow!("required arg before not provided"))?
             .parse()?;
-        let mut tree = Tree::<TT, serde_cbor::Value>::from_link(root, forest).await?;
+        let mut tree = Tree::<TT, String>::from_link(root, forest).await?;
         tree.retain(&OffsetRangeQuery::from(offset..)).await?;
         tree.dump().await?;
         println!("{:?}", tree);
@@ -475,8 +475,7 @@ async fn main() -> Result<()> {
             .and_then(|data| future::ready(Cid::from_str(&data).map_err(anyhow::Error::new)));
         let cids = stream.filter_map(|x| future::ready(x.ok()));
         let mut stream = forest
-            .query(AllQuery)
-            .stream::<String>(cids.boxed_local())
+            .stream_roots(AllQuery, cids.boxed_local())
             .boxed_local();
         while let Some(ev) = stream.next().await {
             println!("{:?}", ev);
@@ -486,7 +485,7 @@ async fn main() -> Result<()> {
         let mut config = Config::debug_fast();
         config.index_key = index_key;
         config.value_key = value_key;
-        let forest = Arc::new(Forest::<TT>::new(store, config));
+        let forest = Arc::new(Forest::<TT, String>::new(store, config));
         let _t0 = std::time::Instant::now();
         let base = None;
         let batches = 1;
