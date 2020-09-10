@@ -13,19 +13,19 @@ repository = "https://github.com/actyx/banyan/"
 
 [dependencies]
 zstd = "0.5.1+zstd.1.4.4"
-serde = { version = "1.0.106", features = ["derive", "rc"] }
+serde = { version = "1", features = ["derive", "rc"] }
 
 futures = "0.3.5"
-tracing = "0.1.13"
-lru = "0.4.3"
-maplit = "1.0.2"
-derive_more = "0.99.5"
-anyhow = "1.0.31"
-bitvec = "0.17.4"
-salsa20 = "0.5.2"
-rand = "0.7.3"
-ref-cast = "1.0.2"
-serde_cbor = { version = "0.11.1", features = ["tags"] }
+tracing = "0.1"
+lru = "0.4"
+maplit = "1.0"
+derive_more = "0.99"
+anyhow = "1.0"
+bitvec = "0.17"
+salsa20 = "0.5"
+rand = "0.7"
+ref-cast = "1.0"
+serde_cbor = { version = "0.11", features = ["tags"] }
 
 [dev-dependencies]
 hex = "0.4.2"
