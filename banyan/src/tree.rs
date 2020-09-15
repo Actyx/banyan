@@ -352,8 +352,8 @@ impl<
     }
 
     /// root of a non-empty tree
-    pub fn root(self) -> Option<T::Link> {
-        self.root.and_then(|index| index.link().clone())
+    pub fn root(&self) -> Option<&T::Link> {
+        self.root.as_ref().and_then(|index| index.link().as_ref())
     }
 }
 

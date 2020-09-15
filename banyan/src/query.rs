@@ -42,7 +42,7 @@ impl<T: TreeTypes> Query<T> for Arc<dyn Query<T>> {
     }
 }
 
-/// The only information that does not require
+/// The only query that does not require looking at indices
 #[derive(Debug, Clone)]
 pub struct OffsetRangeQuery<R>(R);
 
