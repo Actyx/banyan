@@ -756,12 +756,13 @@ where
         Box::pin(s)
     }
 
-    pub(crate) fn stream_filtered_static_chunked<Q: Query<T> + Clone + 'static>(
+    pub(crate) fn stream_filtered_static_chunked<Q: Query<T> + Clone + 'static, E: 'static>(
         self: Arc<Self>,
         offset: u64,
         query: Q,
         index: Index<T>,
-    ) -> LocalBoxStream<'static, Result<FilteredChunk<T, V>>> {
+        mk_extra: &'static impl Fn(IndexRef<T>) -> E,
+    ) -> LocalBoxStream<'static, Result<FilteredChunk<T, V, E>>> {
         let s = async move {
             Ok(match self.load_node(&index).await? {
                 NodeInfo::Leaf(index, node) => {
@@ -777,6 +778,7 @@ where
                     let chunk = FilteredChunk {
                         range: offset..offset + index.keys.count(),
                         data: pairs,
+                        extra: mk_extra(IndexRef::Leaf(index)),
                     };
                     stream::once(future::ok(chunk)).left_stream().left_stream()
                 }
@@ -789,12 +791,18 @@ where
                         move |(is_matching, (child, offset))| {
                             if is_matching {
                                 self.clone()
-                                    .stream_filtered_static_chunked(offset, query.clone(), child)
+                                    .stream_filtered_static_chunked(
+                                        offset,
+                                        query.clone(),
+                                        child,
+                                        mk_extra,
+                                    )
                                     .right_stream()
                             } else {
                                 let placeholder = FilteredChunk {
                                     range: offset..offset + child.count(),
                                     data: Vec::new(),
+                                    extra: mk_extra(child.as_index_ref()),
                                 };
                                 stream::once(future::ok(placeholder)).left_stream()
                             }
@@ -811,12 +819,16 @@ where
         Box::pin(s)
     }
 
-    pub(crate) fn stream_filtered_static_chunked_reverse<Q: Query<T> + Clone + 'static>(
+    pub(crate) fn stream_filtered_static_chunked_reverse<
+        Q: Query<T> + Clone + 'static,
+        E: 'static,
+    >(
         self: Arc<Self>,
         offset: u64,
         query: Q,
         index: Index<T>,
-    ) -> LocalBoxStream<'static, Result<FilteredChunk<T, V>>> {
+        mk_extra: &'static impl Fn(IndexRef<T>) -> E,
+    ) -> LocalBoxStream<'static, Result<FilteredChunk<T, V, E>>> {
         let s =
             async move {
                 Ok(match self.load_node(&index).await? {
@@ -834,6 +846,7 @@ where
                         let chunk = FilteredChunk {
                             range: offset..offset + index.keys.count(),
                             data: pairs,
+                            extra: mk_extra(IndexRef::Leaf(index)),
                         };
                         stream::once(future::ok(chunk)).left_stream().left_stream()
                     }
@@ -851,12 +864,14 @@ where
                                             offset,
                                             query.clone(),
                                             child,
+                                            mk_extra,
                                         )
                                         .right_stream()
                                 } else {
                                     let placeholder = FilteredChunk {
                                         range: offset..offset + child.count(),
                                         data: Vec::new(),
+                                        extra: mk_extra(child.as_index_ref()),
                                     };
                                     stream::once(future::ok(placeholder)).left_stream()
                                 }
@@ -1254,9 +1269,12 @@ pub(crate) enum CreateMode {
 /// A filtered chunk.
 /// Contains both data and information about the offsets the data resulted from.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FilteredChunk<T: TreeTypes, V> {
+pub struct FilteredChunk<T: TreeTypes, V, E> {
     /// index range for this chunk
     pub range: std::ops::Range<u64>,
-    // data
+    // filtered data (offset, key, value)
     pub data: Vec<(u64, T::Key, V)>,
+    // arbitrary extra data computed from the leaf or branch index.
+    // If you don't need this you can just pass a fn that returns ()
+    pub extra: E,
 }

@@ -140,7 +140,7 @@ async fn compare_filtered_chunked(xs: Vec<(Key, u64)>, range: Range<u64>) -> any
     let range = range.clone();
     let tree = create_test_tree(xs.clone()).await?;
     let actual = tree
-        .stream_filtered_static_chunked(OffsetRangeQuery::from(range.clone()))
+        .stream_filtered_static_chunked(OffsetRangeQuery::from(range.clone()), &|_| ())
         .map(|chunk_result| chunk_result.map(|chunk| stream::iter(chunk.data.into_iter().map(Ok))))
         .try_flatten()
         .collect::<Vec<_>>()
@@ -165,7 +165,7 @@ async fn compare_filtered_chunked_reverse(
     let range = range.clone();
     let tree = create_test_tree(xs.clone()).await?;
     let actual = tree
-        .stream_filtered_static_chunked_reverse(OffsetRangeQuery::from(range.clone()))
+        .stream_filtered_static_chunked_reverse(OffsetRangeQuery::from(range.clone()), &|_| ())
         .map(|chunk_result| chunk_result.map(|chunk| stream::iter(chunk.data.into_iter().map(Ok))))
         .try_flatten()
         .collect::<Vec<_>>()
@@ -191,7 +191,7 @@ async fn filtered_chunked_no_holes(xs: Vec<(Key, u64)>, range: Range<u64>) -> an
     let range = range.clone();
     let tree = create_test_tree(xs.clone()).await?;
     let chunks = tree
-        .stream_filtered_static_chunked(OffsetRangeQuery::from(range.clone()))
+        .stream_filtered_static_chunked(OffsetRangeQuery::from(range.clone()), &|_| ())
         .collect::<Vec<_>>()
         .await
         .into_iter()

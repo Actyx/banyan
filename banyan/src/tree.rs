@@ -280,27 +280,29 @@ impl<
         }
     }
 
-    pub fn stream_filtered_static_chunked(
+    pub fn stream_filtered_static_chunked<E: 'static>(
         self,
         query: impl Query<T> + Clone + 'static,
-    ) -> impl Stream<Item = Result<FilteredChunk<T, V>>> + 'static {
+        mk_extra: &'static impl Fn(IndexRef<T>) -> E,
+    ) -> impl Stream<Item = Result<FilteredChunk<T, V, E>>> + 'static {
         match &self.root {
             Some(index) => self
                 .forest
-                .stream_filtered_static_chunked(0, query, index.clone())
+                .stream_filtered_static_chunked(0, query, index.clone(), mk_extra)
                 .left_stream(),
             None => stream::empty().right_stream(),
         }
     }
 
-    pub fn stream_filtered_static_chunked_reverse(
+    pub fn stream_filtered_static_chunked_reverse<E: 'static>(
         self,
         query: impl Query<T> + Clone + 'static,
-    ) -> impl Stream<Item = Result<FilteredChunk<T, V>>> + 'static {
+        mk_extra: &'static impl Fn(IndexRef<T>) -> E,
+    ) -> impl Stream<Item = Result<FilteredChunk<T, V, E>>> + 'static {
         match &self.root {
             Some(index) => self
                 .forest
-                .stream_filtered_static_chunked_reverse(0, query, index.clone())
+                .stream_filtered_static_chunked_reverse(0, query, index.clone(), mk_extra)
                 .left_stream(),
             None => stream::empty().right_stream(),
         }

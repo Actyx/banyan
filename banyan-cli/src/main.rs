@@ -345,7 +345,7 @@ async fn main() -> Result<()> {
         let root = Cid::from_str(
             matches
                 .value_of("root")
-                .ok_or(anyhow!("root must be provided"))?,
+                .ok_or_else(|| anyhow!("root must be provided"))?,
         )?;
         let tree = Tree::<TT, String>::from_link(root, forest).await?;
         tree.dump().await?;
@@ -354,7 +354,7 @@ async fn main() -> Result<()> {
         let root = Cid::from_str(
             matches
                 .value_of("root")
-                .ok_or(anyhow!("root must be provided"))?,
+                .ok_or_else(|| anyhow!("root must be provided"))?,
         )?;
         let tree = Tree::<TT, String>::from_link(root, forest).await?;
         let mut stream = tree.stream().enumerate();
@@ -367,11 +367,11 @@ async fn main() -> Result<()> {
     } else if let Some(matches) = matches.subcommand_matches("build") {
         let count: u64 = matches
             .value_of("count")
-            .ok_or(anyhow!("required arg count not provided"))?
+            .ok_or_else(|| anyhow!("required arg count not provided"))?
             .parse()?;
         let batches: u64 = matches
             .value_of("batches")
-            .ok_or(anyhow!("required arg count not provided"))?
+            .ok_or_else(|| anyhow!("required arg count not provided"))?
             .parse()?;
         let unbalanced = matches.is_present("unbalanced");
         let base = matches.value_of("base").map(Cid::from_str).transpose()?;
@@ -392,7 +392,7 @@ async fn main() -> Result<()> {
         let root = Cid::from_str(
             matches
                 .value_of("root")
-                .ok_or(anyhow!("root must be provided"))?,
+                .ok_or_else(|| anyhow!("root must be provided"))?,
         )?;
         let mut tree = Tree::<TT, String>::from_link(root, forest).await?;
         tree.dump().await?;
@@ -405,11 +405,11 @@ async fn main() -> Result<()> {
         let root = Cid::from_str(
             matches
                 .value_of("root")
-                .ok_or(anyhow!("root must be provided"))?,
+                .ok_or_else(|| anyhow!("root must be provided"))?,
         )?;
         let tags = matches
             .values_of("tag")
-            .ok_or(anyhow!("at least one tag must be provided"))?
+            .ok_or_else(|| anyhow!("at least one tag must be provided"))?
             .map(|tag| Key::filter_tags(Tags(btreeset! {Tag::new(tag)})))
             .collect::<Vec<_>>();
         let query = DnfQuery(tags);
@@ -425,7 +425,7 @@ async fn main() -> Result<()> {
         let root = Cid::from_str(
             matches
                 .value_of("root")
-                .ok_or(anyhow!("root must be provided"))?,
+                .ok_or_else(|| anyhow!("root must be provided"))?,
         )?;
         let mut tree = Tree::<TT, String>::from_link(root, forest).await?;
         tree.repair().await?;
@@ -435,11 +435,11 @@ async fn main() -> Result<()> {
         let root = Cid::from_str(
             matches
                 .value_of("root")
-                .ok_or(anyhow!("root must be provided"))?,
+                .ok_or_else(|| anyhow!("root must be provided"))?,
         )?;
         let offset: u64 = matches
             .value_of("before")
-            .ok_or(anyhow!("required arg before not provided"))?
+            .ok_or_else(|| anyhow!("required arg before not provided"))?
             .parse()?;
         let mut tree = Tree::<TT, String>::from_link(root, forest).await?;
         tree.retain(&OffsetRangeQuery::from(offset..)).await?;
@@ -448,7 +448,7 @@ async fn main() -> Result<()> {
     } else if let Some(matches) = matches.subcommand_matches("send_stream") {
         let topic = matches
             .value_of("topic")
-            .ok_or(anyhow!("topic must be provided"))?;
+            .ok_or_else(|| anyhow!("topic must be provided"))?;
         let mut ticks = tokio::time::interval(Duration::from_secs(1));
         let mut tree = Tree::<TT, String>::empty(forest);
         let mut offset = 0;
@@ -468,15 +468,13 @@ async fn main() -> Result<()> {
     } else if let Some(matches) = matches.subcommand_matches("recv_stream") {
         let topic = matches
             .value_of("topic")
-            .ok_or(anyhow!("topic must be provided"))?;
+            .ok_or_else(|| anyhow!("topic must be provided"))?;
         let stream = pubsub_sub(topic)?
             .map_err(anyhow::Error::new)
             .and_then(|data| future::ready(String::from_utf8(data).map_err(anyhow::Error::new)))
             .and_then(|data| future::ready(Cid::from_str(&data).map_err(anyhow::Error::new)));
         let cids = stream.filter_map(|x| future::ready(x.ok()));
-        let mut stream = forest
-            .stream_roots(AllQuery, cids.boxed())
-            .boxed_local();
+        let mut stream = forest.stream_roots(AllQuery, cids.boxed()).boxed_local();
         while let Some(ev) = stream.next().await {
             println!("{:?}", ev);
         }
@@ -491,7 +489,7 @@ async fn main() -> Result<()> {
         let batches = 1;
         let count: u64 = matches
             .value_of("count")
-            .ok_or(anyhow!("required arg count not provided"))?
+            .ok_or_else(|| anyhow!("required arg count not provided"))?
             .parse()?;
         let unbalanced = false;
         let (tree, tcreate) = bench_build(forest.clone(), base, batches, count, unbalanced).await?;

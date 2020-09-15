@@ -1,4 +1,6 @@
 //! helper methods to stream trees
+use crate::index::IndexRef;
+
 use super::forest::*;
 use super::query::*;
 use super::tree::*;
@@ -41,11 +43,12 @@ impl<
             })
     }
 
-    pub fn stream_roots_chunked<Q: Query<T> + Clone + 'static>(
+    pub fn stream_roots_chunked<Q: Query<T> + Clone + 'static, E: 'static>(
         self: Arc<Self>,
         query: Q,
         roots: BoxStream<'static, T::Link>,
-    ) -> impl Stream<Item = anyhow::Result<FilteredChunk<T, V>>> {
+        mk_extra: &'static impl Fn(IndexRef<T>) -> E,
+    ) -> impl Stream<Item = anyhow::Result<FilteredChunk<T, V, E>>> {
         let offset = Rc::new(Cell::new(0u64));
         roots
             .filter_map(move |cid| Tree::<T, V>::from_link(cid, self.clone()).map(|r| r.ok()))
@@ -58,7 +61,7 @@ impl<
                 ));
                 // dump the results while updating the offset
                 let offset = offset.clone();
-                tree.stream_filtered_static_chunked(query)
+                tree.stream_filtered_static_chunked(query, mk_extra)
                     .take_while(move |result| {
                         if let Ok(chunk) = result {
                             // update the offset

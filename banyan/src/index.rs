@@ -62,12 +62,18 @@ pub trait CompactSeq: Serialize + DeserializeOwned {
     fn get(&self, index: usize) -> Option<Self::Item>;
     /// combines all elements with the semigroup op
     fn summarize(&self) -> Self::Item;
-
+    /// first key
+    fn first(&self) -> Self::Item {
+        self.get(0).unwrap()
+    }
+    /// last key
+    fn last(&self) -> Self::Item {
+        self.get(self.len() - 1).unwrap()
+    }
     /// utility function to get all items for a compactseq.
     fn to_vec(&self) -> Vec<Self::Item> {
         (0..self.len()).map(move |i| self.get(i).unwrap()).collect()
     }
-
     /// utility function to select some items for a compactseq.
     fn select(&self, bits: &BitVec) -> Vec<(u64, Self::Item)> {
         (0..self.len())
@@ -168,6 +174,13 @@ pub enum Index<T: TreeTypes> {
     Branch(BranchIndex<T>),
 }
 
+/// enum for a leaf or branch index
+#[derive(Debug, From)]
+pub enum IndexRef<'a, T: TreeTypes> {
+    Leaf(&'a LeafIndex<T>),
+    Branch(&'a BranchIndex<T>),
+}
+
 impl<T: TreeTypes> Clone for Index<T> {
     fn clone(&self) -> Self {
         match self {
@@ -178,6 +191,13 @@ impl<T: TreeTypes> Clone for Index<T> {
 }
 
 impl<T: TreeTypes> Index<T> {
+    pub fn as_index_ref(&self) -> IndexRef<T> {
+        match self {
+            Index::Leaf(x) => IndexRef::Leaf(x),
+            Index::Branch(x) => IndexRef::Branch(x),
+        }
+    }
+
     pub fn data(&self) -> &T::Seq {
         match self {
             Index::Leaf(x) => &x.keys,
