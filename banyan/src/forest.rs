@@ -59,6 +59,8 @@ pub struct Forest<T: TreeTypes, V> {
     branch_cache: Arc<RwLock<lru::LruCache<T::Link, Branch<T>>>>,
     _tt: PhantomData<(T, V)>,
 }
+
+#[derive(Debug, Clone)]
 /// Configuration for a forest. Includes settings for when a node is considered full
 pub struct Config {
     /// maximum number of values in a leaf
@@ -1034,7 +1036,7 @@ where
         match self.load_node(index).await? {
             NodeInfo::Leaf(index, _) => {
                 println!(
-                    "{}Leaf(count={}, key_bytes={}, sealed={})",
+                    "{}Leaf(count={}, value_bytes={}, sealed={})",
                     prefix,
                     index.keys.count(),
                     index.value_bytes,
