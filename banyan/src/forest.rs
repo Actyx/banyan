@@ -10,7 +10,6 @@ use salsa20::{
     XSalsa20,
 };
 use serde::{de::DeserializeOwned, Serialize};
-use stream::BoxStream;
 use std::{
     fmt::Debug,
     hash::Hash,
@@ -19,6 +18,7 @@ use std::{
     marker::PhantomData,
     sync::{Arc, RwLock},
 };
+use stream::BoxStream;
 use tracing::*;
 
 type FutureResult<'a, T> = BoxFuture<'a, Result<T>>;
@@ -764,7 +764,7 @@ where
     pub(crate) fn stream_filtered_static_chunked<
         Q: Query<T> + Clone + Send + 'static,
         E: Send + 'static,
-        F: Send + Sync + 'static + Fn(IndexRef<T>) -> E,
+        F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
     >(
         self: Arc<Self>,
         offset: u64,
@@ -833,7 +833,7 @@ where
     pub(crate) fn stream_filtered_static_chunked_reverse<
         Q: Query<T> + Clone + Send + 'static,
         E: Send + 'static,
-        F: Send + Sync + 'static + Fn(IndexRef<T>) -> E,
+        F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
     >(
         self: Arc<Self>,
         offset: u64,

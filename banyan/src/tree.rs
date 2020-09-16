@@ -280,11 +280,16 @@ impl<
         }
     }
 
-    pub fn stream_filtered_static_chunked<E: Send + 'static, F: Send + Sync + 'static + Fn(IndexRef<T>) -> E>(
+    pub fn stream_filtered_static_chunked<Q, E, F>(
         self,
-        query: impl Query<T> + Send + Clone + 'static,
+        query: Q,
         mk_extra: &'static F,
-    ) -> impl Stream<Item = Result<FilteredChunk<T, V, E>>> + 'static {
+    ) -> impl Stream<Item = Result<FilteredChunk<T, V, E>>> + 'static
+    where
+        Q: Query<T> + Send + Clone + 'static,
+        E: Send + 'static,
+        F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
+    {
         match &self.root {
             Some(index) => self
                 .forest
@@ -294,11 +299,16 @@ impl<
         }
     }
 
-    pub fn stream_filtered_static_chunked_reverse<E: Send + 'static, F: Send + Sync + 'static + Fn(IndexRef<T>) -> E>(
+    pub fn stream_filtered_static_chunked_reverse<Q, E, F>(
         self,
-        query: impl Query<T> + Clone + Send + 'static,
+        query: Q,
         mk_extra: &'static F,
-    ) -> impl Stream<Item = Result<FilteredChunk<T, V, E>>> + 'static {
+    ) -> impl Stream<Item = Result<FilteredChunk<T, V, E>>> + 'static
+    where
+        Q: Query<T> + Send + Clone + 'static,
+        E: Send + 'static,
+        F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
+    {
         match &self.root {
             Some(index) => self
                 .forest

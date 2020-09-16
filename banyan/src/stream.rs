@@ -6,8 +6,8 @@ use super::query::*;
 use super::tree::*;
 use futures::{prelude::*, stream::BoxStream};
 use serde::{de::DeserializeOwned, Serialize};
-use std::{cell::Cell, fmt::Debug, rc::Rc, sync::Arc, sync::atomic::AtomicU64};
 use std::sync::atomic::Ordering;
+use std::{cell::Cell, fmt::Debug, rc::Rc, sync::atomic::AtomicU64, sync::Arc};
 
 impl<
         T: TreeTypes + 'static,
@@ -44,12 +44,17 @@ impl<
             })
     }
 
-    pub fn stream_roots_chunked<Q: Query<T> + Clone + Send + 'static, E: Send + 'static, F: Send + Sync + 'static + Fn(IndexRef<T>) -> E>(
+    pub fn stream_roots_chunked<Q, E, F>(
         self: Arc<Self>,
         query: Q,
         roots: BoxStream<'static, T::Link>,
         mk_extra: &'static F,
-    ) -> impl Stream<Item = anyhow::Result<FilteredChunk<T, V, E>>> {
+    ) -> impl Stream<Item = anyhow::Result<FilteredChunk<T, V, E>>>
+    where
+        Q: Query<T> + Clone + Send + 'static,
+        E: Send + 'static,
+        F: Send + Sync + 'static + Fn(IndexRef<T>) -> E,
+    {
         let offset = Arc::new(AtomicU64::new(0));
         roots
             .filter_map(move |cid| Tree::<T, V>::from_link(cid, self.clone()).map(|r| r.ok()))
