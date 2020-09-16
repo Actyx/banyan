@@ -78,4 +78,41 @@ impl<
             })
             .boxed()
     }
+
+    pub fn stream_roots_chunked_reverse<Q, E, F>(
+        self: Arc<Self>,
+        query: Q,
+        roots: BoxStream<'static, T::Link>,
+        end_offset: u64,
+        mk_extra: &'static F,
+    ) -> impl Stream<Item = anyhow::Result<FilteredChunk<T, V, E>>>
+    where
+        Q: Query<T> + Clone + Send + 'static,
+        E: Send + 'static,
+        F: Send + Sync + 'static + Fn(IndexRef<T>) -> E,
+    {
+        let end_offset_ref = Arc::new(AtomicU64::new(end_offset));
+        roots
+            .filter_map(move |cid| Tree::<T, V>::from_link(cid, self.clone()).map(|r| r.ok()))
+            .flat_map(move |tree: Tree<T, V>| {
+                let end_offset = end_offset_ref.load(Ordering::SeqCst);
+                // create an intersection of a range query and the main query
+                // and wrap it in an arc so it is cheap to clone
+                let query: Arc<dyn Query<T>> = Arc::new(AndQuery(
+                    OffsetRangeQuery::from(..end_offset),
+                    query.clone(),
+                ));
+                let end_offset_ref = end_offset_ref.clone();
+                tree.stream_filtered_static_chunked_reverse(query, mk_extra)
+                    .take_while(move |result| {
+                        if let Ok(chunk) = result {
+                            // update the end offset from the start of what we got
+                            end_offset_ref.store(chunk.range.start, Ordering::SeqCst);
+                        }
+                        // abort at the first non-ok offset
+                        future::ready(result.is_ok())
+                    })
+            })
+            .boxed()
+    }
 }
