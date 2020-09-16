@@ -280,10 +280,10 @@ impl<
         }
     }
 
-    pub fn stream_filtered_static_chunked<E: 'static>(
+    pub fn stream_filtered_static_chunked<E: Send + 'static, F: Send + Sync + 'static + Fn(IndexRef<T>) -> E>(
         self,
-        query: impl Query<T> + Clone + 'static,
-        mk_extra: &'static impl Fn(IndexRef<T>) -> E,
+        query: impl Query<T> + Send + Clone + 'static,
+        mk_extra: &'static F,
     ) -> impl Stream<Item = Result<FilteredChunk<T, V, E>>> + 'static {
         match &self.root {
             Some(index) => self
@@ -294,10 +294,10 @@ impl<
         }
     }
 
-    pub fn stream_filtered_static_chunked_reverse<E: 'static>(
+    pub fn stream_filtered_static_chunked_reverse<E: Send + 'static, F: Send + Sync + 'static + Fn(IndexRef<T>) -> E>(
         self,
-        query: impl Query<T> + Clone + 'static,
-        mk_extra: &'static impl Fn(IndexRef<T>) -> E,
+        query: impl Query<T> + Clone + Send + 'static,
+        mk_extra: &'static F,
     ) -> impl Stream<Item = Result<FilteredChunk<T, V, E>>> + 'static {
         match &self.root {
             Some(index) => self

@@ -3,13 +3,14 @@ use super::index::*;
 use crate::{query::Query, store::ArcStore, zstd_array::ZstdArrayBuilder};
 use anyhow::{anyhow, Result};
 use bitvec::prelude::*;
-use futures::{future::BoxFuture, prelude::*, stream::LocalBoxStream};
+use futures::{future::BoxFuture, prelude::*};
 use rand::RngCore;
 use salsa20::{
     stream_cipher::{NewStreamCipher, SyncStreamCipher},
     XSalsa20,
 };
 use serde::{de::DeserializeOwned, Serialize};
+use stream::BoxStream;
 use std::{
     fmt::Debug,
     hash::Hash,
@@ -629,7 +630,7 @@ where
         self.get(node, offset).boxed()
     }
 
-    pub(crate) fn stream<'a>(&'a self, index: Index<T>) -> LocalBoxStream<'a, Result<(T::Key, V)>> {
+    pub(crate) fn stream<'a>(&'a self, index: Index<T>) -> BoxStream<'a, Result<(T::Key, V)>> {
         let s = async move {
             Ok(match self.load_node(&index).await? {
                 NodeInfo::Leaf(index, node) => {
@@ -662,8 +663,8 @@ where
         offset: u64,
         query: &'a Q,
         index: Index<T>,
-    ) -> LocalBoxStream<'a, Result<(u64, T::Key, V)>> {
-        let s = async move {
+    ) -> BoxStream<'a, Result<(u64, T::Key, V)>> {
+        async move {
             Ok(match self.load_node(&index).await? {
                 NodeInfo::Leaf(index, node) => {
                     // todo: don't get the node here, since we might not need it
@@ -682,6 +683,8 @@ where
                     let mut matching = BitVec::repeat(true, index.summaries.len());
                     query.intersecting(offset, index, &mut matching);
                     let offsets = zip_with_offset(node.children.to_vec(), offset);
+                    // todo: figure out how to avoid collecting into a vec to get send
+                    let matching = matching.into_iter().collect::<Vec<_>>();
                     let children = matching.into_iter().zip(offsets).filter_map(|(m, c)| {
                         // use bool::then_some in case it gets stabilized
                         if m {
@@ -701,8 +704,8 @@ where
                 }
             })
         }
-        .try_flatten_stream();
-        Box::pin(s)
+        .try_flatten_stream()
+        .boxed()
     }
 
     pub(crate) fn stream_filtered_static<Q: Query<T> + Clone + 'static>(
@@ -710,8 +713,8 @@ where
         offset: u64,
         query: Q,
         index: Index<T>,
-    ) -> LocalBoxStream<'static, Result<(u64, T::Key, V)>> {
-        let s = async move {
+    ) -> BoxStream<'static, Result<(u64, T::Key, V)>> {
+        async move {
             Ok(match self.load_node(&index).await? {
                 NodeInfo::Leaf(index, node) => {
                     // todo: don't get the node here, since we might not need it
@@ -730,6 +733,8 @@ where
                     let mut matching = BitVec::repeat(true, index.summaries.len());
                     query.intersecting(offset, index, &mut matching);
                     let offsets = zip_with_offset(node.children.to_vec(), offset);
+                    // todo: figure out how to avoid collecting into a vec to get send
+                    let matching = matching.into_iter().collect::<Vec<_>>();
                     let children = matching.into_iter().zip(offsets).filter_map(|(m, c)| {
                         // use bool::then_some in case it gets stabilized
                         if m {
@@ -752,18 +757,22 @@ where
                 }
             })
         }
-        .try_flatten_stream();
-        Box::pin(s)
+        .try_flatten_stream()
+        .boxed()
     }
 
-    pub(crate) fn stream_filtered_static_chunked<Q: Query<T> + Clone + 'static, E: 'static>(
+    pub(crate) fn stream_filtered_static_chunked<
+        Q: Query<T> + Clone + Send + 'static,
+        E: Send + 'static,
+        F: Send + Sync + 'static + Fn(IndexRef<T>) -> E,
+    >(
         self: Arc<Self>,
         offset: u64,
         query: Q,
         index: Index<T>,
-        mk_extra: &'static impl Fn(IndexRef<T>) -> E,
-    ) -> LocalBoxStream<'static, Result<FilteredChunk<T, V, E>>> {
-        let s = async move {
+        mk_extra: &'static F,
+    ) -> BoxStream<'static, Result<FilteredChunk<T, V, E>>> {
+        async move {
             Ok(match self.load_node(&index).await? {
                 NodeInfo::Leaf(index, node) => {
                     // todo: don't get the node here, since we might not need it
@@ -787,6 +796,8 @@ where
                     let mut matching = BitVec::repeat(true, index.summaries.len());
                     query.intersecting(offset, index, &mut matching);
                     let offsets = zip_with_offset(node.children.to_vec(), offset);
+                    // todo: figure out how to avoid collecting into a vec to get send
+                    let matching = matching.into_iter().collect::<Vec<_>>();
                     let iter = matching.into_iter().zip(offsets).map(
                         move |(is_matching, (child, offset))| {
                             if is_matching {
@@ -815,20 +826,21 @@ where
                 }
             })
         }
-        .try_flatten_stream();
-        Box::pin(s)
+        .try_flatten_stream()
+        .boxed()
     }
 
     pub(crate) fn stream_filtered_static_chunked_reverse<
-        Q: Query<T> + Clone + 'static,
-        E: 'static,
+        Q: Query<T> + Clone + Send + 'static,
+        E: Send + 'static,
+        F: Send + Sync + 'static + Fn(IndexRef<T>) -> E,
     >(
         self: Arc<Self>,
         offset: u64,
         query: Q,
         index: Index<T>,
-        mk_extra: &'static impl Fn(IndexRef<T>) -> E,
-    ) -> LocalBoxStream<'static, Result<FilteredChunk<T, V, E>>> {
+        mk_extra: &'static F,
+    ) -> BoxStream<'static, Result<FilteredChunk<T, V, E>>> {
         let s =
             async move {
                 Ok(match self.load_node(&index).await? {

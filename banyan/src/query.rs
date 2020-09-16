@@ -15,7 +15,7 @@ use std::{fmt::Debug, ops::RangeBounds, sync::Arc};
 /// A query
 ///
 /// Queries work on compact value sequences instead of individual values for efficiency.
-pub trait Query<T: TreeTypes>: Debug {
+pub trait Query<T: TreeTypes>: Debug + Send + Sync {
     /// a bitvec with `x.data.count()` elements, where each value is a bool indicating if the query *does* match
     fn containing(&self, offset: u64, _index: &LeafIndex<T>, res: &mut BitVec);
     /// a bitvec with `x.data.count()` elements, where each value is a bool indicating if the query *can* match

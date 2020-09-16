@@ -6,7 +6,8 @@ use super::query::*;
 use super::tree::*;
 use futures::{prelude::*, stream::BoxStream};
 use serde::{de::DeserializeOwned, Serialize};
-use std::{cell::Cell, fmt::Debug, rc::Rc, sync::Arc};
+use std::{cell::Cell, fmt::Debug, rc::Rc, sync::Arc, sync::atomic::AtomicU64};
+use std::sync::atomic::Ordering;
 
 impl<
         T: TreeTypes + 'static,
@@ -43,33 +44,33 @@ impl<
             })
     }
 
-    pub fn stream_roots_chunked<Q: Query<T> + Clone + 'static, E: 'static>(
+    pub fn stream_roots_chunked<Q: Query<T> + Clone + Send + 'static, E: Send + 'static, F: Send + Sync + 'static + Fn(IndexRef<T>) -> E>(
         self: Arc<Self>,
         query: Q,
         roots: BoxStream<'static, T::Link>,
-        mk_extra: &'static impl Fn(IndexRef<T>) -> E,
+        mk_extra: &'static F,
     ) -> impl Stream<Item = anyhow::Result<FilteredChunk<T, V, E>>> {
-        let offset = Rc::new(Cell::new(0u64));
+        let offset = Arc::new(AtomicU64::new(0));
         roots
             .filter_map(move |cid| Tree::<T, V>::from_link(cid, self.clone()).map(|r| r.ok()))
             .flat_map(move |tree: Tree<T, V>| {
                 // create an intersection of a range query and the main query
                 // and wrap it in an arc so it is cheap to clone
                 let query: Arc<dyn Query<T>> = Arc::new(AndQuery(
-                    OffsetRangeQuery::from(offset.get()..),
+                    OffsetRangeQuery::from(offset.load(Ordering::SeqCst)..),
                     query.clone(),
                 ));
-                // dump the results while updating the offset
                 let offset = offset.clone();
                 tree.stream_filtered_static_chunked(query, mk_extra)
                     .take_while(move |result| {
                         if let Ok(chunk) = result {
                             // update the offset
-                            offset.set(chunk.range.end)
+                            offset.store(chunk.range.end, Ordering::SeqCst)
                         }
                         // abort at the first non-ok offset
                         future::ready(result.is_ok())
                     })
             })
+            .boxed()
     }
 }
