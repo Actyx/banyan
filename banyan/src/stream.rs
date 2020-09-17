@@ -1,9 +1,8 @@
 //! helper methods to stream trees
-use crate::index::IndexRef;
+use crate::index::{Index, IndexRef};
 
 use super::forest::*;
 use super::query::*;
-use super::tree::*;
 use futures::{prelude::*, stream::BoxStream};
 use serde::{de::DeserializeOwned, Serialize};
 use std::sync::atomic::Ordering;
@@ -48,9 +47,10 @@ impl<
         S: Stream<Item = T::Link> + Send + 'static,
     {
         let offset = Arc::new(AtomicU64::new(0));
+        let forest = self.clone();
         roots
-            .filter_map(move |cid| Tree::<T, V>::from_link(cid, self.clone()).map(|r| r.ok()))
-            .flat_map(move |tree: Tree<T, V>| {
+            .filter_map(move |cid| forest.clone().load_branch_from_cid(cid).map(|r| r.ok()))
+            .flat_map(move |index: Index<T>| {
                 // create an intersection of a range query and the main query
                 // and wrap it in an arc so it is cheap to clone
                 let query: Arc<dyn Query<T>> = Arc::new(AndQuery(
@@ -58,7 +58,7 @@ impl<
                     query.clone(),
                 ));
                 let offset = offset.clone();
-                tree.stream_filtered_static_chunked(query, mk_extra)
+                self.clone().stream_filtered_static_chunked(0, query, index, mk_extra)
                     .take_while(move |result| {
                         if let Ok(chunk) = result {
                             // update the offset
@@ -92,9 +92,10 @@ impl<
         S: Stream<Item = T::Link> + Send + 'static,
     {
         let end_offset_ref = Arc::new(AtomicU64::new(end_offset));
+        let forest = self.clone();
         roots
-            .filter_map(move |cid| Tree::<T, V>::from_link(cid, self.clone()).map(|r| r.ok()))
-            .flat_map(move |tree: Tree<T, V>| {
+            .filter_map(move |cid| forest.clone().load_branch_from_cid(cid).map(|r| r.ok()))
+            .flat_map(move |index| {
                 let end_offset = end_offset_ref.load(Ordering::SeqCst);
                 // create an intersection of a range query and the main query
                 // and wrap it in an arc so it is cheap to clone
@@ -103,7 +104,7 @@ impl<
                     query.clone(),
                 ));
                 let end_offset_ref = end_offset_ref.clone();
-                tree.stream_filtered_static_chunked_reverse(query, mk_extra)
+                self.clone().stream_filtered_static_chunked_reverse(0, query, index, mk_extra)
                     .take_while(move |result| {
                         if let Ok(chunk) = result {
                             // update the end offset from the start of what we got
