@@ -1,6 +1,6 @@
 //! helper methods to work with ipfs/ipld
 use anyhow::{anyhow, Result};
-use banyan::store::Store;
+use banyan::store::{ReadOnlyStore, Store};
 use derive_more::{Display, From, FromStr};
 use futures::{future::BoxFuture, prelude::*};
 use multihash::Sha2_256;
@@ -148,6 +148,17 @@ impl MemStore {
     }
 }
 
+impl ReadOnlyStore<Cid> for MemStore {
+    fn get(&self, cid: &Cid) -> BoxFuture<Result<Arc<[u8]>>> {
+        let x = self.0.as_ref().read().unwrap();
+        if let Some(value) = x.get(cid) {
+            future::ok(value.clone()).boxed()
+        } else {
+            future::err(anyhow!("not there")).boxed()
+        }
+    }
+}
+
 impl Store<Cid> for MemStore {
     fn put(&self, data: &[u8], raw: bool) -> BoxFuture<Result<Cid>> {
         let codec = if raw {
@@ -162,13 +173,5 @@ impl Store<Cid> for MemStore {
             .unwrap()
             .insert(cid.clone(), data.into());
         future::ok(cid).boxed()
-    }
-    fn get(&self, cid: &Cid) -> BoxFuture<Result<Arc<[u8]>>> {
-        let x = self.0.as_ref().read().unwrap();
-        if let Some(value) = x.get(cid) {
-            future::ok(value.clone()).boxed()
-        } else {
-            future::err(anyhow!("not there")).boxed()
-        }
     }
 }

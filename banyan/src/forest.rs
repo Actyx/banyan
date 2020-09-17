@@ -533,7 +533,7 @@ where
         })
     }
 
-    pub(crate) async fn load_branch_from_cid(self: Arc<Self>, cid: T::Link) -> Result<Index<T>> {
+    pub(crate) async fn load_branch_from_link(self: Arc<Self>, cid: T::Link) -> Result<Index<T>> {
         let bytes = self.store.get(&cid).await?;
         let children: Vec<Index<T>> = deserialize_compressed(&self.index_key(), &bytes)?;
         let level = children.iter().map(|x| x.level()).max().unwrap() + 1;

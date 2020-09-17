@@ -59,7 +59,7 @@ impl<
 {
     pub async fn from_link(cid: T::Link, forest: Arc<Forest<T, V>>) -> Result<Self> {
         Ok(Self {
-            root: Some(forest.clone().load_branch_from_cid(cid).await?),
+            root: Some(forest.clone().load_branch_from_link(cid).await?),
             forest,
             _t: PhantomData,
         })
