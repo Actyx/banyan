@@ -1,6 +1,6 @@
 //! helper methods to work with ipfs/ipld
 use anyhow::{anyhow, Result};
-use banyan::store::{ReadOnlyStore, Store};
+use banyan::store::{BlockWriter, ReadOnlyStore};
 use derive_more::{Display, From, FromStr};
 use futures::{future::BoxFuture, prelude::*};
 use multihash::Sha2_256;
@@ -159,8 +159,8 @@ impl ReadOnlyStore<Cid> for MemStore {
     }
 }
 
-impl Store<Cid> for MemStore {
-    fn put(&self, data: &[u8], raw: bool) -> BoxFuture<Result<Cid>> {
+impl BlockWriter<Cid> for MemStore {
+    fn put(&self, data: &[u8], raw: bool, level: u32) -> BoxFuture<Result<Cid>> {
         let codec = if raw {
             cid::Codec::Raw
         } else {

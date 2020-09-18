@@ -59,8 +59,10 @@
 pub mod forest;
 pub mod index;
 pub mod query;
+mod read;
 pub mod store;
 mod stream;
 pub mod tree;
 mod util;
+mod write;
 mod zstd_array;

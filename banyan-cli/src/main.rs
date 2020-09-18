@@ -337,10 +337,17 @@ async fn main() -> Result<()> {
         _ => Level::TRACE,
     };
     tracing_subscriber::fmt().with_max_level(level).init();
-    let mut config = Config::debug_fast();
-    config.index_key = index_key;
-    config.value_key = value_key;
-    let forest = Arc::new(Forest::<TT, String>::new(store, config));
+    let config = Config::debug_fast();
+    let crypto_config = CryptoConfig {
+        index_key,
+        value_key,
+    };
+    let forest = Arc::new(Forest::<TT, String>::new(
+        store.clone(),
+        store,
+        config,
+        crypto_config,
+    ));
     if let Some(matches) = matches.subcommand_matches("dump") {
         let root = Cid::from_str(
             matches
@@ -474,16 +481,27 @@ async fn main() -> Result<()> {
             .and_then(|data| future::ready(String::from_utf8(data).map_err(anyhow::Error::new)))
             .and_then(|data| future::ready(Cid::from_str(&data).map_err(anyhow::Error::new)));
         let cids = stream.filter_map(|x| future::ready(x.ok()));
-        let mut stream = forest.stream_roots(AllQuery, cids.boxed()).boxed_local();
+        let mut stream = forest
+            .read()
+            .clone()
+            .stream_roots(AllQuery, cids.boxed())
+            .boxed_local();
         while let Some(ev) = stream.next().await {
             println!("{:?}", ev);
         }
     } else if let Some(matches) = matches.subcommand_matches("bench") {
         let store = Arc::new(MemStore::new());
-        let mut config = Config::debug_fast();
-        config.index_key = index_key;
-        config.value_key = value_key;
-        let forest = Arc::new(Forest::<TT, String>::new(store, config));
+        let config = Config::debug_fast();
+        let crypto_config = CryptoConfig {
+            index_key,
+            value_key,
+        };
+        let forest = Arc::new(Forest::<TT, String>::new(
+            store.clone(),
+            store,
+            config,
+            crypto_config,
+        ));
         let _t0 = std::time::Instant::now();
         let base = None;
         let batches = 1;
