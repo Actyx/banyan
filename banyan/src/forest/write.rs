@@ -1,10 +1,13 @@
-use crate::{forest::{Forest, CreateMode, FutureResult, BranchResult, Config, CryptoConfig, ReadForest, TreeTypes}, index::zip_with_offset_ref};
 use crate::{
-    util::is_sorted,
-    index::serialize_compressed, index::Branch,
-    index::BranchIndex, index::CompactSeq, index::Index, index::Leaf, index::LeafIndex,
-    index::NodeInfo, query::Query, store::ArcBlockWriter, store::ArcReadOnlyStore,
-    zstd_array::ZstdArrayBuilder,
+    forest::{
+        BranchResult, Config, CreateMode, CryptoConfig, Forest, FutureResult, ReadForest, TreeTypes,
+    },
+    index::zip_with_offset_ref,
+};
+use crate::{
+    index::serialize_compressed, index::Branch, index::BranchIndex, index::CompactSeq,
+    index::Index, index::Leaf, index::LeafIndex, index::NodeInfo, query::Query,
+    store::ArcBlockWriter, store::ArcReadOnlyStore, util::is_sorted, zstd_array::ZstdArrayBuilder,
 };
 use anyhow::Result;
 use bitvec::prelude::BitVec;
@@ -13,7 +16,7 @@ use futures::prelude::*;
 use rand::RngCore;
 use salsa20::{stream_cipher::NewStreamCipher, stream_cipher::SyncStreamCipher, XSalsa20};
 use serde::{de::DeserializeOwned, Serialize};
-use std::{marker::PhantomData, sync::Arc, sync::RwLock};
+use std::{iter, marker::PhantomData, sync::Arc, sync::RwLock};
 use tracing::info;
 
 /// basic random access append only async tree
@@ -29,7 +32,7 @@ where
     /// create a leaf from scratch from an interator
     async fn leaf_from_iter(
         &self,
-        from: &mut std::iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
+        from: &mut iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
     ) -> Result<LeafIndex<T>> {
         assert!(from.peek().is_some());
         self.extend_leaf(None, ZstdArrayBuilder::new(self.config().zstd_level)?, from)
@@ -43,7 +46,7 @@ where
         &self,
         keys: Option<T::Seq>,
         builder: ZstdArrayBuilder,
-        from: &mut std::iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
+        from: &mut iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
     ) -> Result<LeafIndex<T>> {
         assert!(from.peek().is_some());
         let mut keys = keys.map(|x| x.to_vec()).unwrap_or_default();
@@ -93,7 +96,7 @@ where
         &self,
         mut children: Vec<Index<T>>,
         level: u32,
-        from: &mut std::iter::Peekable<impl Iterator<Item = (T::Key, V)> + Send>,
+        from: &mut iter::Peekable<impl Iterator<Item = (T::Key, V)> + Send>,
         mode: CreateMode,
     ) -> Result<BranchIndex<T>> {
         assert!(
@@ -149,7 +152,7 @@ where
     async fn fill_node(
         &self,
         level: u32,
-        from: &mut std::iter::Peekable<impl Iterator<Item = (T::Key, V)> + Send>,
+        from: &mut iter::Peekable<impl Iterator<Item = (T::Key, V)> + Send>,
     ) -> Result<Index<T>> {
         assert!(from.peek().is_some());
         Ok(if level == 0 {
@@ -165,7 +168,7 @@ where
     fn fill_noder<'a>(
         &'a self,
         level: u32,
-        from: &'a mut std::iter::Peekable<impl Iterator<Item = (T::Key, V)> + Send>,
+        from: &'a mut iter::Peekable<impl Iterator<Item = (T::Key, V)> + Send>,
     ) -> FutureResult<'a, Index<T>> {
         self.fill_node(level, from).boxed()
     }
@@ -207,7 +210,7 @@ where
         &self,
         node: Option<&Index<T>>,
         level: u32,
-        from: &mut std::iter::Peekable<impl Iterator<Item = (T::Key, V)> + Send>,
+        from: &mut iter::Peekable<impl Iterator<Item = (T::Key, V)> + Send>,
     ) -> Result<Index<T>> {
         assert!(from.peek().is_some());
         assert!(node.map(|node| level >= node.level()).unwrap_or(true));
@@ -238,7 +241,7 @@ where
     async fn extend(
         &self,
         index: &Index<T>,
-        from: &mut std::iter::Peekable<impl Iterator<Item = (T::Key, V)> + Send>,
+        from: &mut iter::Peekable<impl Iterator<Item = (T::Key, V)> + Send>,
     ) -> Result<Index<T>> {
         info!(
             "extend {} {} {} {}",
@@ -280,7 +283,7 @@ where
     fn extendr<'a>(
         &'a self,
         node: &'a Index<T>,
-        from: &'a mut std::iter::Peekable<impl Iterator<Item = (T::Key, V)> + Send>,
+        from: &'a mut iter::Peekable<impl Iterator<Item = (T::Key, V)> + Send>,
     ) -> FutureResult<'a, Index<T>> {
         self.extend(node, from).boxed()
     }
@@ -340,7 +343,6 @@ where
     }
 
     fn random_nonce(&self) -> salsa20::XNonce {
-        // todo: not very random...
         let mut nonce = [0u8; 24];
         rand::thread_rng().fill_bytes(&mut nonce);
         nonce.into()
@@ -444,9 +446,9 @@ where
         }
         match index {
             Index::Branch(index) => {
-                let mut index = index.clone();
                 // important not to hit the cache here!
-                let branch = self.load_branch(&index).await;
+                let branch = self.load_branch(index).await;
+                let mut index = index.clone();
                 match branch {
                     Ok(Some(node)) => {
                         let mut children = node.children.to_vec();

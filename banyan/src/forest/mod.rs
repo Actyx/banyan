@@ -2,15 +2,10 @@
 use super::index::*;
 use crate::{store::ArcBlockWriter, store::ArcReadOnlyStore};
 use anyhow::Result;
+use core::{fmt::Debug, hash::Hash, iter::FromIterator, marker::PhantomData, ops::Range};
 use futures::future::BoxFuture;
 use rand::RngCore;
 use serde::{de::DeserializeOwned, Serialize};
-use core::{
-    fmt::Debug,
-    hash::Hash,
-    iter::FromIterator,
-    marker::PhantomData,
-};
 use std::{
     io,
     sync::{Arc, RwLock},
@@ -189,7 +184,7 @@ pub(crate) enum CreateMode {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FilteredChunk<T: TreeTypes, V, E> {
     /// index range for this chunk
-    pub range: std::ops::Range<u64>,
+    pub range: Range<u64>,
     // filtered data (offset, key, value)
     pub data: Vec<(u64, T::Key, V)>,
     // arbitrary extra data computed from the leaf or branch index.

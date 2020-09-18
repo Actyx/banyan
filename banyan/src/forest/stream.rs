@@ -1,7 +1,7 @@
 //! helper methods to stream trees
 use crate::index::{Index, IndexRef};
 
-use super::{TreeTypes, ReadForest, FilteredChunk};
+use super::{FilteredChunk, ReadForest, TreeTypes};
 use crate::query::*;
 use futures::{prelude::*, stream::BoxStream};
 use serde::{de::DeserializeOwned, Serialize};

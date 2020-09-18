@@ -8,7 +8,7 @@ use futures::prelude::*;
 use ipfs::MemStore;
 use quickcheck::{Arbitrary, Gen, TestResult};
 use serde::{Deserialize, Serialize};
-use std::{io, iter::FromIterator, ops::Range, sync::Arc};
+use std::{io, iter, iter::FromIterator, ops::Range, sync::Arc};
 mod ipfs;
 
 #[derive(Debug)]
@@ -362,7 +362,7 @@ fn build(items: &mut Vec<u32>) {
             items.splice(0..MAX_BRANCH.min(items.len()), vec![items[0] + 1]);
         } else {
             // temporarily remove the start and recurse
-            let removed = items.splice(0..pos, std::iter::empty()).collect::<Vec<_>>();
+            let removed = items.splice(0..pos, iter::empty()).collect::<Vec<_>>();
             build(items);
             items.splice(0..0, removed);
         }

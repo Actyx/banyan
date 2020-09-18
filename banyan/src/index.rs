@@ -408,7 +408,11 @@ impl<
     > IndexRC<X>
 {
     fn into_index<T: TreeTypes<Seq = X, Key = I>>(self, links: &mut VecDeque<T::Link>) -> Index<T> {
-        let link = if !self.purged { links.pop_front() } else { None };
+        let link = if !self.purged {
+            links.pop_front()
+        } else {
+            None
+        };
         if let (Some(level), Some(count), Some(key_bytes)) =
             (self.level, self.count, self.key_bytes)
         {
@@ -490,7 +494,6 @@ pub(crate) fn deserialize_compressed<T: TreeTypes>(
         .collect::<Vec<_>>();
     Ok(result)
 }
-
 
 /// Utility method to zip a number of indices with an offset that is increased by each index value
 pub(crate) fn zip_with_offset<'a, I: IntoIterator<Item = Index<T>> + 'a, T: TreeTypes + 'a>(

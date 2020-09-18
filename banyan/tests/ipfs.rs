@@ -175,3 +175,5 @@ impl BlockWriter<Cid> for MemStore {
         future::ok(cid).boxed()
     }
 }
+
+struct BatchWriter(Vec<(Cid, u32)>);

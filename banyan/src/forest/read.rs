@@ -1,9 +1,11 @@
-use super::{Config, CryptoConfig, ReadForest, TreeTypes, BranchCache, FilteredChunk, FutureResult};
+use super::{
+    BranchCache, Config, CryptoConfig, FilteredChunk, FutureResult, ReadForest, TreeTypes,
+};
 use crate::{
-    index::deserialize_compressed, index::Branch, index::BranchIndex, index::CompactSeq,
-    index::Index, index::IndexRef, index::Leaf, index::LeafIndex, index::NodeInfo, query::Query,
-    store::ArcReadOnlyStore,
-index::zip_with_offset};
+    index::deserialize_compressed, index::zip_with_offset, index::Branch, index::BranchIndex,
+    index::CompactSeq, index::Index, index::IndexRef, index::Leaf, index::LeafIndex,
+    index::NodeInfo, query::Query, store::ArcReadOnlyStore,
+};
 use anyhow::{anyhow, Result};
 use bitvec::prelude::BitVec;
 use core::fmt::Debug;
@@ -96,7 +98,16 @@ where
             let res = self.branch_cache().write().unwrap().get(link).cloned();
             match res {
                 Some(branch) => Ok(Some(branch)),
-                None => self.load_branch(index).await,
+                None => {
+                    let branch = self.load_branch(index).await?;
+                    if let Some(branch) = &branch {
+                        self.branch_cache()
+                            .write()
+                            .unwrap()
+                            .put(link.clone(), branch.clone());
+                    }
+                    Ok(branch)
+                }
             }
         } else {
             Ok(None)
