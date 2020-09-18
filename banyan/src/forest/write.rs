@@ -71,8 +71,10 @@ where
         tmp.extend(nonce.as_slice());
         tmp.extend(leaf.as_ref().compressed());
         XSalsa20::new(&self.value_key(), &nonce).apply_keystream(&mut tmp[24..]);
+        // todo: avoid the extra allocation by reserving space for the length prefix in tmp.
+        let tmp = serde_cbor::to_vec(&serde_cbor::Value::Bytes(tmp))?;
         // store leaf
-        let link = self.writer.put(&tmp, true, 0).await?;
+        let link = self.writer.put(&tmp, 0).await?;
         let index: LeafIndex<T> = LeafIndex {
             link: Some(link),
             value_bytes: leaf.as_ref().compressed().len() as u64,
@@ -358,7 +360,7 @@ where
             &mut cbor,
         )?;
         Ok((
-            self.writer.put(&cbor, false, level).await?,
+            self.writer.put(&cbor, level).await?,
             cbor.len() as u64,
         ))
     }

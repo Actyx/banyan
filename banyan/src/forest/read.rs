@@ -49,8 +49,13 @@ where
     pub(crate) async fn load_leaf(&self, index: &LeafIndex<T>) -> Result<Option<Leaf>> {
         Ok(if let Some(link) = &index.link {
             let data = &self.store().get(link).await?;
+            let data = if let serde_cbor::Value::Bytes(data) = serde_cbor::from_slice(&data)? {
+                data
+            } else {
+                anyhow::bail!("expected cbor byte array");
+            };
             if data.len() < 24 {
-                return Err(anyhow!("leaf data without nonce"));
+                anyhow::bail!("leaf data without nonce");
             }
             let (nonce, data) = data.split_at(24);
             let mut data = data.to_vec();

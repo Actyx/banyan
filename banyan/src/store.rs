@@ -7,7 +7,7 @@ pub trait BlockWriter<L> {
     /// adds a block to a temporary staging area
     ///
     /// We might have to do this async at some point, but let's keep it sync for now.
-    fn put(&self, data: &[u8], raw: bool, level: u32) -> BoxFuture<Result<L>>;
+    fn put(&self, data: &[u8], level: u32) -> BoxFuture<Result<L>>;
 }
 
 pub type ArcBlockWriter<L> = Arc<dyn BlockWriter<L> + Send + Sync + 'static>;

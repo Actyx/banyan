@@ -8,7 +8,7 @@ use rand::RngCore;
 use serde::{de::DeserializeOwned, Serialize};
 use std::{
     io,
-    sync::{Arc, RwLock},
+    sync::{Arc, RwLock}, fmt::Display,
 };
 mod read;
 mod stream;
@@ -35,7 +35,7 @@ pub trait TreeTypes: Debug + Send + Sync {
         + Send
         + Sync;
     /// link type to use over block boundaries
-    type Link: ToString + Hash + Eq + Clone + Debug + Send + Sync;
+    type Link: Display + Hash + Eq + Clone + Debug + Send + Sync;
 
     fn serialize_branch(
         links: &[&Self::Link],

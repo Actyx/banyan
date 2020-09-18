@@ -19,8 +19,8 @@ use banyan::{
     query::{AllQuery, OffsetRangeQuery, Query},
     tree::*,
 };
-use ipfs::{pubsub_pub, pubsub_sub, Cid, IpfsStore, MemStore};
-use tags::{DnfQuery, Key, Tag, Tags, TT};
+use ipfs::{pubsub_pub, pubsub_sub, IpfsStore, MemStore};
+use tags::{DnfQuery, Key, Tag, Tags, TT, Sha256Digest};
 
 pub type Error = anyhow::Error;
 pub type Result<T> = anyhow::Result<T>;
@@ -194,7 +194,7 @@ fn create_salsa_key(text: &str) -> salsa20::Key {
 
 async fn build_tree(
     forest: Arc<Forest<TT, String>>,
-    base: Option<Cid>,
+    base: Option<Sha256Digest>,
     batches: u64,
     count: u64,
     unbalanced: bool,
@@ -247,7 +247,7 @@ async fn build_tree(
 
 async fn bench_build(
     forest: Arc<Forest<TT, String>>,
-    base: Option<Cid>,
+    base: Option<Sha256Digest>,
     batches: u64,
     count: u64,
     unbalanced: bool,
@@ -349,7 +349,7 @@ async fn main() -> Result<()> {
         crypto_config,
     ));
     if let Some(matches) = matches.subcommand_matches("dump") {
-        let root = Cid::from_str(
+        let root = Sha256Digest::from_str(
             matches
                 .value_of("root")
                 .ok_or_else(|| anyhow!("root must be provided"))?,
@@ -358,7 +358,7 @@ async fn main() -> Result<()> {
         tree.dump().await?;
         return Ok(());
     } else if let Some(matches) = matches.subcommand_matches("stream") {
-        let root = Cid::from_str(
+        let root = Sha256Digest::from_str(
             matches
                 .value_of("root")
                 .ok_or_else(|| anyhow!("root must be provided"))?,
@@ -381,7 +381,7 @@ async fn main() -> Result<()> {
             .ok_or_else(|| anyhow!("required arg count not provided"))?
             .parse()?;
         let unbalanced = matches.is_present("unbalanced");
-        let base = matches.value_of("base").map(Cid::from_str).transpose()?;
+        let base = matches.value_of("base").map(Sha256Digest::from_str).transpose()?;
         println!(
             "building a tree with {} batches of {} values, unbalanced: {}",
             batches, count, unbalanced
@@ -396,7 +396,7 @@ async fn main() -> Result<()> {
         println!("{:?}", levels);
         tree2.dump().await?;
     } else if let Some(matches) = matches.subcommand_matches("pack") {
-        let root = Cid::from_str(
+        let root = Sha256Digest::from_str(
             matches
                 .value_of("root")
                 .ok_or_else(|| anyhow!("root must be provided"))?,
@@ -409,7 +409,7 @@ async fn main() -> Result<()> {
         tree.dump().await?;
         println!("{:?}", tree);
     } else if let Some(matches) = matches.subcommand_matches("filter") {
-        let root = Cid::from_str(
+        let root = Sha256Digest::from_str(
             matches
                 .value_of("root")
                 .ok_or_else(|| anyhow!("root must be provided"))?,
@@ -429,7 +429,7 @@ async fn main() -> Result<()> {
             }
         }
     } else if let Some(matches) = matches.subcommand_matches("repair") {
-        let root = Cid::from_str(
+        let root = Sha256Digest::from_str(
             matches
                 .value_of("root")
                 .ok_or_else(|| anyhow!("root must be provided"))?,
@@ -439,7 +439,7 @@ async fn main() -> Result<()> {
         tree.dump().await?;
         println!("{:?}", tree);
     } else if let Some(matches) = matches.subcommand_matches("forget") {
-        let root = Cid::from_str(
+        let root = Sha256Digest::from_str(
             matches
                 .value_of("root")
                 .ok_or_else(|| anyhow!("root must be provided"))?,
@@ -479,7 +479,7 @@ async fn main() -> Result<()> {
         let stream = pubsub_sub(topic)?
             .map_err(anyhow::Error::new)
             .and_then(|data| future::ready(String::from_utf8(data).map_err(anyhow::Error::new)))
-            .and_then(|data| future::ready(Cid::from_str(&data).map_err(anyhow::Error::new)));
+            .and_then(|data| future::ready(Sha256Digest::from_str(&data)));
         let cids = stream.filter_map(|x| future::ready(x.ok()));
         let mut stream = forest
             .read()

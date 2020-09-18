@@ -160,13 +160,8 @@ impl ReadOnlyStore<Cid> for MemStore {
 }
 
 impl BlockWriter<Cid> for MemStore {
-    fn put(&self, data: &[u8], raw: bool, level: u32) -> BoxFuture<Result<Cid>> {
-        let codec = if raw {
-            cid::Codec::Raw
-        } else {
-            cid::Codec::DagCBOR
-        };
-        let cid = Cid::new(data, codec);
+    fn put(&self, data: &[u8], _level: u32) -> BoxFuture<Result<Cid>> {
+        let cid = Cid::new(data, cid::Codec::DagCBOR);
         self.0
             .as_ref()
             .write()
@@ -175,5 +170,3 @@ impl BlockWriter<Cid> for MemStore {
         future::ok(cid).boxed()
     }
 }
-
-struct BatchWriter(Vec<(Cid, u32)>);
