@@ -11,7 +11,7 @@ use std::{fmt::Debug, sync::atomic::AtomicU64, sync::Arc};
 impl<
         T: TreeTypes + 'static,
         V: Clone + Send + Sync + Debug + Serialize + DeserializeOwned + 'static,
-    > Forest<T, V>
+    > ReadForest<T, V>
 {
     /// Given a sequence of roots, will stream matching events in ascending order indefinitely.
     ///
@@ -49,7 +49,7 @@ impl<
         let offset = Arc::new(AtomicU64::new(0));
         let forest = self.clone();
         roots
-            .filter_map(move |cid| forest.clone().load_branch_from_link(cid).map(|r| r.ok()))
+            .filter_map(move |cid| forest.load_branch_from_link(cid).map(|r| r.ok()))
             .flat_map(move |index: Index<T>| {
                 // create an intersection of a range query and the main query
                 // and wrap it in an arc so it is cheap to clone
