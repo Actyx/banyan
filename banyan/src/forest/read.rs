@@ -1,10 +1,9 @@
-use crate::forest::{Config, CryptoConfig, ReadForest, TreeTypes};
+use super::{Config, CryptoConfig, ReadForest, TreeTypes, BranchCache, FilteredChunk, FutureResult};
 use crate::{
-    forest::zip_with_offset, forest::BranchCache, forest::FilteredChunk, forest::FutureResult,
     index::deserialize_compressed, index::Branch, index::BranchIndex, index::CompactSeq,
     index::Index, index::IndexRef, index::Leaf, index::LeafIndex, index::NodeInfo, query::Query,
     store::ArcReadOnlyStore,
-};
+index::zip_with_offset};
 use anyhow::{anyhow, Result};
 use bitvec::prelude::BitVec;
 use core::fmt::Debug;
@@ -46,8 +45,8 @@ where
 
     /// load a leaf given a leaf index
     pub(crate) async fn load_leaf(&self, index: &LeafIndex<T>) -> Result<Option<Leaf>> {
-        Ok(if let Some(cid) = &index.link {
-            let data = &self.store().get(cid).await?;
+        Ok(if let Some(link) = &index.link {
+            let data = &self.store().get(link).await?;
             if data.len() < 24 {
                 return Err(anyhow!("leaf data without nonce"));
             }
@@ -63,13 +62,13 @@ where
 
     pub(crate) fn load_branch_from_link(
         &self,
-        cid: T::Link,
+        link: T::Link,
     ) -> impl Future<Output = Result<Index<T>>> {
         let store = self.store.clone();
         let index_key = self.index_key();
         let config = self.config;
         async move {
-            let bytes = store.get(&cid).await?;
+            let bytes = store.get(&link).await?;
             let children: Vec<Index<T>> = deserialize_compressed(&index_key, &bytes)?;
             let level = children.iter().map(|x| x.level()).max().unwrap() + 1;
             let count = children.iter().map(|x| x.count()).sum();
@@ -78,7 +77,7 @@ where
                 children.iter().map(|x| x.key_bytes()).sum::<u64>() + (bytes.len() as u64);
             let summaries = children.iter().map(|x| x.data().summarize()).collect();
             let result = BranchIndex {
-                link: Some(cid),
+                link: Some(link),
                 level,
                 count,
                 summaries,
@@ -93,8 +92,8 @@ where
 
     /// load a branch given a branch index, from the cache
     async fn load_branch_cached(&self, index: &BranchIndex<T>) -> Result<Option<Branch<T>>> {
-        if let Some(cid) = &index.link {
-            let res = self.branch_cache().write().unwrap().get(cid).cloned();
+        if let Some(link) = &index.link {
+            let res = self.branch_cache().write().unwrap().get(link).cloned();
             match res {
                 Some(branch) => Ok(Some(branch)),
                 None => self.load_branch(index).await,
@@ -127,8 +126,8 @@ where
 
     /// load a branch given a branch index
     pub(crate) async fn load_branch(&self, index: &BranchIndex<T>) -> Result<Option<Branch<T>>> {
-        Ok(if let Some(cid) = &index.link {
-            let bytes = self.store.get(&cid).await?;
+        Ok(if let Some(link) = &index.link {
+            let bytes = self.store.get(&link).await?;
             let children: Vec<_> = deserialize_compressed(&self.index_key(), &bytes)?;
             // let children = CborZstdArrayRef::new(bytes.as_ref()).items()?;
             Some(Branch::<T>::new(children))

@@ -1,8 +1,8 @@
 //! helper methods to stream trees
 use crate::index::{Index, IndexRef};
 
-use super::forest::*;
-use super::query::*;
+use super::{TreeTypes, ReadForest, FilteredChunk};
+use crate::query::*;
 use futures::{prelude::*, stream::BoxStream};
 use serde::{de::DeserializeOwned, Serialize};
 use std::sync::atomic::Ordering;
@@ -49,7 +49,7 @@ impl<
         let offset = Arc::new(AtomicU64::new(0));
         let forest = self.clone();
         roots
-            .filter_map(move |cid| forest.load_branch_from_link(cid).map(|r| r.ok()))
+            .filter_map(move |link| forest.load_branch_from_link(link).map(|r| r.ok()))
             .flat_map(move |index: Index<T>| {
                 // create an intersection of a range query and the main query
                 // and wrap it in an arc so it is cheap to clone
@@ -95,7 +95,7 @@ impl<
         let end_offset_ref = Arc::new(AtomicU64::new(end_offset));
         let forest = self.clone();
         roots
-            .filter_map(move |cid| forest.clone().load_branch_from_link(cid).map(|r| r.ok()))
+            .filter_map(move |link| forest.clone().load_branch_from_link(link).map(|r| r.ok()))
             .flat_map(move |index| {
                 let end_offset = end_offset_ref.load(Ordering::SeqCst);
                 // create an intersection of a range query and the main query

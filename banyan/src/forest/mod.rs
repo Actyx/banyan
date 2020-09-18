@@ -5,14 +5,19 @@ use anyhow::Result;
 use futures::future::BoxFuture;
 use rand::RngCore;
 use serde::{de::DeserializeOwned, Serialize};
-use std::{
+use core::{
     fmt::Debug,
     hash::Hash,
-    io,
     iter::FromIterator,
     marker::PhantomData,
+};
+use std::{
+    io,
     sync::{Arc, RwLock},
 };
+mod read;
+mod stream;
+mod write;
 
 pub type FutureResult<'a, T> = BoxFuture<'a, Result<T>>;
 pub type BranchCache<T: TreeTypes> = Arc<RwLock<lru::LruCache<T::Link, Branch<T>>>>;
@@ -78,7 +83,6 @@ pub struct CryptoConfig {
 
 impl CryptoConfig {
     pub fn random_key() -> salsa20::Key {
-        // todo: not very random...
         let mut key = [0u8; 32];
         rand::thread_rng().fill_bytes(&mut key);
         key.into()
@@ -158,38 +162,6 @@ impl Config {
     pub fn leaf_sealed(&self, bytes: u64, count: u64) -> bool {
         bytes >= self.target_leaf_size || count >= self.max_leaf_count
     }
-}
-
-/// Utility method to zip a number of indices with an offset that is increased by each index value
-pub(crate) fn zip_with_offset<'a, I: IntoIterator<Item = Index<T>> + 'a, T: TreeTypes + 'a>(
-    value: I,
-    offset: u64,
-) -> impl Iterator<Item = (Index<T>, u64)> + 'a {
-    value.into_iter().scan(offset, |offset, x| {
-        let o0 = *offset;
-        *offset += x.count();
-        Some((x, o0))
-    })
-}
-
-/// Utility method to zip a number of indices with an offset that is increased by each index value
-pub(crate) fn zip_with_offset_ref<
-    'a,
-    I: IntoIterator<Item = &'a Index<T>> + 'a,
-    T: TreeTypes + 'a,
->(
-    value: I,
-    offset: u64,
-) -> impl Iterator<Item = (&'a Index<T>, u64)> + 'a {
-    value.into_iter().scan(offset, |offset, x| {
-        let o0 = *offset;
-        *offset += x.count();
-        Some((x, o0))
-    })
-}
-
-pub(crate) fn is_sorted<T: Ord>(iter: impl Iterator<Item = T>) -> bool {
-    iter.collect::<Vec<_>>().windows(2).all(|x| x[0] <= x[1])
 }
 
 /// Helper enum for finding a valid branch in a sequence of nodes

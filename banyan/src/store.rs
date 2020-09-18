@@ -13,13 +13,7 @@ pub trait BlockWriter<L> {
 pub type ArcBlockWriter<L> = Arc<dyn BlockWriter<L> + Send + Sync + 'static>;
 
 pub trait ReadOnlyStore<L> {
-    fn get(&self, cid: &L) -> BoxFuture<Result<Arc<[u8]>>>;
+    fn get(&self, link: &L) -> BoxFuture<Result<Arc<[u8]>>>;
 }
 
 pub type ArcReadOnlyStore<L> = Arc<dyn ReadOnlyStore<L> + Send + Sync + 'static>;
-
-pub trait Store<L>: ReadOnlyStore<L> {
-    fn put(&self, data: &[u8], raw: bool) -> BoxFuture<Result<L>>;
-}
-
-pub type ArcStore<L> = Arc<dyn Store<L> + Send + Sync + 'static>;

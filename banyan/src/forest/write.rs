@@ -1,7 +1,7 @@
-use crate::forest::{Config, CryptoConfig, ReadForest, TreeTypes};
+use crate::{forest::{Forest, CreateMode, FutureResult, BranchResult, Config, CryptoConfig, ReadForest, TreeTypes}, index::zip_with_offset_ref};
 use crate::{
-    forest::is_sorted, forest::zip_with_offset_ref, forest::BranchResult, forest::CreateMode,
-    forest::Forest, forest::FutureResult, index::serialize_compressed, index::Branch,
+    util::is_sorted,
+    index::serialize_compressed, index::Branch,
     index::BranchIndex, index::CompactSeq, index::Index, index::Leaf, index::LeafIndex,
     index::NodeInfo, query::Query, store::ArcBlockWriter, store::ArcReadOnlyStore,
     zstd_array::ZstdArrayBuilder,
@@ -69,9 +69,9 @@ where
         tmp.extend(leaf.as_ref().compressed());
         XSalsa20::new(&self.value_key(), &nonce).apply_keystream(&mut tmp[24..]);
         // store leaf
-        let cid = self.writer.put(&tmp, true, 0).await?;
+        let link = self.writer.put(&tmp, true, 0).await?;
         let index: LeafIndex<T> = LeafIndex {
-            link: Some(cid),
+            link: Some(link),
             value_bytes: leaf.as_ref().compressed().len() as u64,
             sealed: self
                 .config()
@@ -187,13 +187,13 @@ where
         let value_bytes = children.iter().map(|x| x.value_bytes()).sum();
         let sealed = self.config.branch_sealed(&children, level);
         let summaries: T::Seq = summaries.into_iter().collect();
-        let (cid, encoded_children_len) = self.persist_branch(&children, level).await?;
+        let (link, encoded_children_len) = self.persist_branch(&children, level).await?;
         let key_bytes = children.iter().map(|x| x.key_bytes()).sum::<u64>() + encoded_children_len;
         Ok(BranchIndex {
             level,
             count,
             sealed,
-            link: Some(cid),
+            link: Some(link),
             summaries,
             key_bytes,
             value_bytes,
@@ -397,11 +397,11 @@ where
                             changed = true;
                         }
                     }
-                    // rewrite the node and update the cid if children have changed
+                    // rewrite the node and update the link if children have changed
                     if changed {
-                        let (cid, _) = self.persist_branch(&children, index.level).await?;
+                        let (link, _) = self.persist_branch(&children, index.level).await?;
                         // todo: update size data
-                        index.link = Some(cid);
+                        index.link = Some(link);
                     }
                 }
                 Ok(index.into())
@@ -458,18 +458,18 @@ where
                                 changed = true;
                             }
                         }
-                        // rewrite the node and update the cid if children have changed
+                        // rewrite the node and update the link if children have changed
                         if changed {
-                            let (cid, _) = self.persist_branch(&children, index.level).await?;
-                            index.link = Some(cid);
+                            let (link, _) = self.persist_branch(&children, index.level).await?;
+                            index.link = Some(link);
                         }
                     }
                     Ok(None) => {
                         // already purged, nothing to do
                     }
                     Err(cause) => {
-                        let cid_txt = index.link.map(|x| x.to_string()).unwrap_or_default();
-                        report.push(format!("forgetting branch {} due to {}", cid_txt, cause));
+                        let link_txt = index.link.map(|x| x.to_string()).unwrap_or_default();
+                        report.push(format!("forgetting branch {} due to {}", link_txt, cause));
                         if !index.sealed {
                             report.push("warning: forgetting unsealed branch!".into());
                         } else if index.level as i32 > *level {
@@ -484,8 +484,8 @@ where
                 let mut index = index.clone();
                 // important not to hit the cache here!
                 if let Err(cause) = self.load_leaf(&index).await {
-                    let cid_txt = index.link.map(|x| x.to_string()).unwrap_or_default();
-                    report.push(format!("forgetting leaf {} due to {}", cid_txt, cause));
+                    let link_txt = index.link.map(|x| x.to_string()).unwrap_or_default();
+                    report.push(format!("forgetting leaf {} due to {}", link_txt, cause));
                     if !index.sealed {
                         report.push("warning: forgetting unsealed leaf!".into());
                     } else if *level < 0 {

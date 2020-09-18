@@ -19,6 +19,10 @@ pub(crate) trait RangeBoundsExt<T: Ord>: RangeBounds<T> {
 
 impl<T: Ord, R: RangeBounds<T>> RangeBoundsExt<T> for R {}
 
+pub(crate) fn is_sorted<T: Ord>(iter: impl Iterator<Item = T>) -> bool {
+    iter.collect::<Vec<_>>().windows(2).all(|x| x[0] <= x[1])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -57,9 +57,9 @@ impl<
         T: TreeTypes + 'static,
     > Tree<T, V>
 {
-    pub async fn from_link(cid: T::Link, forest: Arc<Forest<T, V>>) -> Result<Self> {
+    pub async fn from_link(link: T::Link, forest: Arc<Forest<T, V>>) -> Result<Self> {
         Ok(Self {
-            root: Some(forest.load_branch_from_link(cid).await?),
+            root: Some(forest.load_branch_from_link(link).await?),
             forest,
             _t: PhantomData,
         })
