@@ -422,7 +422,7 @@ async fn main() -> Result<()> {
             .ok_or_else(|| anyhow!("at least one tag must be provided"))?
             .map(|tag| Key::filter_tags(Tags(btreeset! {Tag::new(tag)})))
             .collect::<Vec<_>>();
-        let query = DnfQuery(tags);
+        let query: Arc<dyn Query<TT>> = Arc::new(DnfQuery(tags));
         let tree = Tree::<TT, String>::from_link(root, forest).await?;
         tree.dump().await?;
         let mut stream = tree.stream_filtered(&query).enumerate();

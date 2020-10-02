@@ -186,138 +186,22 @@ where
         self.get(node, offset).boxed()
     }
 
-    pub(crate) fn stream<'a>(&'a self, index: Index<T>) -> BoxStream<'a, Result<(T::Key, V)>> {
-        let s = async move {
-            Ok(match self.load_node(&index).await? {
-                NodeInfo::Leaf(index, node) => {
-                    info!("streaming leaf {}", index.keys.count());
-                    let keys = index.keys();
-                    info!("raw compressed data {}", node.as_ref().compressed().len());
-                    let elems = node.as_ref().items()?;
-                    let pairs = keys.zip(elems).collect::<Vec<_>>();
-                    stream::iter(pairs).map(Ok).left_stream().left_stream()
-                }
-                NodeInfo::Branch(_, node) => {
-                    info!("streaming branch {} {}", index.level(), node.children.len());
-                    stream::iter(node.children.to_vec())
-                        .map(move |child| self.stream(child))
-                        .flatten()
-                        .right_stream()
-                        .left_stream()
-                }
-                NodeInfo::PurgedBranch(_) | NodeInfo::PurgedLeaf(_) => {
-                    stream::empty().right_stream()
-                }
-            })
-        }
-        .try_flatten_stream();
-        Box::pin(s)
-    }
-
-    pub(crate) fn stream_filtered<'a, Q: Query<T> + Debug>(
-        &'a self,
-        offset: u64,
-        query: &'a Q,
-        index: Index<T>,
-    ) -> BoxStream<'a, Result<(u64, T::Key, V)>> {
-        async move {
-            Ok(match self.load_node(&index).await? {
-                NodeInfo::Leaf(index, node) => {
-                    // todo: don't get the node here, since we might not need it
-                    let mut matching = BitVec::repeat(true, index.keys.len());
-                    query.containing(offset, index, &mut matching);
-                    let keys = index.select_keys(&matching);
-                    let elems: Vec<V> = node.as_ref().select(&matching)?;
-                    let pairs = keys
-                        .zip(elems)
-                        .map(|((o, k), v)| (o + offset, k, v))
-                        .collect::<Vec<_>>();
-                    stream::iter(pairs).map(Ok).left_stream().left_stream()
-                }
-                NodeInfo::Branch(index, node) => {
-                    // todo: don't get the node here, since we might not need it
-                    let mut matching = BitVec::repeat(true, index.summaries.len());
-                    query.intersecting(offset, index, &mut matching);
-                    let offsets = zip_with_offset(node.children.to_vec(), offset);
-                    // todo: figure out how to avoid collecting into a vec to get send
-                    let matching = matching.into_iter().collect::<Vec<_>>();
-                    let children = matching.into_iter().zip(offsets).filter_map(|(m, c)| {
-                        // use bool::then_some in case it gets stabilized
-                        if m {
-                            Some(c)
-                        } else {
-                            None
-                        }
-                    });
-                    stream::iter(children)
-                        .map(move |(child, offset)| self.stream_filtered(offset, query, child))
-                        .flatten()
-                        .right_stream()
-                        .left_stream()
-                }
-                NodeInfo::PurgedBranch(_) | NodeInfo::PurgedLeaf(_) => {
-                    stream::empty().right_stream()
-                }
-            })
-        }
-        .try_flatten_stream()
-        .boxed()
-    }
-
-    pub(crate) fn stream_filtered_static<Q: Query<T> + Clone + 'static>(
+    /// Convenience method to stream filtered.
+    ///
+    /// Implemented in terms of stream_filtered_chunked
+    pub(crate) fn stream_filtered<Q: Query<T> + Clone + 'static>(
         self: Arc<Self>,
         offset: u64,
         query: Q,
         index: Index<T>,
     ) -> BoxStream<'static, Result<(u64, T::Key, V)>> {
-        async move {
-            Ok(match self.load_node(&index).await? {
-                NodeInfo::Leaf(index, node) => {
-                    // todo: don't get the node here, since we might not need it
-                    let mut matching = BitVec::repeat(true, index.keys.len());
-                    query.containing(offset, index, &mut matching);
-                    let keys = index.select_keys(&matching);
-                    let elems: Vec<V> = node.as_ref().select(&matching)?;
-                    let pairs = keys
-                        .zip(elems)
-                        .map(|((o, k), v)| (o + offset, k, v))
-                        .collect::<Vec<_>>();
-                    stream::iter(pairs).map(Ok).left_stream().left_stream()
-                }
-                NodeInfo::Branch(index, node) => {
-                    // todo: don't get the node here, since we might not need it
-                    let mut matching = BitVec::repeat(true, index.summaries.len());
-                    query.intersecting(offset, index, &mut matching);
-                    let offsets = zip_with_offset(node.children.to_vec(), offset);
-                    // todo: figure out how to avoid collecting into a vec to get send
-                    let matching = matching.into_iter().collect::<Vec<_>>();
-                    let children = matching.into_iter().zip(offsets).filter_map(|(m, c)| {
-                        // use bool::then_some in case it gets stabilized
-                        if m {
-                            Some(c)
-                        } else {
-                            None
-                        }
-                    });
-                    stream::iter(children)
-                        .map(move |(child, offset)| {
-                            self.clone()
-                                .stream_filtered_static(offset, query.clone(), child)
-                        })
-                        .flatten()
-                        .right_stream()
-                        .left_stream()
-                }
-                NodeInfo::PurgedBranch(_) | NodeInfo::PurgedLeaf(_) => {
-                    stream::empty().right_stream()
-                }
-            })
-        }
-        .try_flatten_stream()
-        .boxed()
+        self.stream_filtered_chunked(offset, query, index, &|_| {})
+            .map_ok(|chunk| stream::iter(chunk.data).map(Ok))
+            .try_flatten()
+            .boxed()
     }
 
-    pub(crate) fn stream_filtered_static_chunked<
+    pub(crate) fn stream_filtered_chunked<
         Q: Query<T> + Clone + Send + 'static,
         E: Send + 'static,
         F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
@@ -358,12 +242,7 @@ where
                         move |(is_matching, (child, offset))| {
                             if is_matching {
                                 self.clone()
-                                    .stream_filtered_static_chunked(
-                                        offset,
-                                        query.clone(),
-                                        child,
-                                        mk_extra,
-                                    )
+                                    .stream_filtered_chunked(offset, query.clone(), child, mk_extra)
                                     .right_stream()
                             } else {
                                 let placeholder = FilteredChunk {
@@ -386,7 +265,7 @@ where
         .boxed()
     }
 
-    pub(crate) fn stream_filtered_static_chunked_reverse<
+    pub(crate) fn stream_filtered_chunked_reverse<
         Q: Query<T> + Clone + Send + 'static,
         E: Send + 'static,
         F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
@@ -428,7 +307,7 @@ where
                             move |(is_matching, (child, offset))| {
                                 if is_matching {
                                     self.clone()
-                                        .stream_filtered_static_chunked_reverse(
+                                        .stream_filtered_chunked_reverse(
                                             offset,
                                             query.clone(),
                                             child,

@@ -245,23 +245,31 @@ impl<
         })
     }
 
-    /// stream the entire content of the tree
+    /// convenience function to stream the entire content of the tree
     pub fn stream<'a>(&'a self) -> impl Stream<Item = Result<(T::Key, V)>> + 'a {
         match &self.root {
-            Some(index) => self.forest.stream(index.clone()).left_stream(),
+            Some(index) => self
+                .forest
+                .read()
+                .clone()
+                .stream_filtered(0, AllQuery, index.clone())
+                .map_ok(|(_, k, v)| (k, v))
+                .left_stream(),
             None => stream::empty().right_stream(),
         }
     }
 
     /// stream the tree, filtered by a query
-    pub fn stream_filtered<'a, Q: Query<T> + Debug>(
+    pub fn stream_filtered<'a, Q: Query<T> + Debug + Clone + 'static>(
         &'a self,
         query: &'a Q,
     ) -> impl Stream<Item = Result<(u64, T::Key, V)>> + 'a {
         match &self.root {
             Some(index) => self
                 .forest
-                .stream_filtered(0, query, index.clone())
+                .read()
+                .clone()
+                .stream_filtered(0, query.clone(), index.clone())
                 .left_stream(),
             None => stream::empty().right_stream(),
         }
@@ -276,7 +284,7 @@ impl<
                 .forest
                 .read()
                 .clone()
-                .stream_filtered_static(0, query, index.clone())
+                .stream_filtered(0, query, index.clone())
                 .left_stream(),
             None => stream::empty().right_stream(),
         }
@@ -297,7 +305,7 @@ impl<
                 .forest
                 .read()
                 .clone()
-                .stream_filtered_static_chunked(0, query, index.clone(), mk_extra)
+                .stream_filtered_chunked(0, query, index.clone(), mk_extra)
                 .left_stream(),
             None => stream::empty().right_stream(),
         }
@@ -318,7 +326,7 @@ impl<
                 .forest
                 .read()
                 .clone()
-                .stream_filtered_static_chunked_reverse(0, query, index.clone(), mk_extra)
+                .stream_filtered_chunked_reverse(0, query, index.clone(), mk_extra)
                 .left_stream(),
             None => stream::empty().right_stream(),
         }

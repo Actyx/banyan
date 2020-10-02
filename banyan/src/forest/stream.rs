@@ -59,7 +59,7 @@ impl<
                 ));
                 let offset = offset.clone();
                 self.clone()
-                    .stream_filtered_static_chunked(0, query, index, mk_extra)
+                    .stream_filtered_chunked(0, query, index, mk_extra)
                     .take_while(move |result| {
                         if let Ok(chunk) = result {
                             // update the offset
@@ -106,7 +106,7 @@ impl<
                 ));
                 let end_offset_ref = end_offset_ref.clone();
                 self.clone()
-                    .stream_filtered_static_chunked_reverse(0, query, index, mk_extra)
+                    .stream_filtered_chunked_reverse(0, query, index, mk_extra)
                     .take_while(move |result| {
                         if let Ok(chunk) = result {
                             // update the end offset from the start of what we got
