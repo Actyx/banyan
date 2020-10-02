@@ -146,7 +146,7 @@ impl<
     pub async fn collect<B: FromIterator<(T::Key, V)>>(&self) -> Result<B> {
         let query = AllQuery;
         let items: Vec<Result<(T::Key, V)>> = self
-            .stream_filtered(&query)
+            .stream_filtered(query)
             .map_ok(|(_, k, v)| (k, v))
             .collect::<Vec<_>>()
             .await;
@@ -157,7 +157,7 @@ impl<
     pub async fn collect_from<B: FromIterator<(T::Key, V)>>(&self, offset: u64) -> Result<B> {
         let query = OffsetRangeQuery::from(offset..);
         let items: Vec<Result<(T::Key, V)>> = self
-            .stream_filtered(&query)
+            .stream_filtered(query)
             .map_ok(|(_, k, v)| (k, v))
             .collect::<Vec<_>>()
             .await;
@@ -248,38 +248,8 @@ impl<
         })
     }
 
-    /// convenience function to stream the entire content of the tree
-    pub fn stream<'a>(&'a self) -> impl Stream<Item = Result<(T::Key, V)>> + 'a {
-        match &self.root {
-            Some(index) => self
-                .forest
-                .read()
-                .clone()
-                .stream_filtered(0, AllQuery, index.clone())
-                .map_ok(|(_, k, v)| (k, v))
-                .left_stream(),
-            None => stream::empty().right_stream(),
-        }
-    }
-
-    /// stream the tree, filtered by a query
-    pub fn stream_filtered<'a, Q: Query<T> + Debug + Clone + 'static>(
-        &'a self,
-        query: &'a Q,
-    ) -> impl Stream<Item = Result<(u64, T::Key, V)>> + 'a {
-        match &self.root {
-            Some(index) => self
-                .forest
-                .read()
-                .clone()
-                .stream_filtered(0, query.clone(), index.clone())
-                .left_stream(),
-            None => stream::empty().right_stream(),
-        }
-    }
-
-    pub fn stream_filtered_static(
-        self,
+    pub fn stream_filtered(
+        &self,
         query: impl Query<T> + Clone + 'static,
     ) -> impl Stream<Item = Result<(u64, T::Key, V)>> + 'static {
         match &self.root {
@@ -293,7 +263,7 @@ impl<
         }
     }
 
-    pub fn stream_filtered_static_chunked<Q, E, F>(
+    pub fn stream_filtered_chunked<Q, E, F>(
         self,
         query: Q,
         mk_extra: &'static F,
@@ -314,7 +284,7 @@ impl<
         }
     }
 
-    pub fn stream_filtered_static_chunked_reverse<Q, E, F>(
+    pub fn stream_filtered_chunked_reverse<Q, E, F>(
         self,
         query: Q,
         mk_extra: &'static F,

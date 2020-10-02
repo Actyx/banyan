@@ -364,7 +364,7 @@ async fn main() -> Result<()> {
                 .ok_or_else(|| anyhow!("root must be provided"))?,
         )?;
         let tree = Tree::<TT, String>::from_link(root, forest).await?;
-        let mut stream = tree.stream().enumerate();
+        let mut stream = tree.stream_filtered(AllQuery).enumerate();
         while let Some((i, Ok(v))) = stream.next().await {
             if i % 1000 == 0 {
                 println!("{:?}", v);
@@ -425,7 +425,7 @@ async fn main() -> Result<()> {
         let query: Arc<dyn Query<TT>> = Arc::new(DnfQuery(tags));
         let tree = Tree::<TT, String>::from_link(root, forest).await?;
         tree.dump().await?;
-        let mut stream = tree.stream_filtered(&query).enumerate();
+        let mut stream = tree.stream_filtered(query).enumerate();
         while let Some((i, Ok(v))) = stream.next().await {
             if i % 1000 == 0 {
                 println!("{:?}", v);
@@ -523,7 +523,7 @@ async fn main() -> Result<()> {
         let query: Arc<dyn Query<TT>> = Arc::new(DnfQuery(tags));
         let values: Vec<_> = tree
             .clone()
-            .stream_filtered_static(query)
+            .stream_filtered(query)
             .map_ok(|(_, k, v)| (k, v))
             .collect::<Vec<_>>()
             .await;
@@ -534,7 +534,7 @@ async fn main() -> Result<()> {
         let tags = vec![Key::range(0, count / 10, Tags::single("fizzbuzz"))];
         let query: Arc<dyn Query<TT>> = Arc::new(DnfQuery(tags));
         let values: Vec<_> = tree
-            .stream_filtered_static(query)
+            .stream_filtered(query)
             .map_ok(|(_, k, v)| (k, v))
             .collect::<Vec<_>>()
             .await;
