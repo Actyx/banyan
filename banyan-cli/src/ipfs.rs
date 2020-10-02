@@ -1,7 +1,7 @@
 //! helper methods to work with ipfs/ipld
 use anyhow::{anyhow, Result};
-use banyan::store::{ReadOnlyStore, Store};
-use derive_more::{Display, From, FromStr};
+use banyan::store::{BlockWriter, ReadOnlyStore};
+use derive_more::{Display, From, FromStr, Into};
 use futures::{future::BoxFuture, prelude::*};
 use multihash::Sha2_256;
 use reqwest::multipart::Part;
@@ -13,12 +13,15 @@ use serde_cbor::tags::Tagged;
 use std::{
     collections::HashMap,
     convert::TryFrom,
+    convert::TryInto,
     fmt, result,
     str::FromStr,
     sync::{Arc, RwLock},
 };
 
-#[derive(Clone, Hash, PartialEq, Eq, Display, From, FromStr)]
+use crate::tags::Sha256Digest;
+
+#[derive(Clone, Hash, PartialEq, Eq, Display, From, Into, FromStr)]
 pub struct Cid(cid::Cid);
 
 impl Cid {
@@ -146,7 +149,7 @@ impl<'de> Deserialize<'de> for CidIo {
     }
 }
 
-pub struct MemStore(Arc<RwLock<HashMap<Cid, Arc<[u8]>>>>);
+pub struct MemStore(Arc<RwLock<HashMap<Sha256Digest, Arc<[u8]>>>>);
 
 impl MemStore {
     pub fn new() -> Self {
@@ -154,10 +157,10 @@ impl MemStore {
     }
 }
 
-impl ReadOnlyStore<Cid> for MemStore {
-    fn get(&self, cid: &Cid) -> BoxFuture<Result<Arc<[u8]>>> {
+impl ReadOnlyStore<Sha256Digest> for MemStore {
+    fn get(&self, link: &Sha256Digest) -> BoxFuture<Result<Arc<[u8]>>> {
         let x = self.0.as_ref().read().unwrap();
-        if let Some(value) = x.get(cid) {
+        if let Some(value) = x.get(link) {
             future::ok(value.clone()).boxed()
         } else {
             future::err(anyhow!("not there")).boxed()
@@ -165,20 +168,11 @@ impl ReadOnlyStore<Cid> for MemStore {
     }
 }
 
-impl Store<Cid> for MemStore {
-    fn put(&self, data: &[u8], raw: bool) -> BoxFuture<Result<Cid>> {
-        let codec = if raw {
-            cid::Codec::Raw
-        } else {
-            cid::Codec::DagCBOR
-        };
-        let cid = Cid::new(data, codec);
-        self.0
-            .as_ref()
-            .write()
-            .unwrap()
-            .insert(cid.clone(), data.into());
-        future::ok(cid).boxed()
+impl BlockWriter<Sha256Digest> for MemStore {
+    fn put(&self, data: &[u8], level: u32) -> BoxFuture<Result<Sha256Digest>> {
+        let digest = Sha256Digest::new(data);
+        self.0.as_ref().write().unwrap().insert(digest, data.into());
+        future::ok(digest).boxed()
     }
 }
 
@@ -316,22 +310,23 @@ impl IpfsStore {
     }
 }
 
-impl ReadOnlyStore<Cid> for IpfsStore {
-    fn get(&self, cid: &Cid) -> BoxFuture<Result<Arc<[u8]>>> {
-        let cid = cid.clone();
+impl ReadOnlyStore<Sha256Digest> for IpfsStore {
+    fn get(&self, link: &Sha256Digest) -> BoxFuture<Result<Arc<[u8]>>> {
+        let cid: Cid = (*link).into();
         async move { crate::ipfs::block_get(&cid).await }.boxed()
     }
 }
 
-impl Store<Cid> for IpfsStore {
-    fn put(&self, data: &[u8], raw: bool) -> BoxFuture<Result<Cid>> {
-        let codec = if raw {
-            cid::Codec::Raw
-        } else {
-            cid::Codec::DagCBOR
-        };
+impl BlockWriter<Sha256Digest> for IpfsStore {
+    fn put(&self, data: &[u8], level: u32) -> BoxFuture<Result<Sha256Digest>> {
         let data = data.to_vec();
-        async move { crate::ipfs::block_put(&data, codec, false).await }.boxed()
+        async move {
+            let cid = crate::ipfs::block_put(&data, cid::Codec::DagCBOR, false).await?;
+            assert!(cid.0.hash().algorithm() == multihash::Code::Sha2_256);
+            assert!(cid.0.hash().digest().len() == 32);
+            cid.try_into()
+        }
+        .boxed()
     }
 }
 

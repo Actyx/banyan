@@ -4,25 +4,91 @@ use banyan::{forest::*, query::Query};
 use bitvec::prelude::*;
 use maplit::btreeset;
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeSet, io, iter::FromIterator, sync::Arc};
+use std::{
+    collections::BTreeSet,
+    convert::{TryFrom, TryInto},
+    fmt, io,
+    iter::FromIterator,
+    str::FromStr,
+    sync::Arc,
+};
 
 #[derive(Debug)]
 pub struct TT {}
 
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Sha256Digest([u8; 32]);
+
+impl Sha256Digest {
+    pub fn new(data: &[u8]) -> Self {
+        let mh = multihash::Sha2_256::digest(data);
+        Sha256Digest(mh.digest().try_into().unwrap())
+    }
+}
+
+impl From<Sha256Digest> for Cid {
+    fn from(value: Sha256Digest) -> Self {
+        let mh = multihash::wrap(multihash::Code::Sha2_256, &value.0);
+        cid::Cid::new_v1(cid::Codec::DagCBOR, mh).into()
+    }
+}
+
+impl FromStr for Sha256Digest {
+    type Err = anyhow::Error;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let cid = Cid::from_str(s)?;
+        cid.try_into()
+    }
+}
+
+impl TryFrom<Cid> for Sha256Digest {
+    type Error = anyhow::Error;
+    fn try_from(value: Cid) -> Result<Self, Self::Error> {
+        let cid: cid::Cid = value.into();
+        if cid.version() != cid::Version::V1 {
+            anyhow::bail!("version 0 multihash not supported!");
+        }
+        // if cid.codec() != cid::Codec::DagCBOR {
+        //     anyhow::bail!("Must be DagCBOR codec");
+        // }
+        if cid.hash().algorithm() != multihash::Code::Sha2_256 {
+            anyhow::bail!("hashes must be Sha256 encoded!");
+        }
+        if cid.hash().digest().len() != 32 {
+            anyhow::bail!("Sha256 must have 256 bits digest");
+        }
+        Ok(Sha256Digest(cid.hash().digest().try_into()?))
+    }
+}
+
+impl fmt::Display for Sha256Digest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", Cid::from(*self))
+    }
+}
+
 impl TreeTypes for TT {
     type Key = Key;
     type Seq = KeySeq;
-    type Link = Cid;
+    type Link = Sha256Digest;
     fn serialize_branch(
         links: &[&Self::Link],
         data: Vec<u8>,
         w: impl io::Write,
     ) -> anyhow::Result<()> {
-        serde_cbor::to_writer(w, &(links, serde_cbor::Value::Bytes(data)))
+        let cids = links
+            .into_iter()
+            .map(|x| Cid::from(**x))
+            .collect::<Vec<_>>();
+        serde_cbor::to_writer(w, &(cids, serde_cbor::Value::Bytes(data)))
             .map_err(|e| anyhow::Error::new(e))
     }
     fn deserialize_branch(reader: impl io::Read) -> anyhow::Result<(Vec<Self::Link>, Vec<u8>)> {
-        let (links, data): (Vec<Self::Link>, serde_cbor::Value) = serde_cbor::from_reader(reader)?;
+        let (cids, data): (Vec<Cid>, serde_cbor::Value) = serde_cbor::from_reader(reader)?;
+        let links = cids
+            .into_iter()
+            .map(Sha256Digest::try_from)
+            .collect::<anyhow::Result<Vec<_>>>()?;
         if let serde_cbor::Value::Bytes(data) = data {
             Ok((links, data))
         } else {

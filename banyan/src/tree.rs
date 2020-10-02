@@ -57,9 +57,9 @@ impl<
         T: TreeTypes + 'static,
     > Tree<T, V>
 {
-    pub async fn from_link(cid: T::Link, forest: Arc<Forest<T, V>>) -> Result<Self> {
+    pub async fn from_link(link: T::Link, forest: Arc<Forest<T, V>>) -> Result<Self> {
         Ok(Self {
-            root: Some(forest.clone().load_branch_from_link(cid).await?),
+            root: Some(forest.load_branch_from_link(link).await?),
             forest,
             _t: PhantomData,
         })
@@ -274,6 +274,8 @@ impl<
         match &self.root {
             Some(index) => self
                 .forest
+                .read()
+                .clone()
                 .stream_filtered_static(0, query, index.clone())
                 .left_stream(),
             None => stream::empty().right_stream(),
@@ -293,6 +295,8 @@ impl<
         match &self.root {
             Some(index) => self
                 .forest
+                .read()
+                .clone()
                 .stream_filtered_static_chunked(0, query, index.clone(), mk_extra)
                 .left_stream(),
             None => stream::empty().right_stream(),
@@ -312,6 +316,8 @@ impl<
         match &self.root {
             Some(index) => self
                 .forest
+                .read()
+                .clone()
                 .stream_filtered_static_chunked_reverse(0, query, index.clone(), mk_extra)
                 .left_stream(),
             None => stream::empty().right_stream(),

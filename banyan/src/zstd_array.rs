@@ -1,14 +1,15 @@
 //! Utilities to work with zstd compressed arrays of cbor values
 use anyhow::Result;
 use bitvec::prelude::*;
+use core::{fmt, ops::Deref};
 use ref_cast::RefCast;
 use serde::{
     de::{DeserializeOwned, IgnoredAny},
     Deserialize, Serialize,
 };
 use std::{
+    io,
     io::{prelude::*, Cursor, Write},
-    ops::Deref,
     sync::Arc,
 };
 use tracing::*;
@@ -164,8 +165,8 @@ impl ZstdArray {
     }
 }
 
-impl std::fmt::Debug for ZstdArray {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Debug for ZstdArray {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "ZstdArray")
     }
 }
@@ -197,8 +198,8 @@ pub struct ZstdArrayBuilder {
     encoder: zstd::stream::write::Encoder<Vec<u8>>,
 }
 
-impl std::fmt::Debug for ZstdArrayBuilder {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Debug for ZstdArrayBuilder {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "ZstdArrayBuilder")
     }
 }
@@ -211,7 +212,7 @@ impl ZstdArrayBuilder {
         Ok(res)
     }
 
-    pub fn new(level: i32) -> std::io::Result<Self> {
+    pub fn new(level: i32) -> io::Result<Self> {
         Ok(Self {
             encoder: Encoder::new(Vec::new(), level)?,
         })

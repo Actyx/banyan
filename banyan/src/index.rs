@@ -102,7 +102,7 @@ pub struct LeafIndex<T: TreeTypes> {
     pub sealed: bool,
     // link to the block
     pub link: Option<T::Link>,
-    /// A sequence of keys with the same number of values as the data block the cid points to.
+    /// A sequence of keys with the same number of values as the data block the link points to.
     pub keys: T::Seq,
     // serialized size of the data
     pub value_bytes: u64,
@@ -407,8 +407,12 @@ impl<
         X: CompactSeq<Item = I> + Clone + Debug + FromIterator<I> + Send + Sync,
     > IndexRC<X>
 {
-    fn into_index<T: TreeTypes<Seq = X, Key = I>>(self, cids: &mut VecDeque<T::Link>) -> Index<T> {
-        let cid = if !self.purged { cids.pop_front() } else { None };
+    fn into_index<T: TreeTypes<Seq = X, Key = I>>(self, links: &mut VecDeque<T::Link>) -> Index<T> {
+        let link = if !self.purged {
+            links.pop_front()
+        } else {
+            None
+        };
         if let (Some(level), Some(count), Some(key_bytes)) =
             (self.level, self.count, self.key_bytes)
         {
@@ -419,7 +423,7 @@ impl<
                 key_bytes,
                 count,
                 level,
-                link: cid,
+                link,
             }
             .into()
         } else {
@@ -427,7 +431,7 @@ impl<
                 keys: self.data,
                 sealed: self.sealed,
                 value_bytes: self.value_bytes,
-                link: cid,
+                link,
             }
             .into()
         }
@@ -452,21 +456,21 @@ pub(crate) fn serialize_compressed<T: TreeTypes>(
     level: i32,
     into: &mut Vec<u8>,
 ) -> Result<()> {
-    let mut cids: Vec<&T::Link> = Vec::new();
+    let mut links: Vec<&T::Link> = Vec::new();
     let mut compressed: Vec<u8> = Vec::new();
     compressed.extend_from_slice(&nonce);
     let mut writer = zstd::stream::write::Encoder::new(compressed.by_ref(), level)?;
     writer.write_all(&[CBOR_ARRAY_START])?;
     for item in items.iter() {
-        if let Some(cid) = item.link() {
-            cids.push(cid);
+        if let Some(link) = item.link() {
+            links.push(link);
         }
         serde_cbor::to_writer(writer.by_ref(), &IndexWC::from(item))?;
     }
     writer.write_all(&[CBOR_BREAK])?;
     writer.finish()?;
     salsa20::XSalsa20::new(key, nonce).apply_keystream(&mut compressed[24..]);
-    T::serialize_branch(&cids, compressed, into)?;
+    T::serialize_branch(&links, compressed, into)?;
     Ok(())
 }
 
@@ -474,8 +478,8 @@ pub(crate) fn deserialize_compressed<T: TreeTypes>(
     key: &salsa20::Key,
     ipld: &[u8],
 ) -> Result<Vec<Index<T>>> {
-    let (cids, mut compressed) = T::deserialize_branch(ipld)?;
-    let mut cids = cids.into();
+    let (links, mut compressed) = T::deserialize_branch(ipld)?;
+    let mut links = links.into();
     if compressed.len() < 24 {
         return Err(anyhow!("nonce missing"));
     }
@@ -486,7 +490,35 @@ pub(crate) fn deserialize_compressed<T: TreeTypes>(
     let data: Vec<IndexRC<T::Seq>> = serde_cbor::from_reader(reader)?;
     let result = data
         .into_iter()
-        .map(|data| data.into_index(&mut cids))
+        .map(|data| data.into_index(&mut links))
         .collect::<Vec<_>>();
     Ok(result)
+}
+
+/// Utility method to zip a number of indices with an offset that is increased by each index value
+pub(crate) fn zip_with_offset<'a, I: IntoIterator<Item = Index<T>> + 'a, T: TreeTypes + 'a>(
+    value: I,
+    offset: u64,
+) -> impl Iterator<Item = (Index<T>, u64)> + 'a {
+    value.into_iter().scan(offset, |offset, x| {
+        let o0 = *offset;
+        *offset += x.count();
+        Some((x, o0))
+    })
+}
+
+/// Utility method to zip a number of indices with an offset that is increased by each index value
+pub(crate) fn zip_with_offset_ref<
+    'a,
+    I: IntoIterator<Item = &'a Index<T>> + 'a,
+    T: TreeTypes + 'a,
+>(
+    value: I,
+    offset: u64,
+) -> impl Iterator<Item = (&'a Index<T>, u64)> + 'a {
+    value.into_iter().scan(offset, |offset, x| {
+        let o0 = *offset;
+        *offset += x.count();
+        Some((x, o0))
+    })
 }

@@ -8,7 +8,7 @@ use futures::prelude::*;
 use ipfs::MemStore;
 use quickcheck::{Arbitrary, Gen, TestResult};
 use serde::{Deserialize, Serialize};
-use std::{io, iter::FromIterator, ops::Range, sync::Arc};
+use std::{io, iter, iter::FromIterator, ops::Range, sync::Arc};
 mod ipfs;
 
 #[derive(Debug)]
@@ -86,7 +86,12 @@ where
     I::IntoIter: Send,
 {
     let store = Arc::new(MemStore::new());
-    let forest = Arc::new(Forest::<TT, u64>::new(store, Config::debug()));
+    let forest = Arc::new(Forest::<TT, u64>::new(
+        store.clone(),
+        store,
+        Config::debug(),
+        Default::default(),
+    ));
     let mut tree = Tree::<TT, u64>::empty(forest);
     tree.extend(xs).await?;
     tree.assert_invariants().await?;
@@ -252,7 +257,12 @@ async fn build_get(xs: Vec<(Key, u64)>) -> quickcheck::TestResult {
 async fn build_pack(xss: Vec<Vec<(Key, u64)>>) -> quickcheck::TestResult {
     test(|| async {
         let store = Arc::new(MemStore::new());
-        let forest = Arc::new(Forest::<TT, u64>::new(store, Config::debug()));
+        let forest = Arc::new(Forest::<TT, u64>::new(
+            store.clone(),
+            store,
+            Config::debug(),
+            Default::default(),
+        ));
         let mut tree = Tree::<TT, u64>::empty(forest);
         // flattened xss for reference
         let xs = xss.iter().cloned().flatten().collect::<Vec<_>>();
@@ -278,7 +288,12 @@ async fn build_pack(xss: Vec<Vec<(Key, u64)>>) -> quickcheck::TestResult {
 async fn retain(xss: Vec<Vec<(Key, u64)>>) -> quickcheck::TestResult {
     test(|| async {
         let store = Arc::new(MemStore::new());
-        let forest = Arc::new(Forest::<TT, u64>::new(store, Config::debug()));
+        let forest = Arc::new(Forest::<TT, u64>::new(
+            store.clone(),
+            store,
+            Config::debug(),
+            Default::default(),
+        ));
         let mut tree = Tree::<TT, u64>::empty(forest);
         // flattened xss for reference
         let xs = xss.iter().cloned().flatten().collect::<Vec<_>>();
@@ -309,7 +324,12 @@ async fn filter_test_simple() -> anyhow::Result<()> {
 #[tokio::test]
 async fn stream_test_simple() -> anyhow::Result<()> {
     let store = Arc::new(MemStore::new());
-    let forest = Arc::new(Forest::<TT, u64>::new(store, Config::debug()));
+    let forest = Arc::new(Forest::<TT, u64>::new(
+        store.clone(),
+        store,
+        Config::debug(),
+        Default::default(),
+    ));
     let mut trees = Vec::new();
     for n in 1..=10u64 {
         let mut tree = Tree::<TT, u64>::empty(forest.clone());
@@ -318,7 +338,10 @@ async fn stream_test_simple() -> anyhow::Result<()> {
         trees.push(tree.root().cloned().unwrap());
     }
     println!("{:?}", trees);
-    let res = forest.stream_roots(AllQuery, stream::iter(trees).boxed());
+    let res = forest
+        .read()
+        .clone()
+        .stream_roots(AllQuery, stream::iter(trees).boxed());
     let res = res.collect::<Vec<_>>().await;
     println!("{:?}", res);
     Ok(())
@@ -339,7 +362,7 @@ fn build(items: &mut Vec<u32>) {
             items.splice(0..MAX_BRANCH.min(items.len()), vec![items[0] + 1]);
         } else {
             // temporarily remove the start and recurse
-            let removed = items.splice(0..pos, std::iter::empty()).collect::<Vec<_>>();
+            let removed = items.splice(0..pos, iter::empty()).collect::<Vec<_>>();
             build(items);
             items.splice(0..0, removed);
         }

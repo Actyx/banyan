@@ -14,6 +14,8 @@ repository = "https://github.com/actyx/banyan/"
 [dependencies]
 zstd = "0.5.1+zstd.1.4.4"
 serde = { version = "1", features = ["derive", "rc"] }
+serde_cbor = { version = "0.11", features = ["tags"] }
+salsa20 = "0.5"
 
 futures = "0.3.5"
 tracing = "0.1"
@@ -22,10 +24,8 @@ maplit = "1.0"
 derive_more = "0.99"
 anyhow = "1.0"
 bitvec = "0.17"
-salsa20 = "0.5"
 rand = "0.7"
 ref-cast = "1.0"
-serde_cbor = { version = "0.11", features = ["tags"] }
 
 [dev-dependencies]
 hex = "0.4.2"
