@@ -65,7 +65,7 @@ impl<
         })
     }
     pub fn link(&self) -> Option<T::Link> {
-        self.root.as_ref().and_then(|r| r.link().clone())
+        self.root.as_ref().and_then(|r| *r.link())
     }
     pub fn level(&self) -> i32 {
         self.root.as_ref().map(|x| x.level() as i32).unwrap_or(-1)

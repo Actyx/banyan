@@ -36,7 +36,7 @@ pub trait TreeTypes: Debug + Send + Sync {
         + Send
         + Sync;
     /// link type to use over block boundaries
-    type Link: Display + Debug + Hash + Eq + Clone + Send + Sync;
+    type Link: Display + Debug + Hash + Eq + Clone + Copy + Send + Sync;
 
     fn serialize_branch(
         links: &[&Self::Link],

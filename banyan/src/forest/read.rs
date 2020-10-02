@@ -119,7 +119,7 @@ where
                         self.branch_cache()
                             .write()
                             .unwrap()
-                            .put(link.clone(), branch.clone());
+                            .put(*link, branch.clone());
                     }
                     Ok(branch)
                 }

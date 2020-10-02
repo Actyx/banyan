@@ -1,3 +1,4 @@
+use anyhow::bail;
 use banyan::index::CompactSeq;
 use banyan::{
     forest::{Config, Transaction, TreeTypes},
@@ -5,11 +6,11 @@ use banyan::{
     tree::Tree,
 };
 use futures::prelude::*;
-use ipfs::MemStore;
 use quickcheck::{Arbitrary, Gen, TestResult};
 use serde::{Deserialize, Serialize};
 use std::{io, iter, iter::FromIterator, ops::Range, sync::Arc};
-mod ipfs;
+use store::{MemStore, Sha256Digest};
+mod store;
 
 #[derive(Debug)]
 struct TT;
@@ -45,26 +46,44 @@ impl FromIterator<Key> for KeySeq {
     }
 }
 
+fn get_bytes(data: serde_cbor::Value) -> anyhow::Result<Vec<u8>> {
+    if let serde_cbor::Value::Bytes(data) = data {
+        Ok(data)
+    } else {
+        bail!("expected CBOR bytes!");
+    }
+}
+
 impl TreeTypes for TT {
     type Key = Key;
     type Seq = KeySeq;
-    type Link = ipfs::Cid;
+    type Link = Sha256Digest;
 
     fn serialize_branch(
         links: &[&Self::Link],
         data: Vec<u8>,
         w: impl io::Write,
     ) -> anyhow::Result<()> {
+        let links = links
+            .iter()
+            .map(|x| serde_cbor::Value::Bytes(x.as_ref().to_vec()))
+            .collect::<Vec<_>>();
         serde_cbor::to_writer(w, &(links, serde_cbor::Value::Bytes(data)))
             .map_err(|e| anyhow::Error::new(e))
     }
     fn deserialize_branch(reader: impl io::Read) -> anyhow::Result<(Vec<Self::Link>, Vec<u8>)> {
-        let (links, data): (Vec<Self::Link>, serde_cbor::Value) = serde_cbor::from_reader(reader)?;
-        if let serde_cbor::Value::Bytes(data) = data {
-            Ok((links, data))
-        } else {
-            Err(anyhow::anyhow!("expected cbor bytes"))
-        }
+        let (links, data): (Vec<serde_cbor::Value>, serde_cbor::Value) =
+            serde_cbor::from_reader(reader)?;
+        let data = get_bytes(data)?;
+        let links = links
+            .into_iter()
+            .map(get_bytes)
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        let links = links
+            .into_iter()
+            .map(|x| Sha256Digest::read(&x))
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        Ok((links, data))
     }
 }
 
