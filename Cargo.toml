@@ -5,3 +5,6 @@ members = [
   "banyan",
   "banyan-cli",
 ]
+
+[profile.release]
+debug = true

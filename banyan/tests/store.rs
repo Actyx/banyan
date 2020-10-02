@@ -30,7 +30,7 @@ impl ReadOnlyStore<Sha256Digest> for MemStore {
 }
 
 impl BlockWriter<Sha256Digest> for MemStore {
-    fn put(&self, data: &[u8], _level: u32) -> BoxFuture<Result<Sha256Digest>> {
+    fn put(&self, data: &[u8]) -> BoxFuture<Result<Sha256Digest>> {
         let link = Sha256Digest::digest(data);
         self.0.as_ref().write().unwrap().insert(link, data.into());
         future::ok(link).boxed()

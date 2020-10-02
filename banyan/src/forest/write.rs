@@ -84,7 +84,7 @@ where
         // todo: avoid the extra allocation by reserving space for the length prefix in tmp.
         let tmp = serde_cbor::to_vec(&serde_cbor::Value::Bytes(tmp))?;
         // store leaf
-        let link = self.writer.put(&tmp, 0).await?;
+        let link = self.writer.put(&tmp).await?;
         let index: LeafIndex<T> = LeafIndex {
             link: Some(link),
             value_bytes: leaf.as_ref().compressed().len() as u64,
@@ -347,7 +347,7 @@ where
             self.config().zstd_level,
             &mut cbor,
         )?;
-        Ok((self.writer.put(&cbor, level).await?, cbor.len() as u64))
+        Ok((self.writer.put(&cbor).await?, cbor.len() as u64))
     }
 
     pub(crate) async fn retain<Q: Query<T> + Send + Sync>(

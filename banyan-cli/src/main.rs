@@ -514,43 +514,43 @@ async fn main() -> Result<()> {
             .parse()?;
         let unbalanced = false;
         let (tree, tcreate) = bench_build(forest.clone(), base, batches, count, unbalanced).await?;
-        let t0 = std::time::Instant::now();
-        let _values: Vec<_> = tree.collect().await?;
-        let t1 = std::time::Instant::now();
-        let tcollect = t1 - t0;
-        let t0 = std::time::Instant::now();
-        let tags = vec![Key::range(0, u64::max_value(), Tags::single("fizz"))];
-        let query: Arc<dyn Query<TT>> = Arc::new(DnfQuery(tags));
-        let values: Vec<_> = tree
-            .clone()
-            .stream_filtered(query)
-            .map_ok(|(_, k, v)| (k, v))
-            .collect::<Vec<_>>()
-            .await;
-        println!("{}", values.len());
-        let t1 = std::time::Instant::now();
-        let tfilter_common = t1 - t0;
-        let t0 = std::time::Instant::now();
-        let tags = vec![Key::range(0, count / 10, Tags::single("fizzbuzz"))];
-        let query: Arc<dyn Query<TT>> = Arc::new(DnfQuery(tags));
-        let values: Vec<_> = tree
-            .stream_filtered(query)
-            .map_ok(|(_, k, v)| (k, v))
-            .collect::<Vec<_>>()
-            .await;
-        println!("{}", values.len());
-        let t1 = std::time::Instant::now();
-        let tfilter_rare = t1 - t0;
-        println!("create {}", (tcreate.as_micros() as f64) / 1000000.0);
-        println!("collect {}", (tcollect.as_micros() as f64) / 1000000.0);
-        println!(
-            "filter_common {}",
-            (tfilter_common.as_micros() as f64) / 1000000.0
-        );
-        println!(
-            "filter_rare {}",
-            (tfilter_rare.as_micros() as f64) / 1000000.0
-        );
+    // let t0 = std::time::Instant::now();
+    // let _values: Vec<_> = tree.collect().await?;
+    // let t1 = std::time::Instant::now();
+    // let tcollect = t1 - t0;
+    // let t0 = std::time::Instant::now();
+    // let tags = vec![Key::range(0, u64::max_value(), Tags::single("fizz"))];
+    // let query: Arc<dyn Query<TT>> = Arc::new(DnfQuery(tags));
+    // let values: Vec<_> = tree
+    //     .clone()
+    //     .stream_filtered(query)
+    //     .map_ok(|(_, k, v)| (k, v))
+    //     .collect::<Vec<_>>()
+    //     .await;
+    // println!("{}", values.len());
+    // let t1 = std::time::Instant::now();
+    // let tfilter_common = t1 - t0;
+    // let t0 = std::time::Instant::now();
+    // let tags = vec![Key::range(0, count / 10, Tags::single("fizzbuzz"))];
+    // let query: Arc<dyn Query<TT>> = Arc::new(DnfQuery(tags));
+    // let values: Vec<_> = tree
+    //     .stream_filtered(query)
+    //     .map_ok(|(_, k, v)| (k, v))
+    //     .collect::<Vec<_>>()
+    //     .await;
+    // println!("{}", values.len());
+    // let t1 = std::time::Instant::now();
+    // let tfilter_rare = t1 - t0;
+    // println!("create {}", (tcreate.as_micros() as f64) / 1000000.0);
+    // println!("collect {}", (tcollect.as_micros() as f64) / 1000000.0);
+    // println!(
+    //     "filter_common {}",
+    //     (tfilter_common.as_micros() as f64) / 1000000.0
+    // );
+    // println!(
+    //     "filter_rare {}",
+    //     (tfilter_rare.as_micros() as f64) / 1000000.0
+    // );
     } else {
         app().print_long_help()?;
         println!();

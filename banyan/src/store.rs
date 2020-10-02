@@ -7,7 +7,7 @@ pub trait BlockWriter<L>: Send + Sync {
     /// adds a block to a temporary staging area
     ///
     /// We might have to do this async at some point, but let's keep it sync for now.
-    fn put(&self, data: &[u8], level: u32) -> BoxFuture<Result<L>>;
+    fn put(&self, data: &[u8]) -> BoxFuture<Result<L>>;
 }
 
 /// A block writer, we use dyn to avoid having just another type parameter
@@ -21,7 +21,7 @@ pub type ArcReadOnlyStore<L> = Arc<dyn ReadOnlyStore<L> + Send + Sync + 'static>
 
 pub struct LoggingBlockWriter<L, I> {
     inner: I,
-    log: Arc<Mutex<Vec<(L, u32)>>>,
+    log: Arc<Mutex<Vec<L>>>,
 }
 
 impl<L: Copy, I> LoggingBlockWriter<L, I> {
@@ -32,17 +32,17 @@ impl<L: Copy, I> LoggingBlockWriter<L, I> {
         }
     }
 
-    pub fn written(&self) -> Vec<(L, u32)> {
+    pub fn written(&self) -> Vec<L> {
         self.log.lock().unwrap().clone()
     }
 }
 
 impl<L: Send + Sync + Copy, I: BlockWriter<L>> BlockWriter<L> for LoggingBlockWriter<L, I> {
-    fn put(&self, data: &[u8], level: u32) -> BoxFuture<Result<L>> {
+    fn put(&self, data: &[u8]) -> BoxFuture<Result<L>> {
         self.inner
-            .put(data, level)
+            .put(data)
             .map_ok(move |link| {
-                self.log.lock().unwrap().push((link, level));
+                self.log.lock().unwrap().push(link);
                 link
             })
             .boxed()
@@ -66,7 +66,7 @@ impl<L: Clone> MemBlockWriter<L> {
 }
 
 impl<L: Send + Sync + Copy> BlockWriter<L> for MemBlockWriter<L> {
-    fn put(&self, data: &[u8], level: u32) -> BoxFuture<Result<L>> {
+    fn put(&self, data: &[u8]) -> BoxFuture<Result<L>> {
         let block = todo!();
         todo!()
     }

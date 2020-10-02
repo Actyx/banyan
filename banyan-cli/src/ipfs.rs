@@ -169,7 +169,7 @@ impl ReadOnlyStore<Sha256Digest> for MemStore {
 }
 
 impl BlockWriter<Sha256Digest> for MemStore {
-    fn put(&self, data: &[u8], level: u32) -> BoxFuture<Result<Sha256Digest>> {
+    fn put(&self, data: &[u8]) -> BoxFuture<Result<Sha256Digest>> {
         let digest = Sha256Digest::new(data);
         self.0.as_ref().write().unwrap().insert(digest, data.into());
         future::ok(digest).boxed()
@@ -318,7 +318,7 @@ impl ReadOnlyStore<Sha256Digest> for IpfsStore {
 }
 
 impl BlockWriter<Sha256Digest> for IpfsStore {
-    fn put(&self, data: &[u8], level: u32) -> BoxFuture<Result<Sha256Digest>> {
+    fn put(&self, data: &[u8]) -> BoxFuture<Result<Sha256Digest>> {
         let data = data.to_vec();
         async move {
             let cid = crate::ipfs::block_put(&data, cid::Codec::DagCBOR, false).await?;
