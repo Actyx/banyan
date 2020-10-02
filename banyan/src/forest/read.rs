@@ -343,4 +343,185 @@ where
             .try_flatten_stream();
         Box::pin(s)
     }
+
+    pub(crate) async fn dump(&self, index: &Index<T>, prefix: &str) -> Result<()> {
+        match self.load_node(index).await? {
+            NodeInfo::Leaf(index, _) => {
+                println!(
+                    "{}Leaf(count={}, value_bytes={}, sealed={})",
+                    prefix,
+                    index.keys.count(),
+                    index.value_bytes,
+                    index.sealed,
+                );
+            }
+            NodeInfo::Branch(index, branch) => {
+                println!(
+                    "{}Branch(count={}, key_bytes={}, value_bytes={}, sealed={})",
+                    prefix, index.count, index.key_bytes, index.value_bytes, index.sealed,
+                );
+                let prefix = prefix.to_string() + "  ";
+                for x in branch.children.iter() {
+                    self.dumpr(x, &prefix).await?;
+                }
+            }
+            NodeInfo::PurgedBranch(index) => {
+                println!(
+                    "{}PurgedBranch(count={}, key_bytes={}, value_bytes={}, sealed={})",
+                    prefix, index.count, index.key_bytes, index.value_bytes, index.sealed,
+                );
+            }
+            NodeInfo::PurgedLeaf(index) => {
+                println!(
+                    "{}PurgedLeaf(count={}, key_bytes={}, sealed={})",
+                    prefix,
+                    index.keys.count(),
+                    index.value_bytes,
+                    index.sealed,
+                );
+            }
+        };
+        Ok(())
+    }
+
+    /// recursion helper for dump
+    fn dumpr<'a>(&'a self, index: &'a Index<T>, prefix: &'a str) -> FutureResult<'a, ()> {
+        self.dump(index, prefix).boxed()
+    }
+
+    pub(crate) async fn roots(&self, index: &Index<T>) -> Result<Vec<Index<T>>> {
+        let mut res = Vec::new();
+        let mut level: i32 = i32::max_value();
+        self.roots0(index, &mut level, &mut res).await?;
+        Ok(res)
+    }
+
+    async fn roots0(
+        &self,
+        index: &Index<T>,
+        level: &mut i32,
+        res: &mut Vec<Index<T>>,
+    ) -> Result<()> {
+        if index.sealed() && index.level() as i32 <= *level {
+            *level = index.level() as i32;
+            res.push(index.clone());
+        } else {
+            *level = (*level).min(index.level() as i32 - 1);
+            if let Index::Branch(b) = index {
+                if let Some(branch) = self.load_branch(b).await? {
+                    for child in branch.children.iter() {
+                        self.roots0r(child, level, res).await?;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// recursion helper for roots0
+    fn roots0r<'a>(
+        &'a self,
+        index: &'a Index<T>,
+        level: &'a mut i32,
+        res: &'a mut Vec<Index<T>>,
+    ) -> FutureResult<'a, ()> {
+        self.roots0(index, level, res).boxed()
+    }
+
+    pub(crate) async fn check_invariants(
+        &self,
+        index: &Index<T>,
+        level: &mut i32,
+        msgs: &mut Vec<String>,
+    ) -> Result<()> {
+        macro_rules! check {
+            ($expression:expr) => {
+                if !$expression {
+                    let text = stringify!($expression);
+                    msgs.push(format!("{}", text));
+                }
+            };
+        }
+        if !index.sealed() {
+            *level = (*level).min((index.level() as i32) - 1);
+        }
+        match self.load_node(index).await? {
+            NodeInfo::Leaf(index, leaf) => {
+                let value_count = leaf.as_ref().count()?;
+                check!(value_count == index.keys.count());
+                let leaf_sealed = self
+                    .config()
+                    .leaf_sealed(index.value_bytes, index.keys.count());
+                check!(index.sealed == leaf_sealed);
+            }
+            NodeInfo::Branch(index, branch) => {
+                check!(branch.count() == index.summaries.count());
+                for child in &branch.children.to_vec() {
+                    if index.sealed {
+                        check!(child.level() == index.level - 1);
+                    } else {
+                        check!(child.level() < index.level);
+                    }
+                }
+                for (child, summary) in branch.children.iter().zip(index.summaries()) {
+                    let child_summary = child.data().summarize();
+                    check!(child_summary == summary);
+                }
+                let branch_sealed = self.config.branch_sealed(&branch.children, index.level);
+                check!(index.sealed == branch_sealed);
+                for child in &branch.children.to_vec() {
+                    self.check_invariantsr(child, level, msgs).await?;
+                }
+            }
+            NodeInfo::PurgedBranch(_) => {
+                // not possible to check invariants since the data to compare to is gone
+            }
+            NodeInfo::PurgedLeaf(_) => {
+                // not possible to check invariants since the data to compare to is gone
+            }
+        };
+        Ok(())
+    }
+
+    /// Recursion helper for check_invariants
+    fn check_invariantsr<'a>(
+        &'a self,
+        index: &'a Index<T>,
+        level: &'a mut i32,
+        msgs: &'a mut Vec<String>,
+    ) -> FutureResult<'a, ()> {
+        self.check_invariants(index, level, msgs).boxed()
+    }
+
+    /// Checks if a node is packed to the left
+    pub(crate) async fn is_packed(&self, index: &Index<T>) -> Result<bool> {
+        Ok(
+            if let NodeInfo::Branch(index, branch) = self.load_node(index).await? {
+                if index.sealed {
+                    // sealed nodes, for themselves, are packed
+                    true
+                } else if let Some((last, rest)) = branch.children.split_last() {
+                    // for the first n-1 children, they must all be sealed and at exactly 1 level below
+                    let first_ok = rest
+                        .iter()
+                        .all(|child| child.sealed() && child.level() == index.level - 1);
+                    // for the last child, it can be at any level below, and does not have to be sealed,
+                    let last_ok = last.level() < index.level;
+                    // but it must itself be packed
+                    let rec_ok = self.is_packedr(last).await?;
+                    first_ok && last_ok && rec_ok
+                } else {
+                    // this should not happen, but a branch with no children can be considered packed
+                    true
+                }
+            } else {
+                true
+            },
+        )
+    }
+
+    /// Recursion helper for is_packed
+    fn is_packedr<'a>(&'a self, index: &'a Index<T>) -> FutureResult<'a, bool> {
+        self.is_packed(index).boxed()
+    }
 }
