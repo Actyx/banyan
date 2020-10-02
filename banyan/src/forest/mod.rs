@@ -23,7 +23,7 @@ pub type BranchCache<T: TreeTypes> = Arc<RwLock<lru::LruCache<T::Link, Branch<T>
 ///
 /// There might be more types in the future, so this essentially acts as a module for the entire
 /// code base.
-pub trait TreeTypes: Debug + Send + Sync {
+pub trait TreeTypes: Debug + Send + Sync + 'static {
     /// key type. This also doubles as the type for a combination (union) of keys
     type Key: Debug + Eq + Send;
     /// compact sequence type to be used for indices
@@ -47,7 +47,7 @@ pub trait TreeTypes: Debug + Send + Sync {
 }
 
 /// Everything that is needed to read trees
-pub struct Forest<T: TreeTypes, V> {
+pub struct ForestInner<T: TreeTypes, V> {
     pub(crate) store: ArcReadOnlyStore<T::Link>,
     pub(crate) branch_cache: BranchCache<T>,
     pub(crate) crypto_config: CryptoConfig,
@@ -55,9 +55,42 @@ pub struct Forest<T: TreeTypes, V> {
     pub(crate) _tt: PhantomData<(T, V)>,
 }
 
+pub struct Forest<TT: TreeTypes, V>(Arc<ForestInner<TT, V>>);
+
+impl<TT: TreeTypes, V> Clone for Forest<TT, V> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
+
+impl<TT: TreeTypes, V> Forest<TT, V> {
+    pub fn new(
+        store: ArcReadOnlyStore<TT::Link>,
+        branch_cache: BranchCache<TT>,
+        crypto_config: CryptoConfig,
+        config: Config,
+    ) -> Self {
+        Self(Arc::new(ForestInner {
+            store,
+            branch_cache,
+            crypto_config,
+            config,
+            _tt: PhantomData,
+        }))
+    }
+}
+
+impl<T: TreeTypes, V> std::ops::Deref for Forest<T, V> {
+    type Target = ForestInner<T, V>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 /// Everything that is needed to write trees. To write trees, you also have to read trees.
 pub struct Transaction<T: TreeTypes, V> {
-    pub(crate) read: Arc<Forest<T, V>>,
+    pub(crate) read: Forest<T, V>,
     pub(crate) writer: ArcBlockWriter<T::Link>,
 }
 

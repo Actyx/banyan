@@ -17,7 +17,7 @@ impl<
     ///
     /// This is implemented by calling [stream_roots_chunked] and just flattening the chunks.
     pub fn stream_roots<Q: Query<T> + Clone + 'static>(
-        self: Arc<Self>,
+        &self,
         query: Q,
         roots: BoxStream<'static, T::Link>,
     ) -> impl Stream<Item = anyhow::Result<(u64, T::Key, V)>> + Send {
@@ -35,7 +35,7 @@ impl<
     /// - mk_extra: a fn that allows to compute extra info from indices.
     ///     this can be useful to get progress info even if the query does not match any events
     pub fn stream_roots_chunked<S, Q, E, F>(
-        self: Arc<Self>,
+        &self,
         query: Q,
         roots: S,
         mk_extra: &'static F,
@@ -48,17 +48,20 @@ impl<
     {
         let offset = Arc::new(AtomicU64::new(0));
         let forest = self.clone();
+        let forest2 = self.clone();
         roots
             .filter_map(move |link| forest.load_branch_from_link(link).map(|r| r.ok()))
             .flat_map(move |index: Index<T>| {
                 // create an intersection of a range query and the main query
                 // and wrap it in an arc so it is cheap to clone
-                let query: Arc<dyn Query<T>> = Arc::new(AndQuery(
+                let query = AndQuery(
                     OffsetRangeQuery::from(offset.load(Ordering::SeqCst)..),
                     query.clone(),
-                ));
+                )
+                .boxed();
                 let offset = offset.clone();
-                self.clone()
+                forest2
+                    .clone()
                     .stream_filtered_chunked(0, query, index, mk_extra)
                     .take_while(move |result| {
                         if let Ok(chunk) = result {
@@ -80,7 +83,7 @@ impl<
     /// - mk_extra: a fn that allows to compute extra info from indices.
     ///     this can be useful to get progress info even if the query does not match any events
     pub fn stream_roots_chunked_reverse<S, Q, E, F>(
-        self: Arc<Self>,
+        &self,
         query: Q,
         roots: S,
         end_offset: u64,
@@ -94,18 +97,17 @@ impl<
     {
         let end_offset_ref = Arc::new(AtomicU64::new(end_offset));
         let forest = self.clone();
+        let forest2 = self.clone();
         roots
             .filter_map(move |link| forest.clone().load_branch_from_link(link).map(|r| r.ok()))
             .flat_map(move |index| {
                 let end_offset = end_offset_ref.load(Ordering::SeqCst);
                 // create an intersection of a range query and the main query
                 // and wrap it in an arc so it is cheap to clone
-                let query: Arc<dyn Query<T>> = Arc::new(AndQuery(
-                    OffsetRangeQuery::from(..end_offset),
-                    query.clone(),
-                ));
+                let query = AndQuery(OffsetRangeQuery::from(..end_offset), query.clone()).boxed();
                 let end_offset_ref = end_offset_ref.clone();
-                self.clone()
+                forest2
+                    .clone()
                     .stream_filtered_chunked_reverse(0, query, index, mk_extra)
                     .take_while(move |result| {
                         if let Ok(chunk) = result {

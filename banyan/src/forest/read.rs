@@ -9,7 +9,6 @@ use core::fmt::Debug;
 use futures::{prelude::*, stream::BoxStream};
 use salsa20::{stream_cipher::NewStreamCipher, stream_cipher::SyncStreamCipher, XSalsa20};
 use serde::{de::DeserializeOwned, Serialize};
-use std::{marker::PhantomData, sync::Arc};
 
 /// basic random access append only async tree
 impl<T, V> Forest<T, V>
@@ -18,11 +17,11 @@ where
     V: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static,
 {
     pub(crate) fn crypto_config(&self) -> &CryptoConfig {
-        &self.crypto_config
+        &self.0.crypto_config
     }
 
     pub(crate) fn config(&self) -> &Config {
-        &self.config
+        &self.0.config
     }
 
     pub(crate) fn value_key(&self) -> salsa20::Key {
@@ -34,26 +33,26 @@ where
     }
 
     fn store(&self) -> &ArcReadOnlyStore<T::Link> {
-        &self.store
+        &self.0.store
     }
 
     fn branch_cache(&self) -> &BranchCache<T> {
-        &self.branch_cache
+        &self.0.branch_cache
     }
 
-    pub fn with_value_type<
-        W: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static,
-    >(
-        &self,
-    ) -> Forest<T, W> {
-        Forest {
-            store: self.store.clone(),
-            branch_cache: self.branch_cache.clone(),
-            crypto_config: self.crypto_config,
-            config: self.config,
-            _tt: PhantomData,
-        }
-    }
+    // pub fn with_value_type<
+    //     W: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static,
+    // >(
+    //     &self,
+    // ) -> Forest<T, W> {
+    //     Forest {
+    //         store: self.store.clone(),
+    //         branch_cache: self.branch_cache.clone(),
+    //         crypto_config: self.crypto_config,
+    //         config: self.config,
+    //         _tt: PhantomData,
+    //     }
+    // }
 
     /// load a leaf given a leaf index
     pub(crate) async fn load_leaf(&self, index: &LeafIndex<T>) -> Result<Option<Leaf>> {
@@ -201,7 +200,7 @@ where
     ///
     /// Implemented in terms of stream_filtered_chunked
     pub(crate) fn stream_filtered<Q: Query<T> + Clone + 'static>(
-        self: Arc<Self>,
+        &self,
         offset: u64,
         query: Q,
         index: Index<T>,
@@ -217,14 +216,15 @@ where
         E: Send + 'static,
         F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
     >(
-        self: Arc<Self>,
+        &self,
         offset: u64,
         query: Q,
         index: Index<T>,
         mk_extra: &'static F,
     ) -> BoxStream<'static, Result<FilteredChunk<T, V, E>>> {
+        let this: Forest<T, V> = self.clone();
         async move {
-            Ok(match self.load_node(&index).await? {
+            Ok(match this.load_node(&index).await? {
                 NodeInfo::Leaf(index, node) => {
                     // todo: don't get the node here, since we might not need it
                     let mut matching = vec![true; index.keys.len()];
@@ -250,7 +250,7 @@ where
                     let iter = matching.into_iter().zip(offsets).map(
                         move |(is_matching, (child, offset))| {
                             if is_matching {
-                                self.clone()
+                                this.clone()
                                     .stream_filtered_chunked(offset, query.clone(), child, mk_extra)
                                     .right_stream()
                             } else {
@@ -279,15 +279,16 @@ where
         E: Send + 'static,
         F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
     >(
-        self: Arc<Self>,
+        &self,
         offset: u64,
         query: Q,
         index: Index<T>,
         mk_extra: &'static F,
     ) -> BoxStream<'static, Result<FilteredChunk<T, V, E>>> {
+        let this = self.clone();
         let s =
             async move {
-                Ok(match self.load_node(&index).await? {
+                Ok(match this.load_node(&index).await? {
                     NodeInfo::Leaf(index, node) => {
                         // todo: don't get the node here, since we might not need it
                         let mut matching = vec![true; index.keys.len()];
@@ -315,7 +316,7 @@ where
                         let iter = children.into_iter().rev().map(
                             move |(is_matching, (child, offset))| {
                                 if is_matching {
-                                    self.clone()
+                                    this.clone()
                                         .stream_filtered_chunked_reverse(
                                             offset,
                                             query.clone(),

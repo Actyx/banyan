@@ -26,7 +26,7 @@ use futures::prelude::*;
 use rand::RngCore;
 use salsa20::{stream_cipher::NewStreamCipher, stream_cipher::SyncStreamCipher, XSalsa20};
 use serde::{de::DeserializeOwned, Serialize};
-use std::{iter, marker::PhantomData, sync::Arc, sync::RwLock};
+use std::{iter, sync::Arc, sync::RwLock};
 use tracing::info;
 
 /// basic random access append only async tree
@@ -35,7 +35,7 @@ where
     T: TreeTypes + 'static,
     V: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static,
 {
-    pub fn read(&self) -> &Arc<Forest<T, V>> {
+    pub fn read(&self) -> &Forest<T, V> {
         &self.read
     }
 
@@ -506,13 +506,7 @@ where
     ) -> Self {
         let branch_cache = Arc::new(RwLock::new(lru::LruCache::<T::Link, Branch<T>>::new(1000)));
         Self {
-            read: Arc::new(Forest {
-                store,
-                config,
-                crypto_config,
-                branch_cache,
-                _tt: PhantomData,
-            }),
+            read: Forest::new(store, branch_cache, crypto_config, config),
             writer,
         }
     }
