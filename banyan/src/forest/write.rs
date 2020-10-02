@@ -20,7 +20,7 @@ use crate::{
     util::{is_sorted, BoolSliceExt},
     zstd_array::ZstdArrayBuilder,
 };
-use anyhow::Result;
+use anyhow::{ensure, Result};
 use core::fmt::Debug;
 use futures::prelude::*;
 use rand::RngCore;
@@ -224,7 +224,10 @@ where
         level: u32,
         from: &mut iter::Peekable<impl Iterator<Item = (T::Key, V)> + Send>,
     ) -> Result<Index<T>> {
-        assert!(from.peek().is_some());
+        ensure!(
+            from.peek().is_some(),
+            "must have more than 1 element when extending"
+        );
         assert!(node.map(|node| level >= node.level()).unwrap_or(true));
         let mut node = if let Some(node) = node {
             self.extendr(node, from).await?
@@ -245,6 +248,32 @@ where
             assert!(node.level() <= level);
         }
         Ok(node)
+    }
+
+    pub(crate) async fn extend_unpacked<I>(
+        &self,
+        index: Option<&Index<T>>,
+        from: I,
+    ) -> Result<Option<Index<T>>>
+    where
+        I: IntoIterator<Item = (T::Key, V)>,
+        I::IntoIter: Send,
+    {
+        let mut from = from.into_iter().peekable();
+        if from.peek().is_none() {
+            return Ok(index.cloned());
+        }
+        // create a completely new tree
+        let b = self.extend_above(None, u32::max_value(), &mut from).await?;
+        Ok(Some(match index.cloned() {
+            Some(a) => {
+                let level = a.level().max(b.level()) + 1;
+                self.extend_branch(vec![a, b], level, from.by_ref(), CreateMode::Unpacked)
+                    .await?
+                    .into()
+            }
+            None => b,
+        }))
     }
 
     /// extends an existing node with some values

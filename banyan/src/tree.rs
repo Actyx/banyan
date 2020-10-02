@@ -1,12 +1,12 @@
 //! creation and traversal of banyan trees
 use super::index::*;
-use crate::forest::{CreateMode, FilteredChunk, Transaction, TreeTypes};
+use crate::forest::{FilteredChunk, Transaction, TreeTypes};
 use crate::query::{AllQuery, OffsetRangeQuery, Query};
 use anyhow::Result;
 use futures::prelude::*;
 use serde::{de::DeserializeOwned, Serialize};
 use std::fmt::Debug;
-use std::{fmt, iter::FromIterator, marker::PhantomData, sync::Arc};
+use std::{fmt, iter::FromIterator, marker::PhantomData};
 use tracing::*;
 
 /// A tree. This is mostly an user friendly handle.
@@ -14,7 +14,7 @@ use tracing::*;
 /// Most of the logic except for handling the empty case is implemented in the forest
 pub struct Tree<T: TreeTypes, V> {
     root: Option<Index<T>>,
-    forest: Arc<Transaction<T, V>>,
+    forest: Transaction<T, V>,
     _t: PhantomData<V>,
 }
 
@@ -57,7 +57,7 @@ impl<
         T: TreeTypes + 'static,
     > Tree<T, V>
 {
-    pub async fn from_link(link: T::Link, forest: Arc<Transaction<T, V>>) -> Result<Self> {
+    pub async fn from_link(link: T::Link, forest: Transaction<T, V>) -> Result<Self> {
         Ok(Self {
             root: Some(forest.load_branch_from_link(link).await?),
             forest,
@@ -70,10 +70,7 @@ impl<
     pub fn level(&self) -> i32 {
         self.root.as_ref().map(|x| x.level() as i32).unwrap_or(-1)
     }
-    pub async fn from_roots(
-        forest: Arc<Transaction<T, V>>,
-        mut roots: Vec<Index<T>>,
-    ) -> Result<Self> {
+    pub async fn from_roots(forest: Transaction<T, V>, mut roots: Vec<Index<T>>) -> Result<Self> {
         assert!(roots.iter().all(|x| x.sealed()));
         assert!(is_sorted(roots.iter().map(|x| x.level()).rev()));
         while roots.len() > 1 {
@@ -85,7 +82,7 @@ impl<
             _t: PhantomData,
         })
     }
-    pub fn empty(forest: Arc<Transaction<T, V>>) -> Self {
+    pub fn empty(forest: Transaction<T, V>) -> Self {
         Self {
             root: None,
             forest,
@@ -220,23 +217,10 @@ impl<
         I: IntoIterator<Item = (T::Key, V)>,
         I::IntoIter: Send,
     {
-        let mut from = from.into_iter();
-        let mut tree = Tree::empty(self.forest.clone());
-        tree.extend(from.by_ref()).await?;
-        self.root = match (self.root.clone(), tree.root) {
-            (Some(a), Some(b)) => {
-                let level = a.level().max(b.level()) + 1;
-                let mut from = from.peekable();
-                Some(
-                    self.forest
-                        .extend_branch(vec![a, b], level, from.by_ref(), CreateMode::Unpacked)
-                        .await?
-                        .into(),
-                )
-            }
-            (None, tree) => tree,
-            (tree, None) => tree,
-        };
+        self.root = self
+            .forest
+            .extend_unpacked(self.root.as_ref(), from)
+            .await?;
         Ok(())
     }
 

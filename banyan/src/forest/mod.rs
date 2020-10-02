@@ -78,6 +78,13 @@ impl<TT: TreeTypes, V> Forest<TT, V> {
             _tt: PhantomData,
         }))
     }
+
+    pub fn transaction(&self, writer: ArcBlockWriter<TT::Link>) -> Transaction<TT, V> {
+        Transaction {
+            read: self.clone(),
+            writer,
+        }
+    }
 }
 
 impl<T: TreeTypes, V> std::ops::Deref for Forest<T, V> {
@@ -90,8 +97,17 @@ impl<T: TreeTypes, V> std::ops::Deref for Forest<T, V> {
 
 /// Everything that is needed to write trees. To write trees, you also have to read trees.
 pub struct Transaction<T: TreeTypes, V> {
-    pub(crate) read: Forest<T, V>,
-    pub(crate) writer: ArcBlockWriter<T::Link>,
+    read: Forest<T, V>,
+    writer: ArcBlockWriter<T::Link>,
+}
+
+impl<TT: TreeTypes, V> Clone for Transaction<TT, V> {
+    fn clone(&self) -> Self {
+        Self {
+            read: self.read.clone(),
+            writer: self.writer.clone(),
+        }
+    }
 }
 
 impl<T: TreeTypes, V> std::ops::Deref for Transaction<T, V> {

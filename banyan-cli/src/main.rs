@@ -193,7 +193,7 @@ fn create_salsa_key(text: &str) -> salsa20::Key {
 }
 
 async fn build_tree(
-    forest: Arc<Transaction<TT, String>>,
+    forest: Transaction<TT, String>,
     base: Option<Sha256Digest>,
     batches: u64,
     count: u64,
@@ -246,7 +246,7 @@ async fn build_tree(
 }
 
 async fn bench_build(
-    forest: Arc<Transaction<TT, String>>,
+    forest: Transaction<TT, String>,
     base: Option<Sha256Digest>,
     batches: u64,
     count: u64,
@@ -342,12 +342,7 @@ async fn main() -> Result<()> {
         index_key,
         value_key,
     };
-    let forest = Arc::new(Transaction::<TT, String>::new(
-        store.clone(),
-        store,
-        config,
-        crypto_config,
-    ));
+    let forest = Transaction::<TT, String>::new(store.clone(), store, config, crypto_config);
     if let Some(matches) = matches.subcommand_matches("dump") {
         let root = Sha256Digest::from_str(
             matches
@@ -499,12 +494,7 @@ async fn main() -> Result<()> {
             index_key,
             value_key,
         };
-        let forest = Arc::new(Transaction::<TT, String>::new(
-            store.clone(),
-            store,
-            config,
-            crypto_config,
-        ));
+        let forest = Transaction::<TT, String>::new(store.clone(), store, config, crypto_config);
         let _t0 = std::time::Instant::now();
         let base = None;
         let batches = 1;
