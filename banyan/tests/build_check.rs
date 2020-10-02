@@ -1,3 +1,4 @@
+use anyhow::bail;
 use banyan::index::CompactSeq;
 use banyan::{
     forest::{Config, Transaction, TreeTypes},
@@ -5,11 +6,10 @@ use banyan::{
     tree::Tree,
 };
 use futures::prelude::*;
-use store::{MemStore, Sha256Digest};
 use quickcheck::{Arbitrary, Gen, TestResult};
 use serde::{Deserialize, Serialize};
 use std::{io, iter, iter::FromIterator, ops::Range, sync::Arc};
-use anyhow::bail;
+use store::{MemStore, Sha256Digest};
 mod store;
 
 #[derive(Debug)]
@@ -64,15 +64,25 @@ impl TreeTypes for TT {
         data: Vec<u8>,
         w: impl io::Write,
     ) -> anyhow::Result<()> {
-        let links = links.iter().map(|x| serde_cbor::Value::Bytes(x.as_ref().to_vec())).collect::<Vec<_>>();
+        let links = links
+            .iter()
+            .map(|x| serde_cbor::Value::Bytes(x.as_ref().to_vec()))
+            .collect::<Vec<_>>();
         serde_cbor::to_writer(w, &(links, serde_cbor::Value::Bytes(data)))
             .map_err(|e| anyhow::Error::new(e))
     }
     fn deserialize_branch(reader: impl io::Read) -> anyhow::Result<(Vec<Self::Link>, Vec<u8>)> {
-        let (links, data): (Vec<serde_cbor::Value>, serde_cbor::Value) = serde_cbor::from_reader(reader)?;
+        let (links, data): (Vec<serde_cbor::Value>, serde_cbor::Value) =
+            serde_cbor::from_reader(reader)?;
         let data = get_bytes(data)?;
-        let links = links.into_iter().map(get_bytes).collect::<anyhow::Result<Vec<_>>>()?;
-        let links = links.into_iter().map(|x| Sha256Digest::read(&x)).collect::<anyhow::Result<Vec<_>>>()?;
+        let links = links
+            .into_iter()
+            .map(get_bytes)
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        let links = links
+            .into_iter()
+            .map(|x| Sha256Digest::read(&x))
+            .collect::<anyhow::Result<Vec<_>>>()?;
         Ok((links, data))
     }
 }

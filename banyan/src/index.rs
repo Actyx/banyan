@@ -112,7 +112,7 @@ impl<T: TreeTypes> Clone for LeafIndex<T> {
         Self {
             sealed: self.sealed,
             value_bytes: self.value_bytes,
-            link: self.link.clone(),
+            link: self.link,
             keys: self.keys.clone(),
         }
     }
@@ -154,7 +154,7 @@ impl<T: TreeTypes> Clone for BranchIndex<T> {
             sealed: self.sealed,
             value_bytes: self.value_bytes,
             key_bytes: self.key_bytes,
-            link: self.link.clone(),
+            link: self.link,
             summaries: self.summaries.clone(),
         }
     }

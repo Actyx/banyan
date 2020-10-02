@@ -1,13 +1,14 @@
 //! helper methods for the tesqts
-use anyhow::{anyhow, Result, bail, ensure};
+use anyhow::{anyhow, Result};
 use banyan::store::{BlockWriter, ReadOnlyStore};
-use derive_more::{Display, From, Into, FromStr};
 use futures::{future::BoxFuture, prelude::*};
-use serde::{de::Visitor, ser::SerializeStruct, Deserialize, Deserializer, Serialize, Serializer};
-use serde_cbor::tags::Tagged;
-use std::{collections::HashMap, convert::TryInto, ops::Deref, sync::{Arc, RwLock}};
-use std::{convert::TryFrom, fmt, result, str::FromStr};
-use sha2::{Sha256, Digest};
+use sha2::{Digest, Sha256};
+use std::{
+    collections::HashMap,
+    convert::TryInto,
+    fmt,
+    sync::{Arc, RwLock},
+};
 
 pub struct MemStore(Arc<RwLock<HashMap<Sha256Digest, Arc<[u8]>>>>);
 
@@ -31,11 +32,7 @@ impl ReadOnlyStore<Sha256Digest> for MemStore {
 impl BlockWriter<Sha256Digest> for MemStore {
     fn put(&self, data: &[u8], _level: u32) -> BoxFuture<Result<Sha256Digest>> {
         let link = Sha256Digest::digest(data);
-        self.0
-            .as_ref()
-            .write()
-            .unwrap()
-            .insert(link, data.into());
+        self.0.as_ref().write().unwrap().insert(link, data.into());
         future::ok(link).boxed()
     }
 }
