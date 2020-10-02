@@ -1,5 +1,5 @@
 use super::{
-    BranchCache, Config, CryptoConfig, FilteredChunk, FutureResult, ReadForest, TreeTypes,
+    BranchCache, Config, CryptoConfig, FilteredChunk, FutureResult, Forest, TreeTypes,
 };
 use crate::{
     index::deserialize_compressed, index::zip_with_offset, index::Branch, index::BranchIndex,
@@ -12,11 +12,13 @@ use core::fmt::Debug;
 use futures::{prelude::*, stream::BoxStream};
 use salsa20::{stream_cipher::NewStreamCipher, stream_cipher::SyncStreamCipher, XSalsa20};
 use serde::{de::DeserializeOwned, Serialize};
-use std::sync::Arc;
-use tracing::info;
+use std::{
+    sync::Arc,
+    marker::PhantomData,
+};
 
 /// basic random access append only async tree
-impl<T, V> ReadForest<T, V>
+impl<T, V> Forest<T, V>
 where
     T: TreeTypes + 'static,
     V: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static,
@@ -43,6 +45,16 @@ where
 
     fn branch_cache(&self) -> &BranchCache<T> {
         &self.branch_cache
+    }
+
+    pub fn with_value_type<W: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static>(&self) -> Forest<T, W> {
+        Forest {
+            store: self.store.clone(),
+            branch_cache: self.branch_cache.clone(),
+            crypto_config: self.crypto_config,
+            config: self.config,
+            _tt: PhantomData,
+        }
     }
 
     /// load a leaf given a leaf index
@@ -151,6 +163,7 @@ where
             None
         })
     }
+
     pub(crate) async fn get(
         &self,
         index: &Index<T>,

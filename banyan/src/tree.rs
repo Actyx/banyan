@@ -1,6 +1,6 @@
 //! creation and traversal of banyan trees
 use super::index::*;
-use crate::forest::{CreateMode, FilteredChunk, Forest, TreeTypes};
+use crate::forest::{CreateMode, FilteredChunk, Transaction, TreeTypes};
 use crate::query::{AllQuery, OffsetRangeQuery, Query};
 use anyhow::Result;
 use futures::prelude::*;
@@ -14,7 +14,7 @@ use tracing::*;
 /// Most of the logic except for handling the empty case is implemented in the forest
 pub struct Tree<T: TreeTypes, V> {
     root: Option<Index<T>>,
-    forest: Arc<Forest<T, V>>,
+    forest: Arc<Transaction<T, V>>,
     _t: PhantomData<V>,
 }
 
@@ -57,7 +57,7 @@ impl<
         T: TreeTypes + 'static,
     > Tree<T, V>
 {
-    pub async fn from_link(link: T::Link, forest: Arc<Forest<T, V>>) -> Result<Self> {
+    pub async fn from_link(link: T::Link, forest: Arc<Transaction<T, V>>) -> Result<Self> {
         Ok(Self {
             root: Some(forest.load_branch_from_link(link).await?),
             forest,
@@ -70,7 +70,7 @@ impl<
     pub fn level(&self) -> i32 {
         self.root.as_ref().map(|x| x.level() as i32).unwrap_or(-1)
     }
-    pub async fn from_roots(forest: Arc<Forest<T, V>>, mut roots: Vec<Index<T>>) -> Result<Self> {
+    pub async fn from_roots(forest: Arc<Transaction<T, V>>, mut roots: Vec<Index<T>>) -> Result<Self> {
         assert!(roots.iter().all(|x| x.sealed()));
         assert!(is_sorted(roots.iter().map(|x| x.level()).rev()));
         while roots.len() > 1 {
@@ -82,7 +82,7 @@ impl<
             _t: PhantomData,
         })
     }
-    pub fn empty(forest: Arc<Forest<T, V>>) -> Self {
+    pub fn empty(forest: Arc<Transaction<T, V>>) -> Self {
         Self {
             root: None,
             forest,

@@ -1,6 +1,6 @@
 use banyan::index::CompactSeq;
 use banyan::{
-    forest::{Config, Forest, TreeTypes},
+    forest::{Config, Transaction, TreeTypes},
     query::{AllQuery, OffsetRangeQuery},
     tree::Tree,
 };
@@ -86,7 +86,7 @@ where
     I::IntoIter: Send,
 {
     let store = Arc::new(MemStore::new());
-    let forest = Arc::new(Forest::<TT, u64>::new(
+    let forest = Arc::new(Transaction::<TT, u64>::new(
         store.clone(),
         store,
         Config::debug(),
@@ -257,7 +257,7 @@ async fn build_get(xs: Vec<(Key, u64)>) -> quickcheck::TestResult {
 async fn build_pack(xss: Vec<Vec<(Key, u64)>>) -> quickcheck::TestResult {
     test(|| async {
         let store = Arc::new(MemStore::new());
-        let forest = Arc::new(Forest::<TT, u64>::new(
+        let forest = Arc::new(Transaction::<TT, u64>::new(
             store.clone(),
             store,
             Config::debug(),
@@ -288,7 +288,7 @@ async fn build_pack(xss: Vec<Vec<(Key, u64)>>) -> quickcheck::TestResult {
 async fn retain(xss: Vec<Vec<(Key, u64)>>) -> quickcheck::TestResult {
     test(|| async {
         let store = Arc::new(MemStore::new());
-        let forest = Arc::new(Forest::<TT, u64>::new(
+        let forest = Arc::new(Transaction::<TT, u64>::new(
             store.clone(),
             store,
             Config::debug(),
@@ -324,7 +324,7 @@ async fn filter_test_simple() -> anyhow::Result<()> {
 #[tokio::test]
 async fn stream_test_simple() -> anyhow::Result<()> {
     let store = Arc::new(MemStore::new());
-    let forest = Arc::new(Forest::<TT, u64>::new(
+    let forest = Arc::new(Transaction::<TT, u64>::new(
         store.clone(),
         store,
         Config::debug(),

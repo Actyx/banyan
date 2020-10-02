@@ -193,7 +193,7 @@ fn create_salsa_key(text: &str) -> salsa20::Key {
 }
 
 async fn build_tree(
-    forest: Arc<Forest<TT, String>>,
+    forest: Arc<Transaction<TT, String>>,
     base: Option<Sha256Digest>,
     batches: u64,
     count: u64,
@@ -246,7 +246,7 @@ async fn build_tree(
 }
 
 async fn bench_build(
-    forest: Arc<Forest<TT, String>>,
+    forest: Arc<Transaction<TT, String>>,
     base: Option<Sha256Digest>,
     batches: u64,
     count: u64,
@@ -342,7 +342,7 @@ async fn main() -> Result<()> {
         index_key,
         value_key,
     };
-    let forest = Arc::new(Forest::<TT, String>::new(
+    let forest = Arc::new(Transaction::<TT, String>::new(
         store.clone(),
         store,
         config,
@@ -499,7 +499,7 @@ async fn main() -> Result<()> {
             index_key,
             value_key,
         };
-        let forest = Arc::new(Forest::<TT, String>::new(
+        let forest = Arc::new(Transaction::<TT, String>::new(
             store.clone(),
             store,
             config,

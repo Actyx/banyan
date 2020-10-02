@@ -1,6 +1,6 @@
 use crate::{
     forest::{
-        BranchResult, Config, CreateMode, CryptoConfig, Forest, FutureResult, ReadForest, TreeTypes,
+        BranchResult, Config, CreateMode, CryptoConfig, Transaction, FutureResult, Forest, TreeTypes,
     },
     index::zip_with_offset_ref,
 };
@@ -20,12 +20,12 @@ use std::{iter, marker::PhantomData, sync::Arc, sync::RwLock};
 use tracing::info;
 
 /// basic random access append only async tree
-impl<T, V> Forest<T, V>
+impl<T, V> Transaction<T, V>
 where
     T: TreeTypes + 'static,
     V: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static,
 {
-    pub fn read(&self) -> &Arc<ReadForest<T, V>> {
+    pub fn read(&self) -> &Arc<Forest<T, V>> {
         &self.read
     }
 
@@ -290,28 +290,6 @@ where
         self.extend(node, from).boxed()
     }
 
-    /// Find a valid branch in an array of children.
-    /// This can be either a sealed node at the start, or an unsealed node at the end
-    fn find_valid_branch(&self, children: &[Index<T>]) -> BranchResult {
-        assert!(!children.is_empty());
-        let max_branch_count = self.config.max_branch_count as usize;
-        let level = children[0].level();
-        let pos = children
-            .iter()
-            .position(|x| x.level() < level)
-            .unwrap_or(children.len());
-        if pos >= max_branch_count {
-            // sequence starts with roots that we can turn into a sealed node
-            BranchResult::Sealed(max_branch_count)
-        } else if pos == children.len() || pos == children.len() - 1 {
-            // sequence is something we can turn into an unsealed node
-            BranchResult::Unsealed(max_branch_count.min(children.len()))
-        } else {
-            // remove first pos and recurse
-            BranchResult::Skip(pos)
-        }
-    }
-
     /// Performs a single step of simplification on a sequence of sealed roots of descending level
     pub(crate) async fn simplify_roots(
         &self,
@@ -320,7 +298,7 @@ where
     ) -> Result<()> {
         assert!(roots.len() > 1);
         assert!(is_sorted(roots.iter().map(|x| x.level()).rev()));
-        match self.find_valid_branch(&roots[from..]) {
+        match find_valid_branch(&self.config, &roots[from..]) {
             BranchResult::Sealed(count) | BranchResult::Unsealed(count) => {
                 let range = from..from + count;
                 let node = self
@@ -699,7 +677,7 @@ where
     ) -> Self {
         let branch_cache = Arc::new(RwLock::new(lru::LruCache::<T::Link, Branch<T>>::new(1000)));
         Self {
-            read: Arc::new(ReadForest {
+            read: Arc::new(Forest {
                 store,
                 config,
                 crypto_config,
@@ -708,5 +686,28 @@ where
             }),
             writer,
         }
+    }
+}
+
+
+/// Find a valid branch in an array of children.
+/// This can be either a sealed node at the start, or an unsealed node at the end
+fn find_valid_branch<T: TreeTypes>(config: &Config, children: &[Index<T>]) -> BranchResult {
+    assert!(!children.is_empty());
+    let max_branch_count = config.max_branch_count as usize;
+    let level = children[0].level();
+    let pos = children
+        .iter()
+        .position(|x| x.level() < level)
+        .unwrap_or(children.len());
+    if pos >= max_branch_count {
+        // sequence starts with roots that we can turn into a sealed node
+        BranchResult::Sealed(max_branch_count)
+    } else if pos == children.len() || pos == children.len() - 1 {
+        // sequence is something we can turn into an unsealed node
+        BranchResult::Unsealed(max_branch_count.min(children.len()))
+    } else {
+        // remove first pos and recurse
+        BranchResult::Skip(pos)
     }
 }

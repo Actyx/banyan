@@ -47,7 +47,7 @@ pub trait TreeTypes: Debug + Send + Sync {
 }
 
 /// Everything that is needed to read trees
-pub struct ReadForest<T: TreeTypes, V> {
+pub struct Forest<T: TreeTypes, V> {
     pub(crate) store: ArcReadOnlyStore<T::Link>,
     pub(crate) branch_cache: BranchCache<T>,
     pub(crate) crypto_config: CryptoConfig,
@@ -56,13 +56,13 @@ pub struct ReadForest<T: TreeTypes, V> {
 }
 
 /// Everything that is needed to write trees. To write trees, you also have to read trees.
-pub struct Forest<T: TreeTypes, V> {
-    pub(crate) read: Arc<ReadForest<T, V>>,
+pub struct Transaction<T: TreeTypes, V> {
+    pub(crate) read: Arc<Forest<T, V>>,
     pub(crate) writer: ArcBlockWriter<T::Link>,
 }
 
-impl<T: TreeTypes, V> std::ops::Deref for Forest<T, V> {
-    type Target = ReadForest<T, V>;
+impl<T: TreeTypes, V> std::ops::Deref for Transaction<T, V> {
+    type Target = Forest<T, V>;
 
     fn deref(&self) -> &Self::Target {
         &self.read
