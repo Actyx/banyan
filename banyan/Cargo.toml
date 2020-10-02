@@ -23,7 +23,6 @@ lru = "0.4"
 maplit = "1.0"
 derive_more = "0.99"
 anyhow = "1.0"
-bitvec = "0.17"
 rand = "0.7"
 ref-cast = "1.0"
 
