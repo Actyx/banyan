@@ -1,21 +1,15 @@
-use super::{
-    BranchCache, Config, CryptoConfig, FilteredChunk, FutureResult, Forest, TreeTypes,
-};
+use super::{BranchCache, Config, CryptoConfig, FilteredChunk, Forest, FutureResult, TreeTypes};
 use crate::{
     index::deserialize_compressed, index::zip_with_offset, index::Branch, index::BranchIndex,
     index::CompactSeq, index::Index, index::IndexRef, index::Leaf, index::LeafIndex,
     index::NodeInfo, query::Query, store::ArcReadOnlyStore,
 };
 use anyhow::{anyhow, Result};
-use bitvec::prelude::BitVec;
 use core::fmt::Debug;
 use futures::{prelude::*, stream::BoxStream};
 use salsa20::{stream_cipher::NewStreamCipher, stream_cipher::SyncStreamCipher, XSalsa20};
 use serde::{de::DeserializeOwned, Serialize};
-use std::{
-    sync::Arc,
-    marker::PhantomData,
-};
+use std::{marker::PhantomData, sync::Arc};
 
 /// basic random access append only async tree
 impl<T, V> Forest<T, V>
@@ -47,7 +41,11 @@ where
         &self.branch_cache
     }
 
-    pub fn with_value_type<W: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static>(&self) -> Forest<T, W> {
+    pub fn with_value_type<
+        W: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static,
+    >(
+        &self,
+    ) -> Forest<T, W> {
         Forest {
             store: self.store.clone(),
             branch_cache: self.branch_cache.clone(),
@@ -229,7 +227,7 @@ where
             Ok(match self.load_node(&index).await? {
                 NodeInfo::Leaf(index, node) => {
                     // todo: don't get the node here, since we might not need it
-                    let mut matching = BitVec::repeat(true, index.keys.len());
+                    let mut matching = vec![true; index.keys.len()];
                     query.containing(offset, index, &mut matching);
                     let keys = index.select_keys(&matching);
                     let elems: Vec<V> = node.as_ref().select(&matching)?;
@@ -246,7 +244,7 @@ where
                 }
                 NodeInfo::Branch(index, node) => {
                     // todo: don't get the node here, since we might not need it
-                    let mut matching = BitVec::repeat(true, index.summaries.len());
+                    let mut matching = vec![true; index.summaries.len()];
                     query.intersecting(offset, index, &mut matching);
                     let offsets = zip_with_offset(node.children.to_vec(), offset);
                     // todo: figure out how to avoid collecting into a vec to get send
@@ -294,7 +292,7 @@ where
                 Ok(match self.load_node(&index).await? {
                     NodeInfo::Leaf(index, node) => {
                         // todo: don't get the node here, since we might not need it
-                        let mut matching = BitVec::repeat(true, index.keys.len());
+                        let mut matching = vec![true; index.keys.len()];
                         query.containing(offset, index, &mut matching);
                         let keys = index.select_keys(&matching);
                         let elems: Vec<V> = node.as_ref().select(&matching)?;
@@ -312,7 +310,7 @@ where
                     }
                     NodeInfo::Branch(index, node) => {
                         // todo: don't get the node here, since we might not need it
-                        let mut matching = BitVec::repeat(true, index.summaries.len());
+                        let mut matching = vec![true; index.summaries.len()];
                         query.intersecting(offset, index, &mut matching);
                         let offsets = zip_with_offset(node.children.to_vec(), offset);
                         let children: Vec<_> = matching.into_iter().zip(offsets).collect();

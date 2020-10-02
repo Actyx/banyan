@@ -7,9 +7,8 @@
 use crate::{
     forest::TreeTypes,
     index::{BranchIndex, CompactSeq, LeafIndex},
-    util::RangeBoundsExt,
+    util::{BoolSliceExt, RangeBoundsExt},
 };
-pub use bitvec::vec::BitVec;
 use std::{fmt::Debug, ops::RangeBounds, sync::Arc};
 
 /// A query
@@ -17,27 +16,27 @@ use std::{fmt::Debug, ops::RangeBounds, sync::Arc};
 /// Queries work on compact value sequences instead of individual values for efficiency.
 pub trait Query<T: TreeTypes>: Debug + Send + Sync {
     /// a bitvec with `x.data.count()` elements, where each value is a bool indicating if the query *does* match
-    fn containing(&self, offset: u64, _index: &LeafIndex<T>, res: &mut BitVec);
+    fn containing(&self, offset: u64, _index: &LeafIndex<T>, res: &mut [bool]);
     /// a bitvec with `x.data.count()` elements, where each value is a bool indicating if the query *can* match
-    fn intersecting(&self, offset: u64, _index: &BranchIndex<T>, res: &mut BitVec);
+    fn intersecting(&self, offset: u64, _index: &BranchIndex<T>, res: &mut [bool]);
 }
 
 impl<T: TreeTypes> Query<T> for Box<dyn Query<T>> {
-    fn containing(&self, offset: u64, x: &LeafIndex<T>, res: &mut BitVec) {
+    fn containing(&self, offset: u64, x: &LeafIndex<T>, res: &mut [bool]) {
         self.as_ref().containing(offset, x, res);
     }
 
-    fn intersecting(&self, offset: u64, x: &BranchIndex<T>, res: &mut BitVec) {
+    fn intersecting(&self, offset: u64, x: &BranchIndex<T>, res: &mut [bool]) {
         self.as_ref().intersecting(offset, x, res);
     }
 }
 
 impl<T: TreeTypes> Query<T> for Arc<dyn Query<T>> {
-    fn containing(&self, offset: u64, x: &LeafIndex<T>, res: &mut BitVec) {
+    fn containing(&self, offset: u64, x: &LeafIndex<T>, res: &mut [bool]) {
         self.as_ref().containing(offset, x, res);
     }
 
-    fn intersecting(&self, offset: u64, x: &BranchIndex<T>, res: &mut BitVec) {
+    fn intersecting(&self, offset: u64, x: &BranchIndex<T>, res: &mut [bool]) {
         self.as_ref().intersecting(offset, x, res);
     }
 }
@@ -53,27 +52,27 @@ impl<R: RangeBounds<u64>> From<R> for OffsetRangeQuery<R> {
 }
 
 impl<T: TreeTypes, R: RangeBounds<u64> + Debug + Sync + Send> Query<T> for OffsetRangeQuery<R> {
-    fn containing(&self, mut offset: u64, index: &LeafIndex<T>, res: &mut BitVec) {
+    fn containing(&self, mut offset: u64, index: &LeafIndex<T>, res: &mut [bool]) {
         let range = offset..offset + index.keys.count();
         // shortcut test
         if !&self.0.intersects(&range) {
-            res.set_all(false);
+            res.clear();
         } else {
             for i in 0..(index.keys.len()).min(res.len()) {
                 if res[i] {
-                    res.set(i, self.0.contains(&offset))
+                    res[i] = self.0.contains(&offset);
                 }
                 offset += 1;
             }
         }
     }
 
-    fn intersecting(&self, offset: u64, index: &BranchIndex<T>, res: &mut BitVec) {
+    fn intersecting(&self, offset: u64, index: &BranchIndex<T>, res: &mut [bool]) {
         // we just look at whether the entire index overlaps with the query range.
         // if not, we just clear all bits.
         let range = offset..offset + index.count;
         if !&self.0.intersects(&range) {
-            res.set_all(false);
+            res.clear();
         }
     }
 }
@@ -83,12 +82,12 @@ impl<T: TreeTypes, R: RangeBounds<u64> + Debug + Sync + Send> Query<T> for Offse
 pub struct EmptyQuery;
 
 impl<T: TreeTypes> Query<T> for EmptyQuery {
-    fn containing(&self, _offset: u64, _index: &LeafIndex<T>, res: &mut BitVec) {
-        res.set_all(false);
+    fn containing(&self, _offset: u64, _index: &LeafIndex<T>, res: &mut [bool]) {
+        res.clear();
     }
 
-    fn intersecting(&self, _offset: u64, _index: &BranchIndex<T>, res: &mut BitVec) {
-        res.set_all(false);
+    fn intersecting(&self, _offset: u64, _index: &BranchIndex<T>, res: &mut [bool]) {
+        res.clear();
     }
 }
 
@@ -97,11 +96,11 @@ impl<T: TreeTypes> Query<T> for EmptyQuery {
 pub struct AllQuery;
 
 impl<T: TreeTypes> Query<T> for AllQuery {
-    fn containing(&self, _offset: u64, _index: &LeafIndex<T>, _res: &mut BitVec) {
+    fn containing(&self, _offset: u64, _index: &LeafIndex<T>, _res: &mut [bool]) {
         // this query does not add any additional constraints, so we don't have to do anything
     }
 
-    fn intersecting(&self, _offset: u64, _index: &BranchIndex<T>, _res: &mut BitVec) {
+    fn intersecting(&self, _offset: u64, _index: &BranchIndex<T>, _res: &mut [bool]) {
         // this query does not add any additional constraints, so we don't have to do anything
     }
 }
@@ -113,12 +112,12 @@ impl<T: TreeTypes> Query<T> for AllQuery {
 pub struct AndQuery<A, B>(pub A, pub B);
 
 impl<T: TreeTypes, A: Query<T>, B: Query<T>> Query<T> for AndQuery<A, B> {
-    fn containing(&self, offset: u64, index: &LeafIndex<T>, res: &mut BitVec) {
+    fn containing(&self, offset: u64, index: &LeafIndex<T>, res: &mut [bool]) {
         self.0.containing(offset, index, res);
         self.1.containing(offset, index, res);
     }
 
-    fn intersecting(&self, offset: u64, index: &BranchIndex<T>, res: &mut BitVec) {
+    fn intersecting(&self, offset: u64, index: &BranchIndex<T>, res: &mut [bool]) {
         self.0.intersecting(offset, index, res);
         self.1.intersecting(offset, index, res);
     }
@@ -131,18 +130,18 @@ impl<T: TreeTypes, A: Query<T>, B: Query<T>> Query<T> for AndQuery<A, B> {
 pub struct OrQuery<A, B>(pub A, pub B);
 
 impl<T: TreeTypes, A: Query<T>, B: Query<T>> Query<T> for OrQuery<A, B> {
-    fn containing(&self, offset: u64, index: &LeafIndex<T>, res: &mut BitVec) {
-        let mut tmp = res.clone();
+    fn containing(&self, offset: u64, index: &LeafIndex<T>, res: &mut [bool]) {
+        let mut tmp = res.to_vec();
         self.0.containing(offset, index, res);
         self.1.containing(offset, index, &mut tmp);
-        *res |= tmp;
+        res.or_with(&tmp);
     }
 
-    fn intersecting(&self, offset: u64, index: &BranchIndex<T>, res: &mut BitVec) {
-        let mut tmp = res.clone();
+    fn intersecting(&self, offset: u64, index: &BranchIndex<T>, res: &mut [bool]) {
+        let mut tmp = res.to_vec();
         self.0.intersecting(offset, index, res);
         self.1.intersecting(offset, index, &mut tmp);
-        *res |= tmp;
+        res.or_with(&tmp);
     }
 }
 

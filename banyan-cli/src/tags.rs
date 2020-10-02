@@ -1,7 +1,6 @@
 use crate::ipfs::Cid;
 use banyan::index::*;
 use banyan::{forest::*, query::Query};
-use bitvec::prelude::*;
 use maplit::btreeset;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -200,17 +199,17 @@ impl DnfQuery {
 }
 
 impl Query<TT> for DnfQuery {
-    fn intersecting(&self, _: u64, x: &BranchIndex<TT>, matching: &mut BitVec) {
+    fn intersecting(&self, _: u64, x: &BranchIndex<TT>, matching: &mut [bool]) {
         for (i, s) in x.summaries().take(matching.len()).enumerate() {
             if matching[i] {
-                matching.set(i, self.intersects(&s));
+                matching[i] = self.intersects(&s);
             }
         }
     }
-    fn containing(&self, _: u64, x: &LeafIndex<TT>, matching: &mut BitVec) {
+    fn containing(&self, _: u64, x: &LeafIndex<TT>, matching: &mut [bool]) {
         for (i, s) in x.keys().take(matching.len()).enumerate() {
             if matching[i] {
-                matching.set(i, self.contains(&s));
+                matching[i] = self.contains(&s);
             }
         }
     }

@@ -70,7 +70,10 @@ impl<
     pub fn level(&self) -> i32 {
         self.root.as_ref().map(|x| x.level() as i32).unwrap_or(-1)
     }
-    pub async fn from_roots(forest: Arc<Transaction<T, V>>, mut roots: Vec<Index<T>>) -> Result<Self> {
+    pub async fn from_roots(
+        forest: Arc<Transaction<T, V>>,
+        mut roots: Vec<Index<T>>,
+    ) -> Result<Self> {
         assert!(roots.iter().all(|x| x.sealed()));
         assert!(is_sorted(roots.iter().map(|x| x.level()).rev()));
         while roots.len() > 1 {

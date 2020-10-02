@@ -1,6 +1,5 @@
 //! Utilities to work with zstd compressed arrays of cbor values
 use anyhow::Result;
-use bitvec::prelude::*;
 use core::{fmt, ops::Deref};
 use ref_cast::RefCast;
 use serde::{
@@ -123,7 +122,7 @@ impl ZstdArrayRef {
     /// select the items marked by the iterator and deserialize them into a vec.
     ///
     /// Other items will be skipped when deserializing, saving some unnecessary work.
-    pub fn select<T: DeserializeOwned>(&self, take: &BitVec) -> Result<Vec<T>> {
+    pub fn select<T: DeserializeOwned>(&self, take: &[bool]) -> Result<Vec<T>> {
         let uncompressed = self.decompress_into(Vec::new())?;
         let mut result: Vec<T> = Vec::new();
         let mut r = Cursor::new(&uncompressed);

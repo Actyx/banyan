@@ -40,7 +40,6 @@
 //! [SimpleCompactSeq]: struct.SimpleCompactSeq.html
 use super::zstd_array::{ZstdArray, ZstdArrayBuilder, ZstdArrayRef};
 use anyhow::{anyhow, Result};
-use bitvec::prelude::*;
 use derive_more::From;
 use salsa20::{
     stream_cipher::{NewStreamCipher, SyncStreamCipher},
@@ -75,7 +74,7 @@ pub trait CompactSeq: Serialize + DeserializeOwned {
         (0..self.len()).map(move |i| self.get(i).unwrap()).collect()
     }
     /// utility function to select some items for a compactseq.
-    fn select(&self, bits: &BitVec) -> Vec<(u64, Self::Item)> {
+    fn select(&self, bits: &[bool]) -> Vec<(u64, Self::Item)> {
         (0..self.len())
             .filter_map(move |i| {
                 if bits[i] {
@@ -123,7 +122,7 @@ impl<T: TreeTypes> LeafIndex<T> {
     pub fn keys(&self) -> impl Iterator<Item = T::Key> {
         self.keys.to_vec().into_iter()
     }
-    pub fn select_keys(&self, bits: &BitVec) -> impl Iterator<Item = (u64, T::Key)> {
+    pub fn select_keys(&self, bits: &[bool]) -> impl Iterator<Item = (u64, T::Key)> {
         self.keys.select(bits).into_iter()
     }
 }

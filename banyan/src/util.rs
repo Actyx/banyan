@@ -23,6 +23,32 @@ pub(crate) fn is_sorted<T: Ord>(iter: impl Iterator<Item = T>) -> bool {
     iter.collect::<Vec<_>>().windows(2).all(|x| x[0] <= x[1])
 }
 
+/// Some extensions to make bool slices nicer to work with
+pub trait BoolSliceExt {
+    fn clear(self);
+
+    fn any(self) -> bool;
+
+    fn or_with(self, rhs: &[bool]);
+}
+
+impl BoolSliceExt for &mut [bool] {
+    fn clear(self) {
+        // todo: use fill https://github.com/rust-lang/rust/issues/70758 is merged
+        self.iter_mut().for_each(|x| *x = false);
+    }
+
+    fn any(self) -> bool {
+        self.iter().any(|x| *x)
+    }
+
+    fn or_with(self, rhs: &[bool]) {
+        for i in 0..self.len().min(rhs.len()) {
+            self[i] |= rhs[i]
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

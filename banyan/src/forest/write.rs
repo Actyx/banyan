@@ -1,16 +1,26 @@
 use crate::{
     forest::{
-        BranchResult, Config, CreateMode, CryptoConfig, Transaction, FutureResult, Forest, TreeTypes,
+        BranchResult, Config, CreateMode, CryptoConfig, Forest, FutureResult, Transaction,
+        TreeTypes,
     },
     index::zip_with_offset_ref,
 };
 use crate::{
-    index::serialize_compressed, index::Branch, index::BranchIndex, index::CompactSeq,
-    index::Index, index::Leaf, index::LeafIndex, index::NodeInfo, query::Query,
-    store::ArcBlockWriter, store::ArcReadOnlyStore, util::is_sorted, zstd_array::ZstdArrayBuilder,
+    index::serialize_compressed,
+    index::Branch,
+    index::BranchIndex,
+    index::CompactSeq,
+    index::Index,
+    index::Leaf,
+    index::LeafIndex,
+    index::NodeInfo,
+    query::Query,
+    store::ArcBlockWriter,
+    store::ArcReadOnlyStore,
+    util::{is_sorted, BoolSliceExt},
+    zstd_array::ZstdArrayBuilder,
 };
 use anyhow::Result;
-use bitvec::prelude::BitVec;
 use core::fmt::Debug;
 use futures::prelude::*;
 use rand::RngCore;
@@ -354,7 +364,7 @@ where
             Index::Branch(index) => {
                 let mut index = index.clone();
                 // only do the check unless we are already purged
-                let mut matching = BitVec::repeat(true, index.summaries.len());
+                let mut matching = vec![true; index.summaries.len()];
                 query.intersecting(offset, &index, &mut matching);
                 if index.link.is_some()
                     && index.sealed
@@ -389,7 +399,7 @@ where
                 // only do the check unless we are already purged
                 let mut index = index.clone();
                 if index.sealed && index.link.is_some() && *level >= 0 {
-                    let mut matching = BitVec::repeat(true, index.keys.len());
+                    let mut matching = vec![true; index.keys.len()];
                     query.containing(offset, &index, &mut matching);
                     if !matching.any() {
                         index.link = None
@@ -688,7 +698,6 @@ where
         }
     }
 }
-
 
 /// Find a valid branch in an array of children.
 /// This can be either a sealed node at the start, or an unsealed node at the end
