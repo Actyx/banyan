@@ -359,10 +359,7 @@ where
             self.config().zstd_level,
             &mut cbor,
         )?;
-        Ok((
-            self.writer.put(&cbor, level).await?,
-            cbor.len() as u64,
-        ))
+        Ok((self.writer.put(&cbor, level).await?, cbor.len() as u64))
     }
 
     pub(crate) async fn retain<Q: Query<T> + Send + Sync>(

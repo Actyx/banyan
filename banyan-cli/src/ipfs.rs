@@ -1,7 +1,7 @@
 //! helper methods to work with ipfs/ipld
 use anyhow::{anyhow, Result};
 use banyan::store::{BlockWriter, ReadOnlyStore};
-use derive_more::{Display, From, Into, FromStr};
+use derive_more::{Display, From, FromStr, Into};
 use futures::{future::BoxFuture, prelude::*};
 use multihash::Sha2_256;
 use reqwest::multipart::Part;
@@ -13,10 +13,11 @@ use serde_cbor::tags::Tagged;
 use std::{
     collections::HashMap,
     convert::TryFrom,
+    convert::TryInto,
     fmt, result,
     str::FromStr,
     sync::{Arc, RwLock},
-convert::TryInto};
+};
 
 use crate::tags::Sha256Digest;
 
@@ -170,11 +171,7 @@ impl ReadOnlyStore<Sha256Digest> for MemStore {
 impl BlockWriter<Sha256Digest> for MemStore {
     fn put(&self, data: &[u8], level: u32) -> BoxFuture<Result<Sha256Digest>> {
         let digest = Sha256Digest::new(data);
-        self.0
-            .as_ref()
-            .write()
-            .unwrap()
-            .insert(digest, data.into());
+        self.0.as_ref().write().unwrap().insert(digest, data.into());
         future::ok(digest).boxed()
     }
 }
@@ -323,12 +320,13 @@ impl ReadOnlyStore<Sha256Digest> for IpfsStore {
 impl BlockWriter<Sha256Digest> for IpfsStore {
     fn put(&self, data: &[u8], level: u32) -> BoxFuture<Result<Sha256Digest>> {
         let data = data.to_vec();
-        async move { 
+        async move {
             let cid = crate::ipfs::block_put(&data, cid::Codec::DagCBOR, false).await?;
             assert!(cid.0.hash().algorithm() == multihash::Code::Sha2_256);
             assert!(cid.0.hash().digest().len() == 32);
             cid.try_into()
-        }.boxed()
+        }
+        .boxed()
     }
 }
 

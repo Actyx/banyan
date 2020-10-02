@@ -4,7 +4,14 @@ use banyan::{forest::*, query::Query};
 use bitvec::prelude::*;
 use maplit::btreeset;
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeSet, io, iter::FromIterator, sync::Arc, fmt, convert::{TryFrom, TryInto}, str::FromStr};
+use std::{
+    collections::BTreeSet,
+    convert::{TryFrom, TryInto},
+    fmt, io,
+    iter::FromIterator,
+    str::FromStr,
+    sync::Arc,
+};
 
 #[derive(Debug)]
 pub struct TT {}
@@ -69,13 +76,18 @@ impl TreeTypes for TT {
         data: Vec<u8>,
         w: impl io::Write,
     ) -> anyhow::Result<()> {
-        let cids = links.into_iter().map(|x| Cid::from(**x)).collect::<Vec<_>>();
+        let cids = links
+            .into_iter()
+            .map(|x| Cid::from(**x))
+            .collect::<Vec<_>>();
         serde_cbor::to_writer(w, &(cids, serde_cbor::Value::Bytes(data)))
             .map_err(|e| anyhow::Error::new(e))
     }
     fn deserialize_branch(reader: impl io::Read) -> anyhow::Result<(Vec<Self::Link>, Vec<u8>)> {
         let (cids, data): (Vec<Cid>, serde_cbor::Value) = serde_cbor::from_reader(reader)?;
-        let links = cids.into_iter().map(Sha256Digest::try_from)
+        let links = cids
+            .into_iter()
+            .map(Sha256Digest::try_from)
             .collect::<anyhow::Result<Vec<_>>>()?;
         if let serde_cbor::Value::Bytes(data) = data {
             Ok((links, data))

@@ -20,7 +20,7 @@ use banyan::{
     tree::*,
 };
 use ipfs::{pubsub_pub, pubsub_sub, IpfsStore, MemStore};
-use tags::{DnfQuery, Key, Tag, Tags, TT, Sha256Digest};
+use tags::{DnfQuery, Key, Sha256Digest, Tag, Tags, TT};
 
 pub type Error = anyhow::Error;
 pub type Result<T> = anyhow::Result<T>;
@@ -381,7 +381,10 @@ async fn main() -> Result<()> {
             .ok_or_else(|| anyhow!("required arg count not provided"))?
             .parse()?;
         let unbalanced = matches.is_present("unbalanced");
-        let base = matches.value_of("base").map(Sha256Digest::from_str).transpose()?;
+        let base = matches
+            .value_of("base")
+            .map(Sha256Digest::from_str)
+            .transpose()?;
         println!(
             "building a tree with {} batches of {} values, unbalanced: {}",
             batches, count, unbalanced

@@ -7,8 +7,9 @@ use futures::future::BoxFuture;
 use rand::RngCore;
 use serde::{de::DeserializeOwned, Serialize};
 use std::{
+    fmt::Display,
     io,
-    sync::{Arc, RwLock}, fmt::Display,
+    sync::{Arc, RwLock},
 };
 mod read;
 mod stream;
