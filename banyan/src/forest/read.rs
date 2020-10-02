@@ -247,8 +247,6 @@ where
                     let mut matching = vec![true; index.summaries.len()];
                     query.intersecting(offset, index, &mut matching);
                     let offsets = zip_with_offset(node.children.to_vec(), offset);
-                    // todo: figure out how to avoid collecting into a vec to get send
-                    let matching = matching.into_iter().collect::<Vec<_>>();
                     let iter = matching.into_iter().zip(offsets).map(
                         move |(is_matching, (child, offset))| {
                             if is_matching {
