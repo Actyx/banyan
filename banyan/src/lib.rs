@@ -60,6 +60,13 @@ pub mod forest;
 pub mod index;
 pub mod query;
 pub mod store;
+mod thread_local_zstd;
 pub mod tree;
 mod util;
 mod zstd_array;
+
+#[cfg(test)]
+extern crate quickcheck;
+#[cfg(test)]
+#[macro_use(quickcheck)]
+extern crate quickcheck_macros;
