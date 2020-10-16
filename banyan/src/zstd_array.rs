@@ -147,4 +147,12 @@ impl fmt::Debug for ZstdArray {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use quickcheck::quickcheck;
+    use std::io::Cursor;
+
+    /// basic test to ensure that the decompress works and properly clears the thread local buffer
+    #[quickcheck]
+    fn fill_roundtrip(data: Vec<Vec<u8>>) -> anyhow::Result<bool> {
+        Ok(true)
+    }
 }

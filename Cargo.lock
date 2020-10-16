@@ -88,6 +88,7 @@ dependencies = [
  "maplit",
  "quickcheck",
  "quickcheck_async",
+ "quickcheck_macros",
  "rand",
  "reqwest",
  "salsa20",
@@ -1156,6 +1157,17 @@ version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "247df671941313a4e255a5015772917368f1b21bfedfbd89d68fbb27e802b2fa"
 dependencies = [
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "quickcheck_macros"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "608c156fd8e97febc07dc9c2e2c80bf74cfc6ef26893eae3daf8bc2bc94a4b7f"
+dependencies = [
+ "proc-macro2",
  "quote",
  "syn",
 ]

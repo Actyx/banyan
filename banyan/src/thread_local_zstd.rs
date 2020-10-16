@@ -60,3 +60,19 @@ where
 {
     DECOMPRESSOR.with(|d| d.borrow_mut().decompress_and_transform(compressed, f))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use quickcheck::quickcheck;
+    use std::io::Cursor;
+
+    /// basic test to ensure that the decompress works and properly clears the thread local buffer
+    #[quickcheck]
+    fn thread_local_compression_decompression(data: Vec<u8>) -> anyhow::Result<bool> {
+        let cursor = Cursor::new(&data);
+        let compressed = zstd::encode_all(cursor, 0)?;
+        let decompressed = decompress_and_transform(&compressed, &mut |x| x.to_vec())?;
+        Ok(data == decompressed)
+    }
+}
