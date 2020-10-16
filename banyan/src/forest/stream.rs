@@ -22,7 +22,7 @@ impl<
         roots: BoxStream<'static, T::Link>,
     ) -> impl Stream<Item = anyhow::Result<(u64, T::Key, V)>> + Send {
         self.stream_roots_chunked(query, roots, &|_| ())
-            .map_ok(|chunk| stream::iter(chunk.data.into_iter().map(|x| Ok(x))))
+            .map_ok(|chunk| stream::iter(chunk.data.into_iter().map(Ok)))
             .try_flatten()
     }
 

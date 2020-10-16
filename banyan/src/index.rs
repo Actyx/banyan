@@ -38,7 +38,7 @@
 //! [CompactSeq]: trait.CompactSeq.html
 //! [Semigroup]: trait.Semigroup.html
 //! [SimpleCompactSeq]: struct.SimpleCompactSeq.html
-use super::zstd_array::{ZstdArray, ZstdArrayBuilder, ZstdArrayRef};
+use super::zstd_array::ZstdArray;
 use anyhow::{anyhow, Result};
 use derive_more::From;
 use salsa20::{
@@ -291,21 +291,6 @@ impl Leaf {
         Self(ZstdArray::new(data))
     }
 
-    pub fn from_builder(builder: ZstdArrayBuilder) -> Result<Self> {
-        Ok(Self(builder.build()?))
-    }
-
-    pub fn builder(self, level: i32) -> Result<ZstdArrayBuilder> {
-        ZstdArrayBuilder::init((&self.0).compressed(), level)
-    }
-
-    /// Create a leaf containing a single item, with the given compression level
-    pub fn single<V: Serialize>(value: &V, level: i32) -> Result<Self> {
-        Ok(Leaf::from_builder(
-            ZstdArrayBuilder::new(level)?.push(value)?,
-        )?)
-    }
-
     /// Push an item. The compression level will only be used if this leaf is in readonly mode, otherwise
     /// the compression level of the builder will be used.
     pub fn fill<V: Serialize>(
@@ -314,7 +299,8 @@ impl Leaf {
         compressed_size: u64,
         level: i32,
     ) -> Result<Self> {
-        Leaf::from_builder(self.builder(level)?.fill(from, compressed_size)?)
+        let data = ZstdArray::fill(&[], from, level, compressed_size)?;
+        Ok(Leaf::new(data.into()))
     }
 
     pub fn child_at<T: DeserializeOwned>(&self, offset: u64) -> Result<T> {
@@ -324,8 +310,8 @@ impl Leaf {
     }
 }
 
-impl AsRef<ZstdArrayRef> for Leaf {
-    fn as_ref(&self) -> &ZstdArrayRef {
+impl AsRef<ZstdArray> for Leaf {
+    fn as_ref(&self) -> &ZstdArray {
         &self.0
     }
 }

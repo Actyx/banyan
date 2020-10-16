@@ -24,7 +24,6 @@ maplit = "1.0"
 derive_more = "0.99"
 anyhow = "1.0"
 rand = "0.7"
-ref-cast = "1.0"
 
 [dev-dependencies]
 hex = "0.4.2"

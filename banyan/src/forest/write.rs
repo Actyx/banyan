@@ -4,6 +4,7 @@ use crate::{
         TreeTypes,
     },
     index::zip_with_offset_ref,
+    zstd_array::ZstdArray,
 };
 use crate::{
     index::serialize_compressed,
@@ -18,7 +19,6 @@ use crate::{
     store::ArcBlockWriter,
     store::ArcReadOnlyStore,
     util::{is_sorted, BoolSliceExt},
-    zstd_array::ZstdArrayBuilder,
 };
 use anyhow::{ensure, Result};
 use core::fmt::Debug;
@@ -45,8 +45,7 @@ where
         from: &mut iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
     ) -> Result<LeafIndex<T>> {
         assert!(from.peek().is_some());
-        self.extend_leaf(None, ZstdArrayBuilder::new(self.config().zstd_level)?, from)
-            .await
+        self.extend_leaf(&[], None, from).await
     }
 
     /// Creates a leaf from a sequence that either contains all items from the sequence, or is full
@@ -54,13 +53,14 @@ where
     /// The result is the index of the leaf. The iterator will contain the elements that did not fit.
     async fn extend_leaf(
         &self,
+        compressed: &[u8],
         keys: Option<T::Seq>,
-        builder: ZstdArrayBuilder,
         from: &mut iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
     ) -> Result<LeafIndex<T>> {
         assert!(from.peek().is_some());
-        let mut keys = keys.map(|x| x.to_vec()).unwrap_or_default();
-        let builder = builder.fill(
+        let mut keys = keys.map(|keys| keys.to_vec()).unwrap_or_default();
+        let data = ZstdArray::fill(
+            compressed,
             || {
                 if (keys.len() as u64) < self.config().max_leaf_count {
                     from.next().map(|(k, v)| {
@@ -71,9 +71,10 @@ where
                     None
                 }
             },
+            self.config().zstd_level,
             self.config().target_leaf_size,
         )?;
-        let leaf = Leaf::from_builder(builder)?;
+        let leaf = Leaf::new(data.into());
         let keys = keys.into_iter().collect::<T::Seq>();
         // encrypt leaf
         let mut tmp: Vec<u8> = Vec::with_capacity(leaf.as_ref().compressed().len() + 24);
@@ -298,8 +299,9 @@ where
             NodeInfo::Leaf(index, leaf) => {
                 info!("extending existing leaf");
                 let keys = index.keys.clone();
-                let builder = leaf.builder(self.config().zstd_level)?;
-                self.extend_leaf(Some(keys), builder, from).await?.into()
+                self.extend_leaf(leaf.as_ref().compressed(), Some(keys), from)
+                    .await?
+                    .into()
             }
             NodeInfo::Branch(index, branch) => {
                 info!("extending existing branch");

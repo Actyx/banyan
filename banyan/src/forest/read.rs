@@ -154,7 +154,6 @@ where
         Ok(if let Some(link) = &index.link {
             let bytes = self.store.get(&link).await?;
             let children: Vec<_> = deserialize_compressed(&self.index_key(), &bytes)?;
-            // let children = CborZstdArrayRef::new(bytes.as_ref()).items()?;
             Some(Branch::<T>::new(children))
         } else {
             None
