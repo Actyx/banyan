@@ -30,9 +30,9 @@ impl ZstdArray {
     }
 
     /// create ZStdArray from a single serializable item
-    pub fn single<T: Serialize>(value: T, level: i32) -> Result<Self> {
+    pub fn single<T: Serialize>(value: &T, level: i32) -> Result<Self> {
         let mut encoder = Encoder::new(Vec::new(), level)?;
-        serde_cbor::to_writer(&mut encoder, &value)?;
+        serde_cbor::to_writer(&mut encoder, value)?;
         // call finish to write the zstd frame
         let data = encoder.finish()?;
         // box into an arc
@@ -148,11 +148,35 @@ impl fmt::Debug for ZstdArray {
 mod tests {
     use super::*;
     use quickcheck::quickcheck;
-    use std::io::Cursor;
+    use std::collections::VecDeque;
 
     /// basic test to ensure that the decompress works and properly clears the thread local buffer
     #[quickcheck]
-    fn fill_roundtrip(data: Vec<Vec<u8>>) -> anyhow::Result<bool> {
+    fn zstd_array_fill_roundtrip(first: Vec<u8>, data: Vec<Vec<u8>>) -> anyhow::Result<bool> {
+        let bytes = data.iter().map(|x| x.len()).sum::<usize>() as u64;
+        let target_size = bytes / 2;
+        let initial = ZstdArray::single(&first, 0)?;
+        let mut x: VecDeque<Vec<u8>> = data.clone().into();
+        let za = ZstdArray::fill(&initial.compressed(), || x.pop_front(), 0, target_size)?;
+        // println!("compressed={} n={} bytes={}", za.compressed().len(), data.len(), bytes);
+        let mut decompressed = za.items::<Vec<u8>>()?;
+        let first1 = decompressed
+            .splice(0..1, std::iter::empty())
+            .collect::<Vec<_>>();
+        // first item must always be included
+        if first != first1[0] {
+            return Ok(false);
+        }
+        // remaining items must match input up to where they fit in
+        if &decompressed[..] != &data[..decompressed.len()] {
+            return Ok(false);
+        }
+        //
+        if decompressed.len() < data.len() {
+            if (za.compressed().len() as u64) < target_size {
+                return Ok(false);
+            }
+        }
         Ok(true)
     }
 }
