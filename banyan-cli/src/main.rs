@@ -1,9 +1,9 @@
 use anyhow::anyhow;
 use clap::{App, Arg, SubCommand};
 use futures::prelude::*;
-use maplit::btreeset;
+use tag_index::TagSet;
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::BTreeMap,
     str::FromStr,
     sync::Arc,
     time::Duration,
@@ -21,7 +21,7 @@ use banyan::{
     tree::*,
 };
 use ipfs::{pubsub_pub, pubsub_sub, IpfsStore, MemStore};
-use tags::{DnfQuery, Key, Sha256Digest, Tag, Tags, TT};
+use tags::{DnfQuery, Key, Sha256Digest, Tag, TT};
 
 pub type Error = anyhow::Error;
 pub type Result<T> = anyhow::Result<T>;
@@ -172,16 +172,14 @@ impl Tagger {
     }
 
     pub fn tag(&mut self, name: &'static str) -> Tag {
-        self.0.entry(name).or_insert_with(|| Tag::new(name)).clone()
+        self.0.entry(name).or_insert_with(|| name.into()).clone()
     }
 
-    pub fn tags(&mut self, names: &[&'static str]) -> Tags {
-        Tags(
-            names
-                .into_iter()
-                .map(|name| self.tag(name))
-                .collect::<BTreeSet<_>>(),
-        )
+    pub fn tags(&mut self, names: &[&'static str]) -> TagSet {
+        names
+            .into_iter()
+            .map(|name| self.tag(name))
+            .collect::<TagSet>()
     }
 }
 
@@ -203,7 +201,7 @@ async fn build_tree(
 ) -> anyhow::Result<Tree<TT, String>> {
     let mut tagger = Tagger::new();
     // function to add some arbitrary tags to test out tag querying and compression
-    let mut tags_from_offset = |i: u64| -> Tags {
+    let mut tags_from_offset = |i: u64| -> TagSet {
         let fizz = i % 3 == 0;
         let buzz = i % 5 == 0;
         if fizz && buzz {
@@ -255,7 +253,7 @@ async fn bench_build(
 ) -> anyhow::Result<(Tree<TT, String>, std::time::Duration)> {
     let mut tagger = Tagger::new();
     // function to add some arbitrary tags to test out tag querying and compression
-    let mut tags_from_offset = |i: u64| -> Tags {
+    let mut tags_from_offset = |i: u64| -> TagSet {
         let fizz = i % 3 == 0;
         let buzz = i % 5 == 0;
         if fizz && buzz {
@@ -306,7 +304,7 @@ async fn bench_build(
 async fn main() -> Result<()> {
     let mut tagger = Tagger::new();
     // function to add some arbitrary tags to test out tag querying and compression
-    let mut tags_from_offset = |i: u64| -> Tags {
+    let mut tags_from_offset = |i: u64| -> TagSet {
         let fizz = i % 3 == 0;
         let buzz = i % 5 == 0;
         if fizz && buzz {
@@ -416,7 +414,7 @@ async fn main() -> Result<()> {
         let tags = matches
             .values_of("tag")
             .ok_or_else(|| anyhow!("at least one tag must be provided"))?
-            .map(|tag| Key::filter_tags(Tags(btreeset! {Tag::new(tag)})))
+            .map(|tag| Key::filter_tags(TagSet::single(Tag::from(tag))))
             .collect::<Vec<_>>();
         let query = DnfQuery(tags).boxed();
         let tree = Tree::<TT, String>::from_link(root, forest).await?;
@@ -510,7 +508,7 @@ async fn main() -> Result<()> {
         let t1 = std::time::Instant::now();
         let tcollect = t1 - t0;
         let t0 = std::time::Instant::now();
-        let tags = vec![Key::range(0, u64::max_value(), Tags::single("fizz"))];
+        let tags = vec![Key::range(0, u64::max_value(), TagSet::single(Tag::from("fizz")))];
         let query = DnfQuery(tags).boxed();
         let values: Vec<_> = tree
             .clone()
@@ -522,7 +520,7 @@ async fn main() -> Result<()> {
         let t1 = std::time::Instant::now();
         let tfilter_common = t1 - t0;
         let t0 = std::time::Instant::now();
-        let tags = vec![Key::range(0, count / 10, Tags::single("fizzbuzz"))];
+        let tags = vec![Key::range(0, count / 10, TagSet::single(Tag::from("fizzbuzz")))];
         let query = DnfQuery(tags).boxed();
         let values: Vec<_> = tree
             .stream_filtered(query)

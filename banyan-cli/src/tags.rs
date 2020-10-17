@@ -1,9 +1,9 @@
-use crate::ipfs::Cid;
+use crate::{ipfs::Cid, tag_index::TagIndex, tag_index::TagSet};
 use banyan::index::*;
 use banyan::{forest::*, query::Query};
 use maplit::btreeset;
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeSet, convert::{TryFrom, TryInto}, fmt, io, iter::FromIterator, marker::PhantomData, str::FromStr};
+use std::{collections::BTreeSet, convert::{TryFrom, TryInto}, fmt, io, iter::FromIterator, str::FromStr};
 
 #[derive(Debug)]
 pub struct TT {}
@@ -89,34 +89,18 @@ impl TreeTypes for TT {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialOrd, PartialEq, Ord, Eq)]
-pub struct Tag(smol_str::SmolStr);
-
-impl Tag {
-    pub fn new(text: &str) -> Self {
-        Self(text.into())
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct Tags(pub BTreeSet<Tag>);
-
-impl Tags {
-    pub fn single(text: &str) -> Self {
-        Self(btreeset! { Tag(text.into()) })
-    }
-}
+pub type Tag = Box<str>;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Key {
     min_lamport: u64,
     min_time: u64,
     max_time: u64,
-    tags: Tags,
+    tags: TagSet,
 }
 
 impl Key {
-    pub fn single(lamport: u64, time: u64, tags: Tags) -> Self {
+    pub fn single(lamport: u64, time: u64, tags: TagSet) -> Self {
         Self {
             min_lamport: lamport,
             min_time: time,
@@ -125,7 +109,7 @@ impl Key {
         }
     }
 
-    pub fn filter_tags(tags: Tags) -> Self {
+    pub fn filter_tags(tags: TagSet) -> Self {
         Self {
             min_lamport: u64::MIN,
             min_time: u64::MIN,
@@ -134,7 +118,7 @@ impl Key {
         }
     }
 
-    pub fn range(min_time: u64, max_time: u64, tags: Tags) -> Self {
+    pub fn range(min_time: u64, max_time: u64, tags: TagSet) -> Self {
         Self {
             min_lamport: 0,
             min_time,
@@ -150,7 +134,7 @@ impl Key {
         if self.min_time > that.max_time {
             return false;
         }
-        if self.tags.0.is_disjoint(&that.tags.0) {
+        if self.tags.is_disjoint(&that.tags) {
             return false;
         }
         true
@@ -163,7 +147,7 @@ impl Key {
         if that.max_time > self.max_time {
             return false;
         }
-        if !that.tags.0.is_subset(&self.tags.0) {
+        if !that.tags.is_subset(&self.tags) {
             return false;
         }
         true
@@ -175,7 +159,7 @@ impl Key {
         self.min_lamport = self.min_lamport.min(b.min_lamport);
         self.min_time = self.min_time.min(b.min_time);
         self.max_time = self.max_time.max(b.max_time);
-        self.tags.0.extend(b.tags.0.iter().cloned());
+        self.tags.extend(b.tags.iter().cloned());
     }
 }
 
@@ -213,7 +197,7 @@ pub struct KeySeq {
     min_lamport: Vec<u64>,
     min_time: Vec<u64>,
     max_time: Vec<u64>,
-    tags: Vec<Tags>,
+    tags: TagIndex,
 }
 
 impl CompactSeq for KeySeq {
@@ -238,12 +222,12 @@ impl CompactSeq for KeySeq {
     }
 
     fn len(&self) -> usize {
-        self.tags.len()
+        self.tags.elements.len()
     }
 
     fn summarize(&self) -> Key {
         let mut result = self.get(0).unwrap();
-        for i in 1..self.tags.len() {
+        for i in 1..self.tags.elements.len() {
             result.combine(&self.get(i).unwrap());
         }
         result
@@ -255,18 +239,19 @@ impl FromIterator<Key> for KeySeq {
         let mut min_lamport = Vec::new();
         let mut min_time = Vec::new();
         let mut max_time = Vec::new();
-        let mut tags = Vec::new();
+        let mut tag_index = Vec::new();
         for value in iter.into_iter() {
             min_lamport.push(value.min_lamport);
             min_time.push(value.min_time);
             max_time.push(value.max_time);
-            tags.push(value.tags.clone());
+            tag_index.push(value.tags);
         }
+        let tag_index = TagIndex::from_elements(&tag_index);
         Self {
             min_lamport,
             min_time,
             max_time,
-            tags,
+            tags: tag_index,
         }
     }
 }
