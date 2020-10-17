@@ -3,7 +3,7 @@ use banyan::index::*;
 use banyan::{forest::*, query::Query};
 use maplit::btreeset;
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeSet, convert::{TryFrom, TryInto}, fmt, io, iter::FromIterator, str::FromStr};
+use std::{collections::BTreeSet, convert::{TryFrom, TryInto}, fmt, io, iter::FromIterator, str::FromStr, sync::Arc};
 
 #[derive(Debug)]
 pub struct TT {}
@@ -88,8 +88,6 @@ impl TreeTypes for TT {
         }
     }
 }
-
-pub type Tag = Box<str>;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Key {
@@ -214,7 +212,7 @@ impl CompactSeq for KeySeq {
                 min_lamport: *min_lamport,
                 min_time: *min_time,
                 max_time: *max_time,
-                tags: tags.clone(),
+                tags,
             })
         } else {
             None

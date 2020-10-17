@@ -1,7 +1,7 @@
 use anyhow::anyhow;
 use clap::{App, Arg, SubCommand};
 use futures::prelude::*;
-use tag_index::TagSet;
+use tag_index::{Tag, TagSet};
 use std::{
     collections::BTreeMap,
     str::FromStr,
@@ -21,7 +21,7 @@ use banyan::{
     tree::*,
 };
 use ipfs::{pubsub_pub, pubsub_sub, IpfsStore, MemStore};
-use tags::{DnfQuery, Key, Sha256Digest, Tag, TT};
+use tags::{DnfQuery, Key, Sha256Digest, TT};
 
 pub type Error = anyhow::Error;
 pub type Result<T> = anyhow::Result<T>;

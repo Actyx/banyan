@@ -1,16 +1,14 @@
 use maplit::btreeset;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use smol_str::SmolStr;
 use vec_collections::{VecSet, vecset};
-use std::{
-    cmp::Ord,
-    collections::BTreeSet,
-    ops::{BitAnd, BitOr},
-};
+use std::{cmp::Ord, collections::BTreeSet, ops::{BitAnd, BitOr}, sync::Arc};
 use reduce::Reduce;
 /// An index set is a set of u32 indices into the string table that will not allocate for up to 4 indices.
 /// The size of a non-spilled IndexSet is 32 bytes on 64 bit architectures, so just 8 bytes more than a Vec.
+pub type Tag = smol_str::SmolStr;
 pub type IndexSet = VecSet<[u32; 4]>;
-pub type TagSet = VecSet<[Box<str>; 4]>;
+pub type TagSet = VecSet<[Tag; 4]>;
 
 /// a compact index
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -111,7 +109,7 @@ impl TagIndex {
 /// `And([And([a,b]),c])` will be flattened to `And([a,b,c])`.
 #[derive(Debug, Clone, PartialOrd, Ord, PartialEq, Eq)]
 pub enum Expression {
-    Literal(Box<str>),
+    Literal(SmolStr),
     And(Vec<Expression>),
     Or(Vec<Expression>),
 }
@@ -144,7 +142,7 @@ impl From<Dnf> for Expression {
 }
 
 impl Expression {
-    pub fn literal(text: Box<str>) -> Self {
+    pub fn literal(text: SmolStr) -> Self {
         Self::Literal(text)
     }
 
@@ -247,7 +245,7 @@ impl BitAnd for Expression {
 pub struct Dnf(pub BTreeSet<TagSet>);
 
 impl Dnf {
-    fn literal(text: Box<str>) -> Self {
+    fn literal(text: SmolStr) -> Self {
         Self(btreeset![vecset!{text}])
     }
 
