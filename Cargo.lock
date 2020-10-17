@@ -1815,9 +1815,9 @@ checksum = "6454029bf181f092ad1b853286f23e2c507d8e8194d01d92da4a55c274a5508c"
 
 [[package]]
 name = "vec-collections"
-version = "0.2.7"
+version = "0.2.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "043d296eb2a7371d8995da2b257d5d2c8f3c62f4d867f918fc5e954ff15d3922"
+checksum = "be701b7a779aa54103ee14c80e32407ed72bbfe91a126f5b06be7315eebd89a3"
 dependencies = [
  "num-traits",
  "serde",
