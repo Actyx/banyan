@@ -3,14 +3,7 @@ use banyan::index::*;
 use banyan::{forest::*, query::Query};
 use maplit::btreeset;
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::BTreeSet,
-    convert::{TryFrom, TryInto},
-    fmt, io,
-    iter::FromIterator,
-    str::FromStr,
-    sync::Arc,
-};
+use std::{collections::BTreeSet, convert::{TryFrom, TryInto}, fmt, io, iter::FromIterator, marker::PhantomData, str::FromStr};
 
 #[derive(Debug)]
 pub struct TT {}
@@ -97,7 +90,7 @@ impl TreeTypes for TT {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialOrd, PartialEq, Ord, Eq)]
-pub struct Tag(Arc<str>);
+pub struct Tag(smol_str::SmolStr);
 
 impl Tag {
     pub fn new(text: &str) -> Self {
@@ -200,16 +193,16 @@ impl DnfQuery {
 
 impl Query<TT> for DnfQuery {
     fn intersecting(&self, _: u64, x: &BranchIndex<TT>, matching: &mut [bool]) {
-        for (i, s) in x.summaries().take(matching.len()).enumerate() {
+        for i in 0 .. x.summaries.len().min(matching.len()) {
             if matching[i] {
-                matching[i] = self.intersects(&s);
+                matching[i] = self.intersects(&x.summaries.get(i).unwrap());
             }
         }
     }
     fn containing(&self, _: u64, x: &LeafIndex<TT>, matching: &mut [bool]) {
-        for (i, s) in x.keys().take(matching.len()).enumerate() {
+        for i in 0 .. x.keys.len().min(matching.len()) {
             if matching[i] {
-                matching[i] = self.contains(&s);
+                matching[i] = self.contains(&x.keys.get(i).unwrap());
             }
         }
     }

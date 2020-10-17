@@ -13,6 +13,7 @@ use tracing_subscriber;
 
 mod ipfs;
 mod tags;
+mod tag_index;
 
 use banyan::{
     forest::*,
