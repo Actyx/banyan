@@ -1,19 +1,14 @@
 use anyhow::anyhow;
 use clap::{App, Arg, SubCommand};
 use futures::prelude::*;
+use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Duration};
 use tag_index::{Tag, TagSet};
-use std::{
-    collections::BTreeMap,
-    str::FromStr,
-    sync::Arc,
-    time::Duration,
-};
 use tracing::Level;
 use tracing_subscriber;
 
 mod ipfs;
-mod tags;
 mod tag_index;
+mod tags;
 
 use banyan::{
     forest::*,
@@ -508,7 +503,11 @@ async fn main() -> Result<()> {
         let t1 = std::time::Instant::now();
         let tcollect = t1 - t0;
         let t0 = std::time::Instant::now();
-        let tags = vec![Key::range(0, u64::max_value(), TagSet::single(Tag::from("fizz")))];
+        let tags = vec![Key::range(
+            0,
+            u64::max_value(),
+            TagSet::single(Tag::from("fizz")),
+        )];
         let query = DnfQuery(tags).boxed();
         let values: Vec<_> = tree
             .clone()
@@ -520,7 +519,11 @@ async fn main() -> Result<()> {
         let t1 = std::time::Instant::now();
         let tfilter_common = t1 - t0;
         let t0 = std::time::Instant::now();
-        let tags = vec![Key::range(0, count / 10, TagSet::single(Tag::from("fizzbuzz")))];
+        let tags = vec![Key::range(
+            0,
+            count / 10,
+            TagSet::single(Tag::from("fizzbuzz")),
+        )];
         let query = DnfQuery(tags).boxed();
         let values: Vec<_> = tree
             .stream_filtered(query)

@@ -1,9 +1,13 @@
 use maplit::btreeset;
+use reduce::Reduce;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use smol_str::SmolStr;
-use vec_collections::{VecSet, vecset};
-use std::{cmp::Ord, collections::BTreeSet, ops::{BitAnd, BitOr}};
-use reduce::Reduce;
+use std::{
+    cmp::Ord,
+    collections::BTreeSet,
+    ops::{BitAnd, BitOr},
+};
+use vec_collections::{vecset, VecSet};
 /// An index set is a set of u32 indices into the string table that will not allocate for up to 4 indices.
 /// The size of a non-spilled IndexSet is 32 bytes on 64 bit architectures, so just 8 bytes more than a Vec.
 pub type Tag = smol_str::SmolStr;
@@ -53,7 +57,6 @@ pub fn map_to_index_set(table: &TagSet, tags: &TagSet) -> Option<IndexSet> {
 }
 
 impl TagIndex {
-
     /// given a query expression in Dnf form, returns all matching indices
     pub fn matching(&self, query: Dnf) -> Vec<usize> {
         // lookup all strings and translate them into indices.
@@ -88,9 +91,11 @@ impl TagIndex {
     }
 
     pub fn iter_elements(&self) -> impl Iterator<Item = TagSet> + '_ {
-        self.elements
-            .iter()
-            .map(move |is| is.iter().map(|i| self.tags.as_ref()[*i as usize].clone()).collect::<TagSet>())
+        self.elements.iter().map(move |is| {
+            is.iter()
+                .map(|i| self.tags.as_ref()[*i as usize].clone())
+                .collect::<TagSet>()
+        })
     }
 
     pub fn from_elements(e: &[TagSet]) -> Self {
@@ -100,15 +105,21 @@ impl TagIndex {
         }
         let elements = e
             .iter()
-            .map(|a| a.iter().map(|e| tags.as_ref().binary_search(e).unwrap() as u32).collect::<IndexSet>())
+            .map(|a| {
+                a.iter()
+                    .map(|e| tags.as_ref().binary_search(e).unwrap() as u32)
+                    .collect::<IndexSet>()
+            })
             .collect::<Vec<_>>();
         Self { tags, elements }
     }
 
     pub fn get(&self, index: usize) -> Option<TagSet> {
-        self.elements
-            .get(index)
-            .map(|is| is.iter().map(|i| self.tags.as_ref()[*i as usize].clone()).collect())
+        self.elements.get(index).map(|is| {
+            is.iter()
+                .map(|i| self.tags.as_ref()[*i as usize].clone())
+                .collect()
+        })
     }
 }
 
@@ -138,8 +149,16 @@ impl std::fmt::Display for Expression {
             "{}",
             match self {
                 Expression::Literal(text) => format!("'{}'", text.replace("'", "''")),
-                Expression::And(es) => es.iter().map(child_to_string).collect::<Vec<_>>().join(" & "),
-                Expression::Or(es) => es.iter().map(Expression::to_string).collect::<Vec<_>>().join(" | "),
+                Expression::And(es) => es
+                    .iter()
+                    .map(child_to_string)
+                    .collect::<Vec<_>>()
+                    .join(" & "),
+                Expression::Or(es) => es
+                    .iter()
+                    .map(Expression::to_string)
+                    .collect::<Vec<_>>()
+                    .join(" | "),
             }
         )
     }
@@ -256,12 +275,16 @@ pub struct Dnf(pub BTreeSet<TagSet>);
 
 impl Dnf {
     fn literal(text: SmolStr) -> Self {
-        Self(btreeset![vecset!{text}])
+        Self(btreeset![vecset! {text}])
     }
 
     /// converts the disjunctive normal form back to an expression
     pub fn expression(self) -> Expression {
-        self.0.into_iter().map(Dnf::and_expr).reduce(Expression::bitor).unwrap()
+        self.0
+            .into_iter()
+            .map(Dnf::and_expr)
+            .reduce(Expression::bitor)
+            .unwrap()
     }
 
     fn and_expr(v: TagSet) -> Expression {
@@ -396,7 +419,12 @@ mod tests {
 
     #[test]
     fn test_matching_1() {
-        let index = TagIndex::from_elements(&[tags! {"a"}, tags! {"a", "b"}, tags! {"a"}, tags! {"a", "b"}]);
+        let index = TagIndex::from_elements(&[
+            tags! {"a"},
+            tags! {"a", "b"},
+            tags! {"a"},
+            tags! {"a", "b"},
+        ]);
         let expr = l("a") | l("b");
         assert_eq!(index.matching(expr.dnf()), vec![0, 1, 2, 3]);
         let expr = l("a") & l("b");
@@ -407,7 +435,12 @@ mod tests {
 
     #[test]
     fn test_matching_2() {
-        let index = TagIndex::from_elements(&[tags! {"a", "b"}, tags! {"b", "c"}, tags! {"c", "a"}, tags! {"a", "b"}]);
+        let index = TagIndex::from_elements(&[
+            tags! {"a", "b"},
+            tags! {"b", "c"},
+            tags! {"c", "a"},
+            tags! {"a", "b"},
+        ]);
         let expr = l("a") | l("b") | l("c");
         assert_eq!(index.matching(expr.dnf()), vec![0, 1, 2, 3]);
         let expr = l("a") & l("b");
