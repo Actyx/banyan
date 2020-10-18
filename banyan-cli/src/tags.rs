@@ -1,9 +1,8 @@
 use crate::{ipfs::Cid, tag_index::TagIndex, tag_index::TagSet};
 use banyan::index::*;
 use banyan::{forest::*, query::Query};
-use maplit::btreeset;
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeSet, convert::{TryFrom, TryInto}, fmt, io, iter::FromIterator, str::FromStr, sync::Arc};
+use std::{convert::{TryFrom, TryInto}, fmt, io, iter::FromIterator, str::FromStr};
 
 #[derive(Debug)]
 pub struct TT {}
@@ -174,7 +173,7 @@ impl DnfQuery {
 }
 
 impl Query<TT> for DnfQuery {
-    fn intersecting(&self, _: u64, x: &BranchIndex<TT>, matching: &mut [bool]) {
+    fn intersecting(&self, _: u64, x: &BranchIndex<TT>, matching: &mut [bool]) {        
         for i in 0 .. x.summaries.len().min(matching.len()) {
             if matching[i] {
                 matching[i] = self.intersects(&x.summaries.get(i).unwrap());
@@ -224,11 +223,21 @@ impl CompactSeq for KeySeq {
     }
 
     fn summarize(&self) -> Key {
-        let mut result = self.get(0).unwrap();
-        for i in 1..self.tags.elements.len() {
-            result.combine(&self.get(i).unwrap());
+        let max_time = *self.max_time.iter().max().unwrap();
+        let min_time = *self.min_time.iter().min().unwrap();
+        let min_lamport = *self.min_lamport.iter().min().unwrap();
+        let tags = self.tags.tags.clone();
+        Key {
+            max_time,
+            min_time,
+            min_lamport,
+            tags,
         }
-        result
+        // let mut result = self.get(0).unwrap();
+        // for i in 1..self.tags.elements.len() {
+        //     result.combine(&self.get(i).unwrap());
+        // }
+        // result
     }
 }
 

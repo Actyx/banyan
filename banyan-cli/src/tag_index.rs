@@ -2,7 +2,7 @@ use maplit::btreeset;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use smol_str::SmolStr;
 use vec_collections::{VecSet, vecset};
-use std::{cmp::Ord, collections::BTreeSet, ops::{BitAnd, BitOr}, sync::Arc};
+use std::{cmp::Ord, collections::BTreeSet, ops::{BitAnd, BitOr}};
 use reduce::Reduce;
 /// An index set is a set of u32 indices into the string table that will not allocate for up to 4 indices.
 /// The size of a non-spilled IndexSet is 32 bytes on 64 bit architectures, so just 8 bytes more than a Vec.
@@ -43,7 +43,17 @@ impl<'de> Deserialize<'de> for TagIndex {
     }
 }
 
+/// Lookup all tags in a TagSet `tags` in a TagSet `table`.
+/// If all lookups are successful, translate into a set of indices into the `table`
+/// If any lookup is unsuccessful, return None
+pub fn map_to_index_set(table: &TagSet, tags: &TagSet) -> Option<IndexSet> {
+    tags.iter()
+        .map(|t| table.as_ref().binary_search(t).ok().map(|x| x as u32))
+        .collect::<Option<_>>()
+}
+
 impl TagIndex {
+
     /// given a query expression in Dnf form, returns all matching indices
     pub fn matching(&self, query: Dnf) -> Vec<usize> {
         // lookup all strings and translate them into indices.
