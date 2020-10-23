@@ -394,7 +394,7 @@ where
         self.dump0(index, prefix).boxed()
     }
 
-    pub(crate) async fn roots(&self, index: &Index<T>) -> Result<Vec<Index<T>>> {
+    pub(crate) async fn roots_impl(&self, index: &Index<T>) -> Result<Vec<Index<T>>> {
         let mut res = Vec::new();
         let mut level: i32 = i32::max_value();
         self.roots0(index, &mut level, &mut res).await?;
