@@ -4,6 +4,7 @@ use crate::{
         TreeTypes,
     },
     index::zip_with_offset_ref,
+    store::BlockWriter,
     zstd_array::ZstdArray,
 };
 use crate::{
@@ -16,7 +17,6 @@ use crate::{
     index::LeafIndex,
     index::NodeInfo,
     query::Query,
-    store::ArcBlockWriter,
     store::ArcReadOnlyStore,
     util::{is_sorted, BoolSliceExt},
 };
@@ -30,10 +30,11 @@ use std::{iter, sync::Arc, sync::RwLock};
 use tracing::info;
 
 /// basic random access append only async tree
-impl<T, V> Transaction<T, V>
+impl<T, V, W> Transaction<T, V, W>
 where
     T: TreeTypes + 'static,
     V: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static,
+    W: BlockWriter<T::Link> + 'static,
 {
     pub fn read(&self) -> &Forest<T, V> {
         &self.read
@@ -203,7 +204,7 @@ where
         let value_bytes = children.iter().map(|x| x.value_bytes()).sum();
         let sealed = self.config.branch_sealed(&children, level);
         let summaries: T::Seq = summaries.into_iter().collect();
-        let (link, encoded_children_len) = self.persist_branch(&children, level).await?;
+        let (link, encoded_children_len) = self.persist_branch(&children).await?;
         let key_bytes = children.iter().map(|x| x.key_bytes()).sum::<u64>() + encoded_children_len;
         Ok(BranchIndex {
             level,
@@ -369,7 +370,7 @@ where
         nonce.into()
     }
 
-    async fn persist_branch(&self, children: &[Index<T>], level: u32) -> Result<(T::Link, u64)> {
+    async fn persist_branch(&self, children: &[Index<T>]) -> Result<(T::Link, u64)> {
         let mut cbor = Vec::new();
         serialize_compressed(
             &self.index_key(),
@@ -419,7 +420,7 @@ where
                     }
                     // rewrite the node and update the link if children have changed
                     if changed {
-                        let (link, _) = self.persist_branch(&children, index.level).await?;
+                        let (link, _) = self.persist_branch(&children).await?;
                         // todo: update size data
                         index.link = Some(link);
                     }
@@ -480,7 +481,7 @@ where
                         }
                         // rewrite the node and update the link if children have changed
                         if changed {
-                            let (link, _) = self.persist_branch(&children, index.level).await?;
+                            let (link, _) = self.persist_branch(&children).await?;
                             index.link = Some(link);
                         }
                     }
@@ -526,20 +527,6 @@ where
         level: &'a mut i32,
     ) -> FutureResult<'a, Index<T>> {
         self.repair0(index, report, level).boxed()
-    }
-
-    /// creates a new forest
-    pub fn new(
-        store: ArcReadOnlyStore<T::Link>,
-        writer: ArcBlockWriter<T::Link>,
-        config: Config,
-        crypto_config: CryptoConfig,
-    ) -> Self {
-        let branch_cache = Arc::new(RwLock::new(lru::LruCache::<T::Link, Branch<T>>::new(1000)));
-        Self {
-            read: Forest::new(store, branch_cache, crypto_config, config),
-            writer,
-        }
     }
 }
 

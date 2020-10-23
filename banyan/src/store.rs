@@ -13,6 +13,12 @@ pub trait BlockWriter<L>: Send + Sync {
 /// A block writer, we use dyn to avoid having just another type parameter
 pub type ArcBlockWriter<L> = Arc<dyn BlockWriter<L> + Send + Sync + 'static>;
 
+impl<L> BlockWriter<L> for ArcBlockWriter<L> {
+    fn put(&self, data: &[u8]) -> BoxFuture<Result<L>> {
+        self.as_ref().put(data)
+    }
+}
+
 pub trait ReadOnlyStore<L> {
     fn get(&self, link: &L) -> BoxFuture<Result<Arc<[u8]>>>;
 }

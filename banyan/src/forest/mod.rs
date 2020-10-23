@@ -1,6 +1,6 @@
 //! creation and traversal of banyan trees
 use super::index::*;
-use crate::{store::ArcBlockWriter, store::ArcReadOnlyStore};
+use crate::store::{ArcBlockWriter, ArcReadOnlyStore, BlockWriter};
 use anyhow::Result;
 use core::{fmt::Debug, hash::Hash, iter::FromIterator, marker::PhantomData, ops::Range};
 use futures::future::BoxFuture;
@@ -79,9 +79,29 @@ impl<TT: TreeTypes, V> Forest<TT, V> {
         }))
     }
 
-    pub fn transaction(&self, writer: ArcBlockWriter<TT::Link>) -> Transaction<TT, V> {
+    pub fn new_with_cache(
+        store: ArcReadOnlyStore<TT::Link>,
+        crypto_config: CryptoConfig,
+        config: Config,
+    ) -> Self {
+        let branch_cache = Arc::new(RwLock::new(lru::LruCache::<TT::Link, Branch<TT>>::new(
+            1000,
+        )));
+        Self::new(store, branch_cache, crypto_config, config)
+    }
+
+    pub fn transaction<W: BlockWriter<TT::Link>>(
+        &self,
+        f: impl FnOnce(ArcReadOnlyStore<TT::Link>) -> (ArcReadOnlyStore<TT::Link>, W),
+    ) -> Transaction<TT, V, W> {
+        let (reader, writer) = f(self.0.as_ref().store.clone());
         Transaction {
-            read: self.clone(),
+            read: Self::new(
+                reader,
+                self.branch_cache.clone(),
+                self.crypto_config,
+                self.config,
+            ),
             writer,
         }
     }
@@ -96,21 +116,27 @@ impl<T: TreeTypes, V> std::ops::Deref for Forest<T, V> {
 }
 
 /// Everything that is needed to write trees. To write trees, you also have to read trees.
-pub struct Transaction<T: TreeTypes, V> {
+pub struct Transaction<T: TreeTypes, V, W> {
     read: Forest<T, V>,
-    writer: ArcBlockWriter<T::Link>,
+    writer: W,
 }
 
-impl<TT: TreeTypes, V> Clone for Transaction<TT, V> {
-    fn clone(&self) -> Self {
-        Self {
-            read: self.read.clone(),
-            writer: self.writer.clone(),
-        }
+impl<T: TreeTypes, V, W> Transaction<T, V, W> {
+    pub fn into_inner(self) -> W {
+        self.writer
+    }
+
+    pub fn new(
+        r: ArcReadOnlyStore<T::Link>,
+        w: ArcBlockWriter<T::Link>,
+        config: Config,
+        crypto_config: CryptoConfig,
+    ) -> Transaction<T, V, ArcBlockWriter<T::Link>> {
+        Forest::new_with_cache(r, crypto_config, config).transaction(move |r| (r, w))
     }
 }
 
-impl<T: TreeTypes, V> std::ops::Deref for Transaction<T, V> {
+impl<T: TreeTypes, V, W> std::ops::Deref for Transaction<T, V, W> {
     type Target = Forest<T, V>;
 
     fn deref(&self) -> &Self::Target {

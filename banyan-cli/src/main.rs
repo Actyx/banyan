@@ -13,6 +13,7 @@ mod tags;
 use banyan::{
     forest::*,
     query::{AllQuery, OffsetRangeQuery, QueryExt},
+    store::ArcBlockWriter,
     tree::*,
 };
 use ipfs::{pubsub_pub, pubsub_sub, IpfsStore, MemStore};
@@ -187,7 +188,7 @@ fn create_salsa_key(text: &str) -> salsa20::Key {
 }
 
 async fn build_tree(
-    forest: Transaction<TT, String>,
+    forest: &Transaction<TT, String, ArcBlockWriter<Sha256Digest>>,
     base: Option<Sha256Digest>,
     batches: u64,
     count: u64,
@@ -240,7 +241,7 @@ async fn build_tree(
 }
 
 async fn bench_build(
-    forest: Transaction<TT, String>,
+    forest: &Transaction<TT, String, ArcBlockWriter<Sha256Digest>>,
     base: Option<Sha256Digest>,
     batches: u64,
     count: u64,
@@ -336,7 +337,12 @@ async fn main() -> Result<()> {
         index_key,
         value_key,
     };
-    let forest = Transaction::<TT, String>::new(store.clone(), store, config, crypto_config);
+    let forest = Transaction::<TT, String, ArcBlockWriter<Sha256Digest>>::new(
+        store.clone(),
+        store,
+        config,
+        crypto_config,
+    );
     if let Some(matches) = matches.subcommand_matches("dump") {
         let root = Sha256Digest::from_str(
             matches
@@ -378,7 +384,7 @@ async fn main() -> Result<()> {
             "building a tree with {} batches of {} values, unbalanced: {}",
             batches, count, unbalanced
         );
-        let tree = build_tree(forest.clone(), base, batches, count, unbalanced, 1000).await?;
+        let tree = build_tree(&forest, base, batches, count, unbalanced, 1000).await?;
         forest.dump(&tree).await?;
         let roots = forest.roots(&tree).await?;
         let levels = roots.iter().map(|x| x.level()).collect::<Vec<_>>();
@@ -492,7 +498,12 @@ async fn main() -> Result<()> {
             index_key,
             value_key,
         };
-        let forest = Transaction::<TT, String>::new(store.clone(), store, config, crypto_config);
+        let forest = Transaction::<TT, String, ArcBlockWriter<Sha256Digest>>::new(
+            store.clone(),
+            store,
+            config,
+            crypto_config,
+        );
         let _t0 = std::time::Instant::now();
         let base = None;
         let batches = 1;
@@ -501,7 +512,7 @@ async fn main() -> Result<()> {
             .ok_or_else(|| anyhow!("required arg count not provided"))?
             .parse()?;
         let unbalanced = false;
-        let (tree, tcreate) = bench_build(forest.clone(), base, batches, count, unbalanced).await?;
+        let (tree, tcreate) = bench_build(&forest, base, batches, count, unbalanced).await?;
         let t0 = std::time::Instant::now();
         let _values: Vec<_> = forest.collect(&tree).await?;
         let t1 = std::time::Instant::now();

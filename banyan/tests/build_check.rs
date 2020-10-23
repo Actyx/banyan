@@ -1,10 +1,10 @@
 use anyhow::bail;
-use banyan::index::CompactSeq;
 use banyan::{
     forest::{Config, Transaction, TreeTypes},
     query::{AllQuery, OffsetRangeQuery},
     tree::Tree,
 };
+use banyan::{index::CompactSeq, store::ArcBlockWriter};
 use futures::prelude::*;
 use quickcheck::{Arbitrary, Gen, TestResult};
 use serde::{Deserialize, Serialize};
@@ -99,14 +99,23 @@ impl Arbitrary for Key {
     }
 }
 
-async fn create_test_tree<I>(xs: I) -> anyhow::Result<(Tree<TT, u64>, Transaction<TT, u64>)>
+async fn create_test_tree<I>(
+    xs: I,
+) -> anyhow::Result<(
+    Tree<TT, u64>,
+    Transaction<TT, u64, ArcBlockWriter<Sha256Digest>>,
+)>
 where
     I: IntoIterator<Item = (Key, u64)>,
     I::IntoIter: Send,
 {
     let store = Arc::new(MemStore::new());
-    let forest =
-        Transaction::<TT, u64>::new(store.clone(), store, Config::debug(), Default::default());
+    let forest = Transaction::<TT, u64, ArcBlockWriter<Sha256Digest>>::new(
+        store.clone(),
+        store,
+        Config::debug(),
+        Default::default(),
+    );
     let mut tree = Tree::<TT, u64>::empty();
     tree = forest.extend(&tree, xs).await?;
     forest.assert_invariants(&tree).await?;
@@ -273,8 +282,12 @@ async fn build_get(xs: Vec<(Key, u64)>) -> quickcheck::TestResult {
 async fn build_pack(xss: Vec<Vec<(Key, u64)>>) -> quickcheck::TestResult {
     test(|| async {
         let store = Arc::new(MemStore::new());
-        let forest =
-            Transaction::<TT, u64>::new(store.clone(), store, Config::debug(), Default::default());
+        let forest = Transaction::<TT, u64, ArcBlockWriter<Sha256Digest>>::new(
+            store.clone(),
+            store,
+            Config::debug(),
+            Default::default(),
+        );
         let mut tree = Tree::<TT, u64>::empty();
         // flattened xss for reference
         let xs = xss.iter().cloned().flatten().collect::<Vec<_>>();
@@ -300,8 +313,12 @@ async fn build_pack(xss: Vec<Vec<(Key, u64)>>) -> quickcheck::TestResult {
 async fn retain(xss: Vec<Vec<(Key, u64)>>) -> quickcheck::TestResult {
     test(|| async {
         let store = Arc::new(MemStore::new());
-        let forest =
-            Transaction::<TT, u64>::new(store.clone(), store, Config::debug(), Default::default());
+        let forest = Transaction::<TT, u64, ArcBlockWriter<Sha256Digest>>::new(
+            store.clone(),
+            store,
+            Config::debug(),
+            Default::default(),
+        );
         let mut tree = Tree::<TT, u64>::empty();
         // flattened xss for reference
         let xs = xss.iter().cloned().flatten().collect::<Vec<_>>();
@@ -334,8 +351,12 @@ async fn filter_test_simple() -> anyhow::Result<()> {
 #[tokio::test]
 async fn stream_test_simple() -> anyhow::Result<()> {
     let store = Arc::new(MemStore::new());
-    let forest =
-        Transaction::<TT, u64>::new(store.clone(), store, Config::debug(), Default::default());
+    let forest = Transaction::<TT, u64, ArcBlockWriter<Sha256Digest>>::new(
+        store.clone(),
+        store,
+        Config::debug(),
+        Default::default(),
+    );
     let mut trees = Vec::new();
     for n in 1..=10u64 {
         let mut tree = Tree::<TT, u64>::empty();
