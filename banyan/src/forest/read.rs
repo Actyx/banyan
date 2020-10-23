@@ -160,7 +160,7 @@ where
         })
     }
 
-    pub(crate) async fn get(
+    pub(crate) async fn get0(
         &self,
         index: &Index<T>,
         mut offset: u64,
@@ -192,25 +192,25 @@ where
         node: &'a Index<T>,
         offset: u64,
     ) -> FutureResult<'a, Option<(T::Key, V)>> {
-        self.get(node, offset).boxed()
+        self.get0(node, offset).boxed()
     }
 
     /// Convenience method to stream filtered.
     ///
     /// Implemented in terms of stream_filtered_chunked
-    pub(crate) fn stream_filtered<Q: Query<T> + Clone + 'static>(
+    pub(crate) fn stream_filtered0<Q: Query<T> + Clone + 'static>(
         &self,
         offset: u64,
         query: Q,
         index: Index<T>,
     ) -> BoxStream<'static, Result<(u64, T::Key, V)>> {
-        self.stream_filtered_chunked(offset, query, index, &|_| {})
+        self.stream_filtered_chunked0(offset, query, index, &|_| {})
             .map_ok(|chunk| stream::iter(chunk.data).map(Ok))
             .try_flatten()
             .boxed()
     }
 
-    pub(crate) fn stream_filtered_chunked<
+    pub(crate) fn stream_filtered_chunked0<
         Q: Query<T> + Clone + Send + 'static,
         E: Send + 'static,
         F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
@@ -250,7 +250,12 @@ where
                         move |(is_matching, (child, offset))| {
                             if is_matching {
                                 this.clone()
-                                    .stream_filtered_chunked(offset, query.clone(), child, mk_extra)
+                                    .stream_filtered_chunked0(
+                                        offset,
+                                        query.clone(),
+                                        child,
+                                        mk_extra,
+                                    )
                                     .right_stream()
                             } else {
                                 let placeholder = FilteredChunk {
@@ -273,7 +278,7 @@ where
         .boxed()
     }
 
-    pub(crate) fn stream_filtered_chunked_reverse<
+    pub(crate) fn stream_filtered_chunked_reverse0<
         Q: Query<T> + Clone + Send + 'static,
         E: Send + 'static,
         F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
@@ -316,7 +321,7 @@ where
                             move |(is_matching, (child, offset))| {
                                 if is_matching {
                                     this.clone()
-                                        .stream_filtered_chunked_reverse(
+                                        .stream_filtered_chunked_reverse0(
                                             offset,
                                             query.clone(),
                                             child,
@@ -344,7 +349,7 @@ where
         Box::pin(s)
     }
 
-    pub(crate) async fn dump(&self, index: &Index<T>, prefix: &str) -> Result<()> {
+    pub(crate) async fn dump0(&self, index: &Index<T>, prefix: &str) -> Result<()> {
         match self.load_node(index).await? {
             NodeInfo::Leaf(index, _) => {
                 println!(
@@ -386,10 +391,10 @@ where
 
     /// recursion helper for dump
     fn dumpr<'a>(&'a self, index: &'a Index<T>, prefix: &'a str) -> FutureResult<'a, ()> {
-        self.dump(index, prefix).boxed()
+        self.dump0(index, prefix).boxed()
     }
 
-    pub(crate) async fn roots(&self, index: &Index<T>) -> Result<Vec<Index<T>>> {
+    pub(crate) async fn roots_impl(&self, index: &Index<T>) -> Result<Vec<Index<T>>> {
         let mut res = Vec::new();
         let mut level: i32 = i32::max_value();
         self.roots0(index, &mut level, &mut res).await?;
@@ -428,7 +433,7 @@ where
         self.roots0(index, level, res).boxed()
     }
 
-    pub(crate) async fn check_invariants(
+    pub(crate) async fn check_invariants0(
         &self,
         index: &Index<T>,
         level: &mut i32,
@@ -490,11 +495,11 @@ where
         level: &'a mut i32,
         msgs: &'a mut Vec<String>,
     ) -> FutureResult<'a, ()> {
-        self.check_invariants(index, level, msgs).boxed()
+        self.check_invariants0(index, level, msgs).boxed()
     }
 
     /// Checks if a node is packed to the left
-    pub(crate) async fn is_packed(&self, index: &Index<T>) -> Result<bool> {
+    pub(crate) async fn is_packed0(&self, index: &Index<T>) -> Result<bool> {
         Ok(
             if let NodeInfo::Branch(index, branch) = self.load_node(index).await? {
                 if index.sealed {
@@ -522,6 +527,6 @@ where
 
     /// Recursion helper for is_packed
     fn is_packedr<'a>(&'a self, index: &'a Index<T>) -> FutureResult<'a, bool> {
-        self.is_packed(index).boxed()
+        self.is_packed0(index).boxed()
     }
 }
