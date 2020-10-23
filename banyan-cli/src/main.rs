@@ -216,8 +216,8 @@ async fn build_tree(
         }
     };
     let mut tree = match base {
-        Some(root) => Tree::<TT, String>::from_link(root, forest.clone()).await?,
-        None => Tree::<TT, String>::empty(forest.clone()),
+        Some(root) => Tree::<TT, String>::from_link(root, &forest).await?,
+        None => Tree::<TT, String>::empty(),
     };
     let mut offset: u64 = 0;
     for _ in 0..batches {
@@ -235,11 +235,11 @@ async fn build_tree(
             })
             .collect::<Vec<_>>();
         if unbalanced {
-            tree.extend_unpacked(v).await?;
-            tree.assert_invariants().await?;
+            tree.extend_unpacked(&forest, v).await?;
+            tree.assert_invariants(&forest).await?;
         } else {
-            tree.extend(v).await?;
-            tree.assert_invariants().await?;
+            tree.extend(&forest, v).await?;
+            tree.assert_invariants(&forest).await?;
         }
     }
     Ok(tree)
@@ -268,8 +268,8 @@ async fn bench_build(
         }
     };
     let mut tree = match base {
-        Some(root) => Tree::<TT, String>::from_link(root, forest.clone()).await?,
-        None => Tree::<TT, String>::empty(forest.clone()),
+        Some(root) => Tree::<TT, String>::from_link(root, &forest).await?,
+        None => Tree::<TT, String>::empty(),
     };
     let mut offset: u64 = 0;
     let data = (0..batches)
@@ -290,11 +290,11 @@ async fn bench_build(
     let t0 = std::time::Instant::now();
     for v in data {
         if unbalanced {
-            tree.extend_unpacked(v).await?;
-            tree.assert_invariants().await?;
+            tree.extend_unpacked(&forest, v).await?;
+            tree.assert_invariants(&forest).await?;
         } else {
-            tree.extend(v).await?;
-            tree.assert_invariants().await?;
+            tree.extend(&forest, v).await?;
+            tree.assert_invariants(&forest).await?;
         }
     }
     let t1 = std::time::Instant::now();
@@ -349,8 +349,8 @@ async fn main() -> Result<()> {
                 .value_of("root")
                 .ok_or_else(|| anyhow!("root must be provided"))?,
         )?;
-        let tree = Tree::<TT, String>::from_link(root, forest).await?;
-        tree.dump().await?;
+        let tree = Tree::<TT, String>::from_link(root, &forest).await?;
+        tree.dump(&forest).await?;
         return Ok(());
     } else if let Some(matches) = matches.subcommand_matches("stream") {
         let root = Sha256Digest::from_str(
@@ -358,8 +358,8 @@ async fn main() -> Result<()> {
                 .value_of("root")
                 .ok_or_else(|| anyhow!("root must be provided"))?,
         )?;
-        let tree = Tree::<TT, String>::from_link(root, forest).await?;
-        let mut stream = tree.stream_filtered(AllQuery).enumerate();
+        let tree = Tree::<TT, String>::from_link(root, &forest).await?;
+        let mut stream = tree.stream_filtered(&forest, AllQuery).enumerate();
         while let Some((i, Ok(v))) = stream.next().await {
             if i % 1000 == 0 {
                 println!("{:?}", v);
@@ -385,26 +385,26 @@ async fn main() -> Result<()> {
             batches, count, unbalanced
         );
         let tree = build_tree(forest.clone(), base, batches, count, unbalanced, 1000).await?;
-        tree.dump().await?;
-        let roots = tree.roots().await?;
+        tree.dump(&forest).await?;
+        let roots = tree.roots(&forest).await?;
         let levels = roots.iter().map(|x| x.level()).collect::<Vec<_>>();
-        let tree2 = Tree::<TT, String>::from_roots(forest, roots).await?;
+        let tree2 = Tree::<TT, String>::from_roots(&forest, roots).await?;
         println!("{:?}", tree);
         println!("{}", tree);
         println!("{:?}", levels);
-        tree2.dump().await?;
+        tree2.dump(&forest).await?;
     } else if let Some(matches) = matches.subcommand_matches("pack") {
         let root = Sha256Digest::from_str(
             matches
                 .value_of("root")
                 .ok_or_else(|| anyhow!("root must be provided"))?,
         )?;
-        let mut tree = Tree::<TT, String>::from_link(root, forest).await?;
-        tree.dump().await?;
-        tree.pack().await?;
-        tree.assert_invariants().await?;
-        assert!(tree.is_packed().await?);
-        tree.dump().await?;
+        let mut tree = Tree::<TT, String>::from_link(root, &forest).await?;
+        tree.dump(&forest).await?;
+        tree.pack(&forest).await?;
+        tree.assert_invariants(&forest).await?;
+        assert!(tree.is_packed(&forest).await?);
+        tree.dump(&forest).await?;
         println!("{:?}", tree);
     } else if let Some(matches) = matches.subcommand_matches("filter") {
         let root = Sha256Digest::from_str(
@@ -418,9 +418,9 @@ async fn main() -> Result<()> {
             .map(|tag| Key::filter_tags(Tags(btreeset! {Tag::new(tag)})))
             .collect::<Vec<_>>();
         let query = DnfQuery(tags).boxed();
-        let tree = Tree::<TT, String>::from_link(root, forest).await?;
-        tree.dump().await?;
-        let mut stream = tree.stream_filtered(query).enumerate();
+        let tree = Tree::<TT, String>::from_link(root, &forest).await?;
+        tree.dump(&forest).await?;
+        let mut stream = tree.stream_filtered(&forest, query).enumerate();
         while let Some((i, Ok(v))) = stream.next().await {
             if i % 1000 == 0 {
                 println!("{:?}", v);
@@ -432,9 +432,9 @@ async fn main() -> Result<()> {
                 .value_of("root")
                 .ok_or_else(|| anyhow!("root must be provided"))?,
         )?;
-        let mut tree = Tree::<TT, String>::from_link(root, forest).await?;
-        tree.repair().await?;
-        tree.dump().await?;
+        let mut tree = Tree::<TT, String>::from_link(root, &forest).await?;
+        tree.repair(&forest).await?;
+        tree.dump(&forest).await?;
         println!("{:?}", tree);
     } else if let Some(matches) = matches.subcommand_matches("forget") {
         let root = Sha256Digest::from_str(
@@ -446,23 +446,25 @@ async fn main() -> Result<()> {
             .value_of("before")
             .ok_or_else(|| anyhow!("required arg before not provided"))?
             .parse()?;
-        let mut tree = Tree::<TT, String>::from_link(root, forest).await?;
-        tree.retain(&OffsetRangeQuery::from(offset..)).await?;
-        tree.dump().await?;
+        let mut tree = Tree::<TT, String>::from_link(root, &forest).await?;
+        tree.retain(&forest, &OffsetRangeQuery::from(offset..))
+            .await?;
+        tree.dump(&forest).await?;
         println!("{:?}", tree);
     } else if let Some(matches) = matches.subcommand_matches("send_stream") {
         let topic = matches
             .value_of("topic")
             .ok_or_else(|| anyhow!("topic must be provided"))?;
         let mut ticks = tokio::time::interval(Duration::from_secs(1));
-        let mut tree = Tree::<TT, String>::empty(forest);
+        let mut tree = Tree::<TT, String>::empty();
         let mut offset = 0;
         while let Some(_) = ticks.next().await {
             let key = Key::single(offset, offset, tags_from_offset(offset));
-            tree.extend_unpacked(Some((key, "xxx".into()))).await?;
+            tree.extend_unpacked(&forest, Some((key, "xxx".into())))
+                .await?;
             if tree.level() > 100 {
                 println!("packing the tree");
-                tree.pack().await?;
+                tree.pack(&forest).await?;
             }
             offset += 1;
             if let Some(cid) = tree.link() {
@@ -505,7 +507,7 @@ async fn main() -> Result<()> {
         let unbalanced = false;
         let (tree, tcreate) = bench_build(forest.clone(), base, batches, count, unbalanced).await?;
         let t0 = std::time::Instant::now();
-        let _values: Vec<_> = tree.collect().await?;
+        let _values: Vec<_> = tree.collect(&forest).await?;
         let t1 = std::time::Instant::now();
         let tcollect = t1 - t0;
         let t0 = std::time::Instant::now();
@@ -513,7 +515,7 @@ async fn main() -> Result<()> {
         let query = DnfQuery(tags).boxed();
         let values: Vec<_> = tree
             .clone()
-            .stream_filtered(query)
+            .stream_filtered(&forest, query)
             .map_ok(|(_, k, v)| (k, v))
             .collect::<Vec<_>>()
             .await;
@@ -524,7 +526,7 @@ async fn main() -> Result<()> {
         let tags = vec![Key::range(0, count / 10, Tags::single("fizzbuzz"))];
         let query = DnfQuery(tags).boxed();
         let values: Vec<_> = tree
-            .stream_filtered(query)
+            .stream_filtered(&forest, query)
             .map_ok(|(_, k, v)| (k, v))
             .collect::<Vec<_>>()
             .await;
