@@ -251,7 +251,7 @@ where
         Ok(node)
     }
 
-    pub(crate) async fn extend_unpacked<I>(
+    pub(crate) async fn extend_unpacked0<I>(
         &self,
         index: Option<&Index<T>>,
         from: I,
@@ -280,7 +280,7 @@ where
     /// extends an existing node with some values
     ///
     /// The result will have the same level as the input. `from` will contain all elements that did not fit.        
-    async fn extend(
+    async fn extend0(
         &self,
         index: &Index<T>,
         from: &mut iter::Peekable<impl Iterator<Item = (T::Key, V)> + Send>,
@@ -328,7 +328,7 @@ where
         node: &'a Index<T>,
         from: &'a mut iter::Peekable<impl Iterator<Item = (T::Key, V)> + Send>,
     ) -> FutureResult<'a, Index<T>> {
-        self.extend(node, from).boxed()
+        self.extend0(node, from).boxed()
     }
 
     /// Performs a single step of simplification on a sequence of sealed roots of descending level
@@ -381,7 +381,7 @@ where
         Ok((self.writer.put(&cbor).await?, cbor.len() as u64))
     }
 
-    pub(crate) async fn retain<Q: Query<T> + Send + Sync>(
+    pub(crate) async fn retain0<Q: Query<T> + Send + Sync>(
         &self,
         offset: u64,
         query: &Q,
@@ -450,10 +450,10 @@ where
         index: &'a Index<T>,
         level: &'a mut i32,
     ) -> FutureResult<'a, Index<T>> {
-        self.retain(offset, query, index, level).boxed()
+        self.retain0(offset, query, index, level).boxed()
     }
 
-    pub(crate) async fn repair(
+    pub(crate) async fn repair0(
         &self,
         index: &Index<T>,
         report: &mut Vec<String>,
@@ -525,7 +525,7 @@ where
         report: &'a mut Vec<String>,
         level: &'a mut i32,
     ) -> FutureResult<'a, Index<T>> {
-        self.repair(index, report, level).boxed()
+        self.repair0(index, report, level).boxed()
     }
 
     /// creates a new forest
