@@ -62,7 +62,7 @@ impl<
                 let offset = offset.clone();
                 forest2
                     .clone()
-                    .stream_filtered_chunked(0, query, index, mk_extra)
+                    .stream_filtered_chunked0(0, query, index, mk_extra)
                     .take_while(move |result| {
                         if let Ok(chunk) = result {
                             // update the offset
@@ -108,7 +108,7 @@ impl<
                 let end_offset_ref = end_offset_ref.clone();
                 forest2
                     .clone()
-                    .stream_filtered_chunked_reverse(0, query, index, mk_extra)
+                    .stream_filtered_chunked_reverse0(0, query, index, mk_extra)
                     .take_while(move |result| {
                         if let Ok(chunk) = result {
                             // update the end offset from the start of what we got
