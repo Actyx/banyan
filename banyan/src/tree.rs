@@ -1,6 +1,6 @@
 //! creation and traversal of banyan trees
 use super::index::*;
-use crate::forest::{FilteredChunk, Transaction, TreeTypes};
+use crate::forest::{FilteredChunk, Forest, Transaction, TreeTypes};
 use crate::query::{AllQuery, OffsetRangeQuery, Query};
 use anyhow::Result;
 use futures::prelude::*;
@@ -14,7 +14,6 @@ use tracing::*;
 /// Most of the logic except for handling the empty case is implemented in the forest
 pub struct Tree<T: TreeTypes, V> {
     root: Option<Index<T>>,
-    forest: Transaction<T, V>,
     _t: PhantomData<V>,
 }
 
@@ -46,7 +45,6 @@ impl<V, T: TreeTypes> Clone for Tree<T, V> {
     fn clone(&self) -> Self {
         Self {
             root: self.root.clone(),
-            forest: self.forest.clone(),
             _t: PhantomData,
         }
     }
@@ -57,10 +55,9 @@ impl<
         T: TreeTypes + 'static,
     > Tree<T, V>
 {
-    pub async fn from_link(link: T::Link, forest: Transaction<T, V>) -> Result<Self> {
+    pub async fn from_link(link: T::Link, forest: &Forest<T, V>) -> Result<Self> {
         Ok(Self {
             root: Some(forest.load_branch_from_link(link).await?),
-            forest,
             _t: PhantomData,
         })
     }
@@ -70,7 +67,7 @@ impl<
     pub fn level(&self) -> i32 {
         self.root.as_ref().map(|x| x.level() as i32).unwrap_or(-1)
     }
-    pub async fn from_roots(forest: Transaction<T, V>, mut roots: Vec<Index<T>>) -> Result<Self> {
+    pub async fn from_roots(forest: &Transaction<T, V>, mut roots: Vec<Index<T>>) -> Result<Self> {
         assert!(roots.iter().all(|x| x.sealed()));
         assert!(is_sorted(roots.iter().map(|x| x.level()).rev()));
         while roots.len() > 1 {
@@ -78,58 +75,56 @@ impl<
         }
         Ok(Self {
             root: roots.pop(),
-            forest,
             _t: PhantomData,
         })
     }
-    pub fn empty(forest: Transaction<T, V>) -> Self {
+    pub fn empty() -> Self {
         Self {
             root: None,
-            forest,
             _t: PhantomData,
         }
     }
 
     /// dumps the tree structure
-    pub async fn dump(&self) -> Result<()> {
+    pub async fn dump(&self, txn: &Forest<T, V>) -> Result<()> {
         match &self.root {
-            Some(index) => self.forest.dump(index, "").await,
+            Some(index) => txn.dump(index, "").await,
             None => Ok(()),
         }
     }
 
     /// sealed roots of the tree
-    pub async fn roots(&self) -> Result<Vec<Index<T>>> {
+    pub async fn roots(&self, txn: &Transaction<T, V>) -> Result<Vec<Index<T>>> {
         match &self.root {
-            Some(index) => self.forest.roots(index).await,
+            Some(index) => txn.roots(index).await,
             None => Ok(Vec::new()),
         }
     }
 
-    pub async fn check_invariants(&self) -> Result<Vec<String>> {
+    pub async fn check_invariants(&self, forest: &Forest<T, V>) -> Result<Vec<String>> {
         let mut msgs = Vec::new();
         if let Some(root) = &self.root {
             if root.level() == 0 {
                 msgs.push("tree should not have a leaf as direct child.".into());
             }
             let mut level = i32::max_value();
-            self.forest
+            forest
                 .check_invariants(&root, &mut level, &mut msgs)
                 .await?;
         }
         Ok(msgs)
     }
 
-    pub async fn is_packed(&self) -> Result<bool> {
+    pub async fn is_packed(&self, forest: &Forest<T, V>) -> Result<bool> {
         if let Some(root) = &self.root {
-            self.forest.is_packed(&root).await
+            forest.is_packed(&root).await
         } else {
             Ok(true)
         }
     }
 
-    pub async fn assert_invariants(&self) -> Result<()> {
-        let msgs = self.check_invariants().await?;
+    pub async fn assert_invariants(&self, forest: &Forest<T, V>) -> Result<()> {
+        let msgs = self.check_invariants(forest).await?;
         if !msgs.is_empty() {
             for msg in msgs {
                 error!("Invariant failed: {}", msg);
@@ -140,10 +135,10 @@ impl<
     }
 
     /// Collects all elements from a stream. Might produce an OOM for large streams.
-    pub async fn collect<B: FromIterator<(T::Key, V)>>(&self) -> Result<B> {
+    pub async fn collect<B: FromIterator<(T::Key, V)>>(&self, forest: &Forest<T, V>) -> Result<B> {
         let query = AllQuery;
         let items: Vec<Result<(T::Key, V)>> = self
-            .stream_filtered(query)
+            .stream_filtered(forest, query)
             .map_ok(|(_, k, v)| (k, v))
             .collect::<Vec<_>>()
             .await;
@@ -151,10 +146,14 @@ impl<
     }
 
     /// Collects all elements from the given offset. Might produce an OOM for large streams.
-    pub async fn collect_from<B: FromIterator<(T::Key, V)>>(&self, offset: u64) -> Result<B> {
+    pub async fn collect_from<B: FromIterator<(T::Key, V)>>(
+        &self,
+        forest: &Forest<T, V>,
+        offset: u64,
+    ) -> Result<B> {
         let query = OffsetRangeQuery::from(offset..);
         let items: Vec<Result<(T::Key, V)>> = self
-            .stream_filtered(query)
+            .stream_filtered(forest, query)
             .map_ok(|(_, k, v)| (k, v))
             .collect::<Vec<_>>()
             .await;
@@ -168,24 +167,24 @@ impl<
     /// Likewise, sealed subtrees or leafs will be reused if possible.
     ///
     /// ![packing illustration](https://ipfs.io/ipfs/QmaEDTjHSdCKyGQ3cFMCf73kE67NvffLA5agquLW5qSEVn/packing.jpg)
-    pub async fn pack(&mut self) -> Result<()> {
-        let roots = self.roots().await?;
-        let mut filled = Tree::<T, V>::from_roots(self.forest.clone(), roots).await?;
-        let remainder: Vec<_> = self.collect_from(filled.count()).await?;
-        filled.extend(remainder).await?;
+    pub async fn pack(&mut self, txn: &Transaction<T, V>) -> Result<()> {
+        let roots = self.roots(txn).await?;
+        let mut filled = Tree::<T, V>::from_roots(txn, roots).await?;
+        let remainder: Vec<_> = self.collect_from(txn, filled.count()).await?;
+        filled.extend(txn, remainder).await?;
         *self = filled;
         Ok(())
     }
 
     /// append a single element. This is just a shortcut for extend.
-    pub async fn push(&mut self, key: T::Key, value: V) -> Result<()> {
-        self.extend(Some((key, value))).await
+    pub async fn push(&mut self, txn: &Transaction<T, V>, key: T::Key, value: V) -> Result<()> {
+        self.extend(txn, Some((key, value))).await
     }
 
     /// extend the node with the given iterator of key/value pairs
     ///    
     /// ![extend illustration](https://ipfs.io/ipfs/QmaEDTjHSdCKyGQ3cFMCf73kE67NvffLA5agquLW5qSEVn/extend.jpg)
-    pub async fn extend<I>(&mut self, from: I) -> Result<()>
+    pub async fn extend<I>(&mut self, txn: &Transaction<T, V>, from: I) -> Result<()>
     where
         I: IntoIterator<Item = (T::Key, V)>,
         I::IntoIter: Send,
@@ -196,8 +195,7 @@ impl<
             return Ok(());
         }
         self.root = Some(
-            self.forest
-                .extend_above(self.root.as_ref(), u32::max_value(), from.by_ref())
+            txn.extend_above(self.root.as_ref(), u32::max_value(), from.by_ref())
                 .await?,
         );
         Ok(())
@@ -212,34 +210,30 @@ impl<
     /// To pack a tree, use the pack method.
     ///    
     /// ![extend_unpacked illustration](https://ipfs.io/ipfs/QmaEDTjHSdCKyGQ3cFMCf73kE67NvffLA5agquLW5qSEVn/extend_unpacked.jpg)
-    pub async fn extend_unpacked<I>(&mut self, from: I) -> Result<()>
+    pub async fn extend_unpacked<I>(&mut self, txn: &Transaction<T, V>, from: I) -> Result<()>
     where
         I: IntoIterator<Item = (T::Key, V)>,
         I::IntoIter: Send,
     {
-        self.root = self
-            .forest
-            .extend_unpacked(self.root.as_ref(), from)
-            .await?;
+        self.root = txn.extend_unpacked(self.root.as_ref(), from).await?;
         Ok(())
     }
 
     /// element at index
-    pub async fn get(&self, offset: u64) -> Result<Option<(T::Key, V)>> {
+    pub async fn get(&self, forest: &Forest<T, V>, offset: u64) -> Result<Option<(T::Key, V)>> {
         Ok(match &self.root {
-            Some(index) => self.forest.get(index, offset).await?,
+            Some(index) => forest.get(index, offset).await?,
             None => None,
         })
     }
 
     pub fn stream_filtered(
         &self,
+        forest: &Forest<T, V>,
         query: impl Query<T> + Clone + 'static,
     ) -> impl Stream<Item = Result<(u64, T::Key, V)>> + 'static {
         match &self.root {
-            Some(index) => self
-                .forest
-                .read()
+            Some(index) => forest
                 .clone()
                 .stream_filtered(0, query, index.clone())
                 .left_stream(),
@@ -249,6 +243,7 @@ impl<
 
     pub fn stream_filtered_chunked<Q, E, F>(
         self,
+        forest: &Forest<T, V>,
         query: Q,
         mk_extra: &'static F,
     ) -> impl Stream<Item = Result<FilteredChunk<T, V, E>>> + 'static
@@ -258,9 +253,7 @@ impl<
         F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
     {
         match &self.root {
-            Some(index) => self
-                .forest
-                .read()
+            Some(index) => forest
                 .clone()
                 .stream_filtered_chunked(0, query, index.clone(), mk_extra)
                 .left_stream(),
@@ -270,6 +263,7 @@ impl<
 
     pub fn stream_filtered_chunked_reverse<Q, E, F>(
         self,
+        forest: &Forest<T, V>,
         query: Q,
         mk_extra: &'static F,
     ) -> impl Stream<Item = Result<FilteredChunk<T, V, E>>> + 'static
@@ -279,9 +273,7 @@ impl<
         F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
     {
         match &self.root {
-            Some(index) => self
-                .forest
-                .read()
+            Some(index) => forest
                 .clone()
                 .stream_filtered_chunked_reverse(0, query, index.clone(), mk_extra)
                 .left_stream(),
@@ -299,10 +291,14 @@ impl<
     ///
     /// note that offsets will not be affected by this. Also, unsealed nodes will not be forgotten
     /// even if they do not match the query.
-    pub async fn retain<'a, Q: Query<T> + Send + Sync>(&'a mut self, query: &'a Q) -> Result<()> {
+    pub async fn retain<'a, Q: Query<T> + Send + Sync>(
+        &'a mut self,
+        txn: &Transaction<T, V>,
+        query: &'a Q,
+    ) -> Result<()> {
         if let Some(index) = &self.root {
             let mut level: i32 = i32::max_value();
-            let res = self.forest.retain(0, query, index, &mut level).await?;
+            let res = txn.retain(0, query, index, &mut level).await?;
             self.root = Some(res);
         }
         Ok(())
@@ -315,11 +311,11 @@ impl<
     /// Note that this is an emergency measure to recover data if the tree is not completely
     /// available. It might result in a degenerate tree that can no longer be safely added to,
     /// especially if there are repaired blocks in the non-packed part.
-    pub async fn repair<'a>(&mut self) -> Result<Vec<String>> {
+    pub async fn repair<'a>(&mut self, txn: &Transaction<T, V>) -> Result<Vec<String>> {
         let mut report = Vec::new();
         if let Some(index) = &self.root {
             let mut level: i32 = i32::max_value();
-            self.root = Some(self.forest.repair(index, &mut report, &mut level).await?);
+            self.root = Some(txn.repair(index, &mut report, &mut level).await?);
         }
         Ok(report)
     }
