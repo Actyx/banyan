@@ -1,16 +1,14 @@
-use crate::ipfs::Cid;
+use crate::{ipfs::Cid, tag_index::map_to_index_set, tag_index::TagIndex, tag_index::TagSet};
 use banyan::index::*;
 use banyan::{forest::*, query::Query};
-use maplit::btreeset;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::BTreeSet,
     convert::{TryFrom, TryInto},
     fmt, io,
     iter::FromIterator,
     str::FromStr,
-    sync::Arc,
 };
+use vec_collections::VecSet;
 
 #[derive(Debug)]
 pub struct TT {}
@@ -96,93 +94,94 @@ impl TreeTypes for TT {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialOrd, PartialEq, Ord, Eq)]
-pub struct Tag(Arc<str>);
-
-impl Tag {
-    pub fn new(text: &str) -> Self {
-        Self(text.into())
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct Tags(pub BTreeSet<Tag>);
-
-impl Tags {
-    pub fn single(text: &str) -> Self {
-        Self(btreeset! { Tag(text.into()) })
-    }
-}
-
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Key {
+    time: TimeData,
+    tags: TagSet,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TimeData {
     min_lamport: u64,
     min_time: u64,
     max_time: u64,
-    tags: Tags,
 }
 
-impl Key {
-    pub fn single(lamport: u64, time: u64, tags: Tags) -> Self {
-        Self {
-            min_lamport: lamport,
-            min_time: time,
-            max_time: time,
-            tags,
-        }
-    }
-
-    pub fn filter_tags(tags: Tags) -> Self {
-        Self {
-            min_lamport: u64::MIN,
-            min_time: u64::MIN,
-            max_time: u64::MAX,
-            tags,
-        }
-    }
-
-    pub fn range(min_time: u64, max_time: u64, tags: Tags) -> Self {
-        Self {
-            min_lamport: 0,
-            min_time,
-            max_time,
-            tags,
-        }
-    }
-
-    fn intersects(&self, that: &Key) -> bool {
+impl TimeData {
+    fn intersects(&self, that: &Self) -> bool {
         if self.max_time < that.min_time {
             return false;
         }
         if self.min_time > that.max_time {
             return false;
         }
-        if self.tags.0.is_disjoint(&that.tags.0) {
-            return false;
-        }
         true
     }
 
-    fn contains(&self, that: &Key) -> bool {
+    fn contains(&self, that: &Self) -> bool {
         if that.min_time < self.min_time {
             return false;
         }
         if that.max_time > self.max_time {
             return false;
         }
-        if !that.tags.0.is_subset(&self.tags.0) {
-            return false;
-        }
         true
+    }
+
+    fn combine(&mut self, b: &Self) {
+        self.min_lamport = self.min_lamport.min(b.min_lamport);
+        self.min_time = self.min_time.min(b.min_time);
+        self.max_time = self.max_time.max(b.max_time);
+    }
+}
+
+impl Key {
+    pub fn single(lamport: u64, time: u64, tags: TagSet) -> Self {
+        Self {
+            time: TimeData {
+                min_lamport: lamport,
+                min_time: time,
+                max_time: time,
+            },
+            tags,
+        }
+    }
+
+    pub fn filter_tags(tags: TagSet) -> Self {
+        Self {
+            time: TimeData {
+                min_lamport: u64::MIN,
+                min_time: u64::MIN,
+                max_time: u64::MAX,
+            },
+            tags,
+        }
+    }
+
+    pub fn range(min_time: u64, max_time: u64, tags: TagSet) -> Self {
+        Self {
+            time: TimeData {
+                min_lamport: 0,
+                min_time,
+                max_time,
+            },
+            tags,
+        }
+    }
+
+    fn intersects(&self, that: &Key) -> bool {
+        self.time.intersects(&that.time) && !self.tags.is_disjoint(&that.tags)
+    }
+
+    fn contains(&self, that: &Key) -> bool {
+        self.time.contains(&that.time) && self.tags.is_superset(&that.tags)
     }
 }
 
 impl Key {
     fn combine(&mut self, b: &Self) {
-        self.min_lamport = self.min_lamport.min(b.min_lamport);
-        self.min_time = self.min_time.min(b.min_time);
-        self.max_time = self.max_time.max(b.max_time);
-        self.tags.0.extend(b.tags.0.iter().cloned());
+        self.time.combine(&b.time);
+        self.tags.extend(b.tags.iter().cloned());
     }
 }
 
@@ -196,22 +195,84 @@ impl DnfQuery {
     fn contains(&self, v: &Key) -> bool {
         self.0.iter().any(|x| x.contains(v))
     }
+    fn map_into<'a>(&self, keyseq: &'a KeySeq) -> TranslatedDnfQuery<'a> {
+        TranslatedDnfQuery {
+            query: self
+                .0
+                .iter()
+                .map(|key| {
+                    map_to_index_set(&keyseq.tags.tags, &key.tags).map(|index_set| TranslatedKey {
+                        index_set,
+                        time: key.time,
+                    })
+                })
+                .collect::<Option<Vec<_>>>()
+                .unwrap_or_default(),
+            seq: keyseq,
+        }
+    }
+}
+
+type IndexSet = VecSet<[u32; 4]>;
+
+struct TranslatedKey {
+    index_set: IndexSet,
+    time: TimeData,
+}
+
+struct TranslatedDnfQuery<'a> {
+    query: Vec<TranslatedKey>,
+    seq: &'a KeySeq,
+}
+
+impl<'a> TranslatedDnfQuery<'a> {
+    fn intersects(&self, i: usize) -> bool {
+        self.query.iter().any(|q| {
+            q.time.intersects(&self.seq.time(i).unwrap())
+                && !q.index_set.is_disjoint(&self.seq.tags.elements[i])
+        })
+    }
+
+    fn contains(&self, i: usize) -> bool {
+        self.query.iter().any(|q| {
+            q.time.contains(&self.seq.time(i).unwrap())
+                && q.index_set.is_superset(&self.seq.tags.elements[i])
+        })
+    }
+
+    fn intersecting(&self, matching: &mut [bool]) {
+        for i in 0..self.seq.len().min(matching.len()) {
+            if matching[i] {
+                matching[i] = self.intersects(i);
+            }
+        }
+    }
+
+    fn containing(&self, matching: &mut [bool]) {
+        for i in 0..self.seq.len().min(matching.len()) {
+            if matching[i] {
+                matching[i] = self.contains(i);
+            }
+        }
+    }
 }
 
 impl Query<TT> for DnfQuery {
     fn intersecting(&self, _: u64, x: &BranchIndex<TT>, matching: &mut [bool]) {
-        for (i, s) in x.summaries().take(matching.len()).enumerate() {
-            if matching[i] {
-                matching[i] = self.intersects(&s);
-            }
-        }
+        self.map_into(&x.summaries).intersecting(matching);
+        // for i in 0..x.summaries.len().min(matching.len()) {
+        //     if matching[i] {
+        //         matching[i] = self.intersects(&x.summaries.get(i).unwrap());
+        //     }
+        // }
     }
     fn containing(&self, _: u64, x: &LeafIndex<TT>, matching: &mut [bool]) {
-        for (i, s) in x.keys().take(matching.len()).enumerate() {
-            if matching[i] {
-                matching[i] = self.contains(&s);
-            }
-        }
+        self.map_into(&x.keys).containing(matching);
+        // for i in 0..x.keys.len().min(matching.len()) {
+        //     if matching[i] {
+        //         matching[i] = self.contains(&x.keys.get(i).unwrap());
+        //     }
+        // }
     }
 }
 
@@ -220,7 +281,21 @@ pub struct KeySeq {
     min_lamport: Vec<u64>,
     min_time: Vec<u64>,
     max_time: Vec<u64>,
-    tags: Vec<Tags>,
+    tags: TagIndex,
+}
+
+impl KeySeq {
+    fn time(&self, i: usize) -> Option<TimeData> {
+        if i < self.min_lamport.len() {
+            Some(TimeData {
+                min_time: self.min_time[i],
+                max_time: self.max_time[i],
+                min_lamport: self.min_lamport[i],
+            })
+        } else {
+            None
+        }
+    }
 }
 
 impl CompactSeq for KeySeq {
@@ -234,10 +309,12 @@ impl CompactSeq for KeySeq {
             self.tags.get(index),
         ) {
             Some(Key {
-                min_lamport: *min_lamport,
-                min_time: *min_time,
-                max_time: *max_time,
-                tags: tags.clone(),
+                time: TimeData {
+                    min_lamport: *min_lamport,
+                    min_time: *min_time,
+                    max_time: *max_time,
+                },
+                tags,
             })
         } else {
             None
@@ -245,15 +322,27 @@ impl CompactSeq for KeySeq {
     }
 
     fn len(&self) -> usize {
-        self.tags.len()
+        self.tags.elements.len()
     }
 
     fn summarize(&self) -> Key {
-        let mut result = self.get(0).unwrap();
-        for i in 1..self.tags.len() {
-            result.combine(&self.get(i).unwrap());
+        let max_time = *self.max_time.iter().max().unwrap();
+        let min_time = *self.min_time.iter().min().unwrap();
+        let min_lamport = *self.min_lamport.iter().min().unwrap();
+        let tags = self.tags.tags.clone();
+        Key {
+            time: TimeData {
+                max_time,
+                min_time,
+                min_lamport,
+            },
+            tags,
         }
-        result
+        // let mut result = self.get(0).unwrap();
+        // for i in 1..self.tags.elements.len() {
+        //     result.combine(&self.get(i).unwrap());
+        // }
+        // result
     }
 }
 
@@ -262,18 +351,19 @@ impl FromIterator<Key> for KeySeq {
         let mut min_lamport = Vec::new();
         let mut min_time = Vec::new();
         let mut max_time = Vec::new();
-        let mut tags = Vec::new();
+        let mut tag_index = Vec::new();
         for value in iter.into_iter() {
-            min_lamport.push(value.min_lamport);
-            min_time.push(value.min_time);
-            max_time.push(value.max_time);
-            tags.push(value.tags.clone());
+            min_lamport.push(value.time.min_lamport);
+            min_time.push(value.time.min_time);
+            max_time.push(value.time.max_time);
+            tag_index.push(value.tags);
         }
+        let tag_index = TagIndex::from_elements(&tag_index);
         Self {
             min_lamport,
             min_time,
             max_time,
-            tags,
+            tags: tag_index,
         }
     }
 }
