@@ -1,5 +1,8 @@
 //! helper methods to stream trees
-use crate::index::{Index, IndexRef};
+use crate::{
+    index::{Index, IndexRef},
+    store::ReadOnlyStore,
+};
 
 use super::{FilteredChunk, Forest, TreeTypes};
 use crate::query::*;
@@ -11,7 +14,8 @@ use std::{fmt::Debug, sync::atomic::AtomicU64, sync::Arc};
 impl<
         T: TreeTypes + 'static,
         V: Clone + Send + Sync + Debug + Serialize + DeserializeOwned + 'static,
-    > Forest<T, V>
+        R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static,
+    > Forest<T, V, R>
 {
     /// Given a sequence of roots, will stream matching events in ascending order indefinitely.
     ///

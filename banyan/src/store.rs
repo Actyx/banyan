@@ -25,6 +25,12 @@ pub trait ReadOnlyStore<L> {
 
 pub type ArcReadOnlyStore<L> = Arc<dyn ReadOnlyStore<L> + Send + Sync + 'static>;
 
+impl<L> ReadOnlyStore<L> for ArcReadOnlyStore<L> {
+    fn get(&self, link: &L) -> BoxFuture<Result<Arc<[u8]>>> {
+        self.as_ref().get(link)
+    }
+}
+
 pub struct LoggingBlockWriter<L, I> {
     inner: I,
     log: Arc<Mutex<Vec<L>>>,

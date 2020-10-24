@@ -58,6 +58,7 @@
 //! [B-Trees]: https://en.wikipedia.org/wiki/B-tree
 pub mod forest;
 pub mod index;
+pub mod memstore;
 pub mod query;
 pub mod store;
 mod thread_local_zstd;

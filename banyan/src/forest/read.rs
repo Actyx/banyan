@@ -2,7 +2,7 @@ use super::{BranchCache, Config, CryptoConfig, FilteredChunk, Forest, FutureResu
 use crate::{
     index::deserialize_compressed, index::zip_with_offset, index::Branch, index::BranchIndex,
     index::CompactSeq, index::Index, index::IndexRef, index::Leaf, index::LeafIndex,
-    index::NodeInfo, query::Query, store::ArcReadOnlyStore,
+    index::NodeInfo, query::Query, store::ReadOnlyStore,
 };
 use anyhow::{anyhow, Result};
 use core::fmt::Debug;
@@ -11,10 +11,11 @@ use salsa20::{stream_cipher::NewStreamCipher, stream_cipher::SyncStreamCipher, X
 use serde::{de::DeserializeOwned, Serialize};
 
 /// basic random access append only async tree
-impl<T, V> Forest<T, V>
+impl<T, V, R> Forest<T, V, R>
 where
     T: TreeTypes + 'static,
     V: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static,
+    R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static,
 {
     pub(crate) fn crypto_config(&self) -> &CryptoConfig {
         &self.0.crypto_config
@@ -32,7 +33,7 @@ where
         self.crypto_config().index_key
     }
 
-    fn store(&self) -> &ArcReadOnlyStore<T::Link> {
+    fn store(&self) -> &R {
         &self.0.store
     }
 
@@ -221,7 +222,7 @@ where
         index: Index<T>,
         mk_extra: &'static F,
     ) -> BoxStream<'static, Result<FilteredChunk<T, V, E>>> {
-        let this: Forest<T, V> = self.clone();
+        let this: Forest<T, V, R> = self.clone();
         async move {
             Ok(match this.load_node(&index).await? {
                 NodeInfo::Leaf(index, node) => {
