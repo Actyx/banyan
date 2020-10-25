@@ -11,12 +11,11 @@ use serde::{
 };
 use serde_cbor::tags::Tagged;
 use std::{
-    collections::HashMap,
     convert::TryFrom,
     convert::TryInto,
     fmt, result,
     str::FromStr,
-    sync::{Arc, RwLock},
+    sync::Arc,
 };
 
 use crate::tags::Sha256Digest;
@@ -146,33 +145,6 @@ impl<'de> Deserialize<'de> for CidIo {
             }
         }
         deserializer.deserialize_any(CidVisitor)
-    }
-}
-
-pub struct MemStore(Arc<RwLock<HashMap<Sha256Digest, Arc<[u8]>>>>);
-
-impl MemStore {
-    pub fn new() -> Self {
-        Self(Arc::new(RwLock::new(HashMap::new())))
-    }
-}
-
-impl ReadOnlyStore<Sha256Digest> for MemStore {
-    fn get(&self, link: &Sha256Digest) -> BoxFuture<Result<Arc<[u8]>>> {
-        let x = self.0.as_ref().read().unwrap();
-        if let Some(value) = x.get(link) {
-            future::ok(value.clone()).boxed()
-        } else {
-            future::err(anyhow!("not there")).boxed()
-        }
-    }
-}
-
-impl BlockWriter<Sha256Digest> for MemStore {
-    fn put(&self, data: &[u8]) -> BoxFuture<Result<Sha256Digest>> {
-        let digest = Sha256Digest::new(data);
-        self.0.as_ref().write().unwrap().insert(digest, data.into());
-        future::ok(digest).boxed()
     }
 }
 

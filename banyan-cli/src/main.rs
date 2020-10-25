@@ -14,9 +14,10 @@ use banyan::{
     forest::*,
     query::{AllQuery, OffsetRangeQuery, QueryExt},
     store::{ArcBlockWriter, ArcReadOnlyStore},
+    memstore::MemStore,
     tree::*,
 };
-use ipfs::{pubsub_pub, pubsub_sub, IpfsStore, MemStore};
+use ipfs::{pubsub_pub, pubsub_sub, IpfsStore};
 use tags::{DnfQuery, Key, Sha256Digest, TT};
 
 pub type Error = anyhow::Error;
@@ -489,7 +490,7 @@ async fn main() -> Result<()> {
             println!("{:?}", ev);
         }
     } else if let Some(matches) = matches.subcommand_matches("bench") {
-        let store = Arc::new(MemStore::new());
+        let store = Arc::new(MemStore::new(usize::max_value(), Sha256Digest::new));
         let config = Config::debug_fast();
         let crypto_config = CryptoConfig {
             index_key,
