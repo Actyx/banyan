@@ -1,15 +1,11 @@
 use crate::{
-    forest::{
-        BranchResult, Config, CreateMode, CryptoConfig, Forest, FutureResult, Transaction,
-        TreeTypes,
-    },
+    forest::{BranchResult, Config, CreateMode, Forest, FutureResult, Transaction, TreeTypes},
     index::zip_with_offset_ref,
-    store::BlockWriter,
+    store::{BlockWriter, ReadOnlyStore},
     zstd_array::ZstdArray,
 };
 use crate::{
     index::serialize_compressed,
-    index::Branch,
     index::BranchIndex,
     index::CompactSeq,
     index::Index,
@@ -17,7 +13,6 @@ use crate::{
     index::LeafIndex,
     index::NodeInfo,
     query::Query,
-    store::ArcReadOnlyStore,
     util::{is_sorted, BoolSliceExt},
 };
 use anyhow::{ensure, Result};
@@ -26,17 +21,18 @@ use futures::prelude::*;
 use rand::RngCore;
 use salsa20::{stream_cipher::NewStreamCipher, stream_cipher::SyncStreamCipher, XSalsa20};
 use serde::{de::DeserializeOwned, Serialize};
-use std::{iter, sync::Arc, sync::RwLock};
+use std::iter;
 use tracing::info;
 
 /// basic random access append only async tree
-impl<T, V, W> Transaction<T, V, W>
+impl<T, V, R, W> Transaction<T, V, R, W>
 where
     T: TreeTypes + 'static,
     V: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static,
+    R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static,
     W: BlockWriter<T::Link> + 'static,
 {
-    pub fn read(&self) -> &Forest<T, V> {
+    pub fn read(&self) -> &Forest<T, V, R> {
         &self.read
     }
 

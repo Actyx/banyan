@@ -1,9 +1,12 @@
 //! creation and traversal of banyan trees
 use super::index::*;
-use crate::query::{AllQuery, OffsetRangeQuery, Query};
 use crate::{
     forest::{FilteredChunk, Forest, Transaction, TreeTypes},
     store::BlockWriter,
+};
+use crate::{
+    query::{AllQuery, OffsetRangeQuery, Query},
+    store::ReadOnlyStore,
 };
 use anyhow::Result;
 use futures::prelude::*;
@@ -56,7 +59,8 @@ impl<V, T: TreeTypes> Clone for Tree<T, V> {
 impl<
         T: TreeTypes + 'static,
         V: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static,
-    > Forest<T, V>
+        R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static,
+    > Forest<T, V, R>
 {
     pub async fn load_tree(&self, link: T::Link) -> Result<Tree<T, V>> {
         Ok(Tree {
@@ -204,8 +208,9 @@ impl<
 impl<
         T: TreeTypes + 'static,
         V: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static,
+        R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static,
         W: BlockWriter<T::Link> + 'static,
-    > Transaction<T, V, W>
+    > Transaction<T, V, R, W>
 {
     pub async fn tree_from_roots(&self, mut roots: Vec<Index<T>>) -> Result<Tree<T, V>> {
         assert!(roots.iter().all(|x| x.sealed()));

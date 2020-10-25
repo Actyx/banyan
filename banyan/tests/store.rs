@@ -1,41 +1,6 @@
 //! helper methods for the tesqts
-use anyhow::{anyhow, Result};
-use banyan::store::{BlockWriter, ReadOnlyStore};
-use futures::{future::BoxFuture, prelude::*};
 use sha2::{Digest, Sha256};
-use std::{
-    collections::HashMap,
-    convert::TryInto,
-    fmt,
-    sync::{Arc, RwLock},
-};
-
-pub struct MemStore(Arc<RwLock<HashMap<Sha256Digest, Arc<[u8]>>>>);
-
-impl MemStore {
-    pub fn new() -> Self {
-        Self(Arc::new(RwLock::new(HashMap::new())))
-    }
-}
-
-impl ReadOnlyStore<Sha256Digest> for MemStore {
-    fn get(&self, link: &Sha256Digest) -> BoxFuture<Result<Arc<[u8]>>> {
-        let x = self.0.as_ref().read().unwrap();
-        if let Some(value) = x.get(link) {
-            future::ok(value.clone()).boxed()
-        } else {
-            future::err(anyhow!("not there")).boxed()
-        }
-    }
-}
-
-impl BlockWriter<Sha256Digest> for MemStore {
-    fn put(&self, data: &[u8]) -> BoxFuture<Result<Sha256Digest>> {
-        let link = Sha256Digest::digest(data);
-        self.0.as_ref().write().unwrap().insert(link, data.into());
-        future::ok(link).boxed()
-    }
-}
+use std::{convert::TryInto, fmt};
 
 /// For tests, we use a Sha2-256 digest as a link
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]

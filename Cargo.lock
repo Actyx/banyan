@@ -82,6 +82,7 @@ dependencies = [
  "clap",
  "derive_more",
  "env_logger",
+ "fnv",
  "futures",
  "hex",
  "lru",

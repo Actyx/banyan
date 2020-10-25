@@ -13,14 +13,17 @@ mod tags;
 use banyan::{
     forest::*,
     query::{AllQuery, OffsetRangeQuery, QueryExt},
-    store::ArcBlockWriter,
+    store::{ArcBlockWriter, ArcReadOnlyStore},
+    memstore::MemStore,
     tree::*,
 };
-use ipfs::{pubsub_pub, pubsub_sub, IpfsStore, MemStore};
+use ipfs::{pubsub_pub, pubsub_sub, IpfsStore};
 use tags::{DnfQuery, Key, Sha256Digest, TT};
 
 pub type Error = anyhow::Error;
 pub type Result<T> = anyhow::Result<T>;
+
+type Txn = Transaction<TT, String, ArcReadOnlyStore<Sha256Digest>, ArcBlockWriter<Sha256Digest>>;
 
 fn app() -> clap::App<'static, 'static> {
     let root_arg = || {
@@ -188,7 +191,7 @@ fn create_salsa_key(text: &str) -> salsa20::Key {
 }
 
 async fn build_tree(
-    forest: &Transaction<TT, String, ArcBlockWriter<Sha256Digest>>,
+    forest: &Txn,
     base: Option<Sha256Digest>,
     batches: u64,
     count: u64,
@@ -241,7 +244,7 @@ async fn build_tree(
 }
 
 async fn bench_build(
-    forest: &Transaction<TT, String, ArcBlockWriter<Sha256Digest>>,
+    forest: &Txn,
     base: Option<Sha256Digest>,
     batches: u64,
     count: u64,
@@ -337,12 +340,7 @@ async fn main() -> Result<()> {
         index_key,
         value_key,
     };
-    let forest = Transaction::<TT, String, ArcBlockWriter<Sha256Digest>>::new(
-        store.clone(),
-        store,
-        config,
-        crypto_config,
-    );
+    let forest = Txn::new(store.clone(), store, config, crypto_config);
     if let Some(matches) = matches.subcommand_matches("dump") {
         let root = Sha256Digest::from_str(
             matches
@@ -492,18 +490,13 @@ async fn main() -> Result<()> {
             println!("{:?}", ev);
         }
     } else if let Some(matches) = matches.subcommand_matches("bench") {
-        let store = Arc::new(MemStore::new());
+        let store = Arc::new(MemStore::new(usize::max_value(), Sha256Digest::new));
         let config = Config::debug_fast();
         let crypto_config = CryptoConfig {
             index_key,
             value_key,
         };
-        let forest = Transaction::<TT, String, ArcBlockWriter<Sha256Digest>>::new(
-            store.clone(),
-            store,
-            config,
-            crypto_config,
-        );
+        let forest = Txn::new(store.clone(), store, config, crypto_config);
         let _t0 = std::time::Instant::now();
         let base = None;
         let batches = 1;
