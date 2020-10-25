@@ -1,7 +1,7 @@
 //! interface to a content-addressed store
 use anyhow::Result;
-use futures::{future::BoxFuture, prelude::*};
-use std::sync::{Arc, Mutex};
+use futures::future::BoxFuture;
+use std::sync::Arc;
 
 pub trait BlockWriter<L>: Send + Sync {
     /// adds a block to a temporary staging area
@@ -28,58 +28,5 @@ pub type ArcReadOnlyStore<L> = Arc<dyn ReadOnlyStore<L> + Send + Sync + 'static>
 impl<L> ReadOnlyStore<L> for ArcReadOnlyStore<L> {
     fn get(&self, link: &L) -> BoxFuture<Result<Arc<[u8]>>> {
         self.as_ref().get(link)
-    }
-}
-
-pub struct LoggingBlockWriter<L, I> {
-    inner: I,
-    log: Arc<Mutex<Vec<L>>>,
-}
-
-impl<L: Copy, I> LoggingBlockWriter<L, I> {
-    pub fn new(inner: I) -> Self {
-        Self {
-            inner,
-            log: Default::default(),
-        }
-    }
-
-    pub fn written(&self) -> Vec<L> {
-        self.log.lock().unwrap().clone()
-    }
-}
-
-impl<L: Send + Sync + Copy, I: BlockWriter<L>> BlockWriter<L> for LoggingBlockWriter<L, I> {
-    fn put(&self, data: &[u8]) -> BoxFuture<Result<L>> {
-        self.inner
-            .put(data)
-            .map_ok(move |link| {
-                self.log.lock().unwrap().push(link);
-                link
-            })
-            .boxed()
-    }
-}
-
-pub struct MemBlockWriter<L> {
-    log: Arc<Mutex<Vec<(L, u32, Arc<[u8]>)>>>,
-}
-
-impl<L: Clone> MemBlockWriter<L> {
-    pub fn new() -> Self {
-        Self {
-            log: Default::default(),
-        }
-    }
-
-    pub fn written(&self) -> Vec<(L, u32, Arc<[u8]>)> {
-        self.log.lock().unwrap().clone()
-    }
-}
-
-impl<L: Send + Sync + Copy> BlockWriter<L> for MemBlockWriter<L> {
-    fn put(&self, data: &[u8]) -> BoxFuture<Result<L>> {
-        let block = todo!();
-        todo!()
     }
 }

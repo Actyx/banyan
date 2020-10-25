@@ -302,6 +302,7 @@ pub(crate) async fn block_put(data: &[u8], codec: cid::Codec, pin: bool) -> Resu
     Ok(cid.into())
 }
 
+#[derive(Clone)]
 pub struct IpfsStore {}
 
 impl IpfsStore {

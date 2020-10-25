@@ -37,7 +37,7 @@ impl<R: ReadOnlyStore<L> + Send + Sync + 'static, L: Copy + Eq + Hash + Send + S
 {
     fn get(&self, link: &L) -> BoxFuture<anyhow::Result<Arc<[u8]>>> {
         match self.store.get0(link) {
-            Some(block) => future::ok(block.clone()).boxed(),
+            Some(block) => future::ok(block).boxed(),
             None => self.inner.get(link),
         }
     }
