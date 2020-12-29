@@ -1,6 +1,8 @@
-use crate::{ipfs::Cid, tag_index::map_to_index_set, tag_index::TagIndex, tag_index::TagSet};
+use crate::{tag_index::map_to_index_set, tag_index::TagIndex, tag_index::TagSet};
 use banyan::index::*;
 use banyan::{forest::*, query::Query};
+use libipld::{cbor::DagCborCodec, codec::Codec, Cid};
+use multihash::MultihashDigest;
 use serde::{Deserialize, Serialize};
 use std::{
     convert::{TryFrom, TryInto},
@@ -13,20 +15,32 @@ use vec_collections::VecSet;
 #[derive(Debug)]
 pub struct TT {}
 
-#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Sha256Digest([u8; 32]);
 
 impl Sha256Digest {
     pub fn new(data: &[u8]) -> Self {
-        let mh = multihash::Sha2_256::digest(data);
+        let mh = multihash::Code::Sha2_256.digest(data);
         Sha256Digest(mh.digest().try_into().unwrap())
     }
 }
 
 impl From<Sha256Digest> for Cid {
     fn from(value: Sha256Digest) -> Self {
-        let mh = multihash::wrap(multihash::Code::Sha2_256, &value.0);
-        cid::Cid::new_v1(cid::Codec::DagCBOR, mh).into()
+        // https://github.com/multiformats/multicodec/blob/master/table.csv
+        let mh = multihash::Multihash::wrap(0x12, &value.0).unwrap();
+        Cid::new_v1(0x71, mh).into()
+    }
+}
+
+impl TryFrom<Cid> for Sha256Digest {
+    type Error = anyhow::Error;
+
+    fn try_from(value: Cid) -> Result<Self, Self::Error> {
+        anyhow::ensure!(value.codec() == 0x71, "Unexpected codec");
+        anyhow::ensure!(value.hash().code() == 0x12, "Unexpected hash algorithm");
+        let digest: [u8; 32] = value.hash().digest().try_into()?;
+        Ok(Self(digest))
     }
 }
 
@@ -38,27 +52,13 @@ impl FromStr for Sha256Digest {
     }
 }
 
-impl TryFrom<Cid> for Sha256Digest {
-    type Error = anyhow::Error;
-    fn try_from(value: Cid) -> Result<Self, Self::Error> {
-        let cid: cid::Cid = value.into();
-        if cid.version() != cid::Version::V1 {
-            anyhow::bail!("version 0 multihash not supported!");
-        }
-        // if cid.codec() != cid::Codec::DagCBOR {
-        //     anyhow::bail!("Must be DagCBOR codec");
-        // }
-        if cid.hash().algorithm() != multihash::Code::Sha2_256 {
-            anyhow::bail!("hashes must be Sha256 encoded!");
-        }
-        if cid.hash().digest().len() != 32 {
-            anyhow::bail!("Sha256 must have 256 bits digest");
-        }
-        Ok(Sha256Digest(cid.hash().digest().try_into()?))
+impl fmt::Display for Sha256Digest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", Cid::from(*self))
     }
 }
 
-impl fmt::Display for Sha256Digest {
+impl fmt::Debug for Sha256Digest {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", Cid::from(*self))
     }
@@ -68,31 +68,27 @@ impl TreeTypes for TT {
     type Key = Key;
     type Seq = KeySeq;
     type Link = Sha256Digest;
-    fn serialize_branch(
-        links: &[&Self::Link],
-        data: Vec<u8>,
-        w: impl io::Write,
-    ) -> anyhow::Result<()> {
-        let cids = links
-            .into_iter()
-            .map(|x| Cid::from(**x))
-            .collect::<Vec<_>>();
-        serde_cbor::to_writer(w, &(cids, serde_cbor::Value::Bytes(data)))
-            .map_err(|e| anyhow::Error::new(e))
+
+    fn serialize_branch(links: &[&Self::Link], data: Vec<u8>) -> anyhow::Result<Vec<u8>> {
+        let node = IpldNode(
+            links.iter().map(|x| Cid::from(**x)).collect::<Vec<_>>(),
+            data.into(),
+        );
+        let bytes = DagCborCodec.encode(&node)?;
+        Ok(bytes)
     }
-    fn deserialize_branch(reader: impl io::Read) -> anyhow::Result<(Vec<Self::Link>, Vec<u8>)> {
-        let (cids, data): (Vec<Cid>, serde_cbor::Value) = serde_cbor::from_reader(reader)?;
-        let links = cids
+    fn deserialize_branch(bytes: &[u8]) -> anyhow::Result<(Vec<Self::Link>, Vec<u8>)> {
+        let IpldNode(links, data) = DagCborCodec.decode(bytes)?;
+        let links = links
             .into_iter()
-            .map(Sha256Digest::try_from)
+            .map(|cid| Self::Link::try_from(cid))
             .collect::<anyhow::Result<Vec<_>>>()?;
-        if let serde_cbor::Value::Bytes(data) = data {
-            Ok((links, data))
-        } else {
-            Err(anyhow::anyhow!("expected cbor bytes"))
-        }
+        Ok((links, data.into()))
     }
 }
+
+#[derive(libipld::DagCbor)]
+struct IpldNode(Vec<Cid>, Box<[u8]>);
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Key {

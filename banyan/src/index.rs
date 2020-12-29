@@ -439,8 +439,7 @@ pub(crate) fn serialize_compressed<T: TreeTypes>(
     nonce: &salsa20::XNonce,
     items: &[Index<T>],
     level: i32,
-    into: &mut Vec<u8>,
-) -> Result<()> {
+) -> Result<Vec<u8>> {
     let mut links: Vec<&T::Link> = Vec::new();
     let mut compressed: Vec<u8> = Vec::new();
     compressed.extend_from_slice(&nonce);
@@ -455,8 +454,7 @@ pub(crate) fn serialize_compressed<T: TreeTypes>(
     writer.write_all(&[CBOR_BREAK])?;
     writer.finish()?;
     salsa20::XSalsa20::new(key, nonce).apply_keystream(&mut compressed[24..]);
-    T::serialize_branch(&links, compressed, into)?;
-    Ok(())
+    Ok(T::serialize_branch(&links, compressed)?)
 }
 
 pub(crate) fn deserialize_compressed<T: TreeTypes>(

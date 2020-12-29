@@ -367,13 +367,11 @@ where
     }
 
     async fn persist_branch(&self, children: &[Index<T>]) -> Result<(T::Link, u64)> {
-        let mut cbor = Vec::new();
-        serialize_compressed(
+        let cbor = serialize_compressed(
             &self.index_key(),
             &self.random_nonce(),
             &children,
             self.config().zstd_level,
-            &mut cbor,
         )?;
         Ok((self.writer.put(&cbor).await?, cbor.len() as u64))
     }

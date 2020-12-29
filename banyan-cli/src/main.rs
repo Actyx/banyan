@@ -12,9 +12,9 @@ mod tags;
 
 use banyan::{
     forest::*,
+    memstore::MemStore,
     query::{AllQuery, OffsetRangeQuery, QueryExt},
     store::{ArcBlockWriter, ArcReadOnlyStore},
-    memstore::MemStore,
     tree::*,
 };
 use ipfs::{pubsub_pub, pubsub_sub, IpfsStore};
