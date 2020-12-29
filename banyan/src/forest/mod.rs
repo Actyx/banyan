@@ -8,7 +8,6 @@ use rand::RngCore;
 use serde::{de::DeserializeOwned, Serialize};
 use std::{
     fmt::Display,
-    io,
     sync::{Arc, RwLock},
 };
 mod read;
@@ -38,12 +37,8 @@ pub trait TreeTypes: Debug + Send + Sync + 'static {
     /// link type to use over block boundaries
     type Link: Display + Debug + Hash + Eq + Clone + Copy + Send + Sync;
 
-    fn serialize_branch(
-        links: &[&Self::Link],
-        data: Vec<u8>,
-        w: impl io::Write,
-    ) -> anyhow::Result<()>;
-    fn deserialize_branch(reader: impl io::Read) -> anyhow::Result<(Vec<Self::Link>, Vec<u8>)>;
+    fn serialize_branch(links: &[&Self::Link], data: Vec<u8>) -> anyhow::Result<Vec<u8>>;
+    fn deserialize_branch(data: &[u8]) -> anyhow::Result<(Vec<Self::Link>, Vec<u8>)>;
 }
 
 /// Everything that is needed to read trees

@@ -7,9 +7,10 @@ use banyan::{
     tree::Tree,
 };
 use futures::prelude::*;
+use libipld::{cbor::DagCborCodec, prelude::*, Cid};
 use quickcheck::{Arbitrary, Gen, TestResult};
 use serde::{Deserialize, Serialize};
-use std::{io, iter, iter::FromIterator, ops::Range};
+use std::{convert::TryFrom, iter, iter::FromIterator, ops::Range};
 use store::Sha256Digest;
 mod store;
 
@@ -49,44 +50,29 @@ impl FromIterator<Key> for KeySeq {
     }
 }
 
-fn get_bytes(data: serde_cbor::Value) -> anyhow::Result<Vec<u8>> {
-    if let serde_cbor::Value::Bytes(data) = data {
-        Ok(data)
-    } else {
-        bail!("expected CBOR bytes!");
-    }
-}
+#[derive(libipld::DagCbor)]
+struct IpldNode(Vec<Cid>, Box<[u8]>);
 
 impl TreeTypes for TT {
     type Key = Key;
     type Seq = KeySeq;
     type Link = Sha256Digest;
 
-    fn serialize_branch(
-        links: &[&Self::Link],
-        data: Vec<u8>,
-        w: impl io::Write,
-    ) -> anyhow::Result<()> {
-        let links = links
-            .iter()
-            .map(|x| serde_cbor::Value::Bytes(x.as_ref().to_vec()))
-            .collect::<Vec<_>>();
-        serde_cbor::to_writer(w, &(links, serde_cbor::Value::Bytes(data)))
-            .map_err(|e| anyhow::Error::new(e))
+    fn serialize_branch(links: &[&Self::Link], data: Vec<u8>) -> anyhow::Result<Vec<u8>> {
+        let node = IpldNode(
+            links.iter().map(|x| Cid::from(**x)).collect::<Vec<_>>(),
+            data.into(),
+        );
+        let bytes = DagCborCodec.encode(&node)?;
+        Ok(bytes)
     }
-    fn deserialize_branch(reader: impl io::Read) -> anyhow::Result<(Vec<Self::Link>, Vec<u8>)> {
-        let (links, data): (Vec<serde_cbor::Value>, serde_cbor::Value) =
-            serde_cbor::from_reader(reader)?;
-        let data = get_bytes(data)?;
+    fn deserialize_branch(bytes: &[u8]) -> anyhow::Result<(Vec<Self::Link>, Vec<u8>)> {
+        let IpldNode(links, data) = DagCborCodec.decode(bytes)?;
         let links = links
             .into_iter()
-            .map(get_bytes)
+            .map(|cid| Self::Link::try_from(cid))
             .collect::<anyhow::Result<Vec<_>>>()?;
-        let links = links
-            .into_iter()
-            .map(|x| Sha256Digest::read(&x))
-            .collect::<anyhow::Result<Vec<_>>>()?;
-        Ok((links, data))
+        Ok((links, data.into()))
     }
 }
 
