@@ -1,12 +1,14 @@
 use anyhow::anyhow;
 use clap::{App, Arg, SubCommand};
 use futures::prelude::*;
+use sqlite::SqliteStore;
 use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Duration};
 use tag_index::{Tag, TagSet};
 use tracing::Level;
 use tracing_subscriber;
 
 mod ipfs;
+mod sqlite;
 mod tag_index;
 mod tags;
 
@@ -491,6 +493,7 @@ async fn main() -> Result<()> {
         }
     } else if let Some(matches) = matches.subcommand_matches("bench") {
         let store = Arc::new(MemStore::new(usize::max_value(), Sha256Digest::new));
+        let store = Arc::new(SqliteStore::memory()?);
         let config = Config::debug_fast();
         let crypto_config = CryptoConfig {
             index_key,

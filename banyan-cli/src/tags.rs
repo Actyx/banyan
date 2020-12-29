@@ -6,7 +6,7 @@ use multihash::MultihashDigest;
 use serde::{Deserialize, Serialize};
 use std::{
     convert::{TryFrom, TryInto},
-    fmt, io,
+    fmt,
     iter::FromIterator,
     str::FromStr,
 };

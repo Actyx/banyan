@@ -1,21 +1,16 @@
 //! helper methods to work with ipfs/ipld
 use anyhow::{anyhow, Result};
 use banyan::store::{BlockWriter, ReadOnlyStore};
-use derive_more::{Display, From, FromStr, Into};
 use futures::{future::BoxFuture, prelude::*};
 use libipld::Cid;
-use multihash::Sha2_256;
+use multihash::MultihashDigest;
 use reqwest::multipart::Part;
-use serde::{
-    de::IgnoredAny, de::Visitor, ser::SerializeStruct, Deserialize, Deserializer, Serialize,
-    Serializer,
-};
-use serde_cbor::tags::Tagged;
-use std::{convert::TryFrom, convert::TryInto, fmt, result, str::FromStr, sync::Arc};
+use serde::{de::IgnoredAny, de::Visitor, Deserialize, Deserializer, Serialize, Serializer};
+use std::{convert::TryInto, fmt, str::FromStr};
 
 use crate::tags::Sha256Digest;
 
-pub(crate) async fn block_get(key: &Cid) -> Result<Arc<[u8]>> {
+pub(crate) async fn block_get(key: &Cid) -> Result<Box<[u8]>> {
     let url = reqwest::Url::parse_with_params(
         "http://localhost:5001/api/v0/block/get",
         &[("arg", format!("{}", key))],
@@ -151,15 +146,14 @@ impl IpfsStore {
 }
 
 impl ReadOnlyStore<Sha256Digest> for IpfsStore {
-    fn get(&self, link: &Sha256Digest) -> BoxFuture<Result<Arc<[u8]>>> {
+    fn get(&self, link: &Sha256Digest) -> BoxFuture<Result<Box<[u8]>>> {
         let cid: Cid = (*link).into();
         async move { crate::ipfs::block_get(&cid).await }.boxed()
     }
 }
 
 impl BlockWriter<Sha256Digest> for IpfsStore {
-    fn put(&self, data: &[u8]) -> BoxFuture<Result<Sha256Digest>> {
-        let data = data.to_vec();
+    fn put(&self, data: Vec<u8>) -> BoxFuture<Result<Sha256Digest>> {
         async move {
             let cid = crate::ipfs::block_put(&data, 0x71, false).await?;
             assert!(cid.hash().code() == 0x12);

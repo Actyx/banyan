@@ -1,4 +1,3 @@
-use anyhow::bail;
 use banyan::index::CompactSeq;
 use banyan::{
     forest::{Config, Transaction, TreeTypes},
