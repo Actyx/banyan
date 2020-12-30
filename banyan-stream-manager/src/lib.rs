@@ -5,7 +5,7 @@ use forest::FutureResult;
 use futures::{future::BoxFuture, prelude::*};
 use ipfs_sqlite_block_store::async_block_store::{AsyncBlockStore, AsyncTempPin};
 use libipld::Cid;
-use sqlite::{SqliteStore, TokioRuntime};
+use sqlite::{SqliteStore, SqliteStoreWrite, TokioRuntime};
 use std::{
     collections::BTreeMap,
     str::FromStr,
@@ -172,8 +172,9 @@ impl StreamManager {
         async move {
             let stream = this.get_own_stream(stream_id)?;
             let mut stream = stream.lock().await;
-            // todo: proper transaction that is safe against gc
-            let txn = stream.forest.transaction(|x| (x.clone(), x));
+            let pin = this.0.store.temp_pin().await?;
+            let w = SqliteStoreWrite(this.0.store.clone(), pin);
+            let txn = stream.forest.transaction(|x| (x, w));
             let tree = txn.extend(&stream.latest, events).await?;
             this.0.store.alias(stream_id.0.to_vec(), tree.link().map(Into::into)).await?;
             stream.latest = tree;

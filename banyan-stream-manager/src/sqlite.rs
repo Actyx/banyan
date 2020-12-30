@@ -2,12 +2,8 @@
 use anyhow::{anyhow, Result};
 use banyan::store::{BlockWriter, ReadOnlyStore};
 use futures::{future::BoxFuture, prelude::*};
-use ipfs_sqlite_block_store::{
-    async_block_store::{AsyncBlockStore, RuntimeAdapter},
-    BlockStore, Config, OwnedBlock,
-};
+use ipfs_sqlite_block_store::{BlockStore, Config, OwnedBlock, async_block_store::{AsyncBlockStore, AsyncTempPin, RuntimeAdapter}};
 use libipld::Cid;
-use multihash::{Code, MultihashDigest};
 
 use crate::tags::Sha256Digest;
 
@@ -43,13 +39,15 @@ impl ReadOnlyStore<Sha256Digest> for SqliteStore {
     }
 }
 
-impl BlockWriter<Sha256Digest> for SqliteStore {
+pub struct SqliteStoreWrite(pub AsyncBlockStore<TokioRuntime>, pub AsyncTempPin);
+
+impl BlockWriter<Sha256Digest> for SqliteStoreWrite {
     fn put(&self, data: Vec<u8>) -> BoxFuture<Result<Sha256Digest>> {
         let digest = Sha256Digest::new(&data);
         let cid = digest.into();
         let block = OwnedBlock::new(cid, data);
         self.0
-            .put_block(block, None)
+            .put_block(block, Some(&self.1))
             .err_into()
             .map_ok(move |_| digest)
             .boxed()

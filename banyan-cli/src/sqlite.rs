@@ -7,7 +7,6 @@ use ipfs_sqlite_block_store::{
     BlockStore, Config, OwnedBlock,
 };
 use libipld::Cid;
-use multihash::{Code, MultihashDigest};
 
 use crate::tags::Sha256Digest;
 
