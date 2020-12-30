@@ -69,7 +69,7 @@ impl TreeTypes for TT {
         let IpldNode(links, data) = DagCborCodec.decode(bytes)?;
         let links = links
             .into_iter()
-            .map(|cid| Self::Link::try_from(cid))
+            .map(Self::Link::try_from)
             .collect::<anyhow::Result<Vec<_>>>()?;
         Ok((links, data.into()))
     }

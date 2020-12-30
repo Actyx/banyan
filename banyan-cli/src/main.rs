@@ -274,7 +274,7 @@ async fn bench_build(
     let mut offset: u64 = 0;
     let data = (0..batches)
         .map(|_b| {
-            let v = (0..count)
+            (0..count)
                 .map(|_| {
                     let result = (
                         Key::single(offset, offset, tags_from_offset(offset)),
@@ -283,8 +283,7 @@ async fn bench_build(
                     offset += 1;
                     result
                 })
-                .collect::<Vec<_>>();
-            v
+                .collect::<Vec<_>>()
         })
         .collect::<Vec<_>>();
     let t0 = std::time::Instant::now();
@@ -459,7 +458,7 @@ async fn main() -> Result<()> {
         let mut ticks = tokio::time::interval(Duration::from_secs(1));
         let mut tree = Tree::<TT, String>::empty();
         let mut offset = 0;
-        while let Some(_) = ticks.next().await {
+        while ticks.next().await.is_some() {
             let key = Key::single(offset, offset, tags_from_offset(offset));
             tree = forest
                 .extend_unpacked(&tree, Some((key, "xxx".into())))
@@ -492,7 +491,7 @@ async fn main() -> Result<()> {
             println!("{:?}", ev);
         }
     } else if let Some(matches) = matches.subcommand_matches("bench") {
-        let store = Arc::new(MemStore::new(usize::max_value(), Sha256Digest::new));
+        // let store = Arc::new(MemStore::new(usize::max_value(), Sha256Digest::new));
         let store = Arc::new(SqliteStore::memory()?);
         let config = Config::debug_fast();
         let crypto_config = CryptoConfig {

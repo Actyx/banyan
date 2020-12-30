@@ -289,7 +289,7 @@ impl Dnf {
 
     fn and_expr(v: TagSet) -> Expression {
         v.into_iter()
-            .map(|x| Expression::literal(x))
+            .map(Expression::literal)
             .reduce(Expression::bitand)
             .unwrap()
     }
