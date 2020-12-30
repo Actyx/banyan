@@ -11,6 +11,7 @@ use multihash::{Code, MultihashDigest};
 
 use crate::tags::Sha256Digest;
 
+#[derive(Clone)]
 pub struct SqliteStore(AsyncBlockStore<TokioRuntime>);
 
 impl SqliteStore {
