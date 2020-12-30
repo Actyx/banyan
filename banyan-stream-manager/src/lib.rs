@@ -3,7 +3,7 @@ use banyan::forest::{self, BranchCache, CryptoConfig};
 use clap::{App, Arg, SubCommand};
 use forest::FutureResult;
 use futures::{future::BoxFuture, prelude::*};
-use ipfs_sqlite_block_store::async_block_store::{AsyncBlockStore, AsyncTempPin};
+use ipfs_sqlite_block_store::{BlockStore, TempPin};
 use libipld::Cid;
 use sqlite::{SqliteStore, SqliteStoreWrite, TokioRuntime};
 use std::{
@@ -31,7 +31,6 @@ type Link = Sha256Digest;
 type Tree = banyan::tree::Tree<TT, Event>;
 type Result<T> = anyhow::Result<T>;
 type AsyncResult<T> = BoxFuture<'static, Result<T>>;
-type BlockStore = AsyncBlockStore<TokioRuntime>;
 
 struct OwnStreamState {
     latest: Tree,
@@ -48,7 +47,7 @@ impl OwnStreamState {
 }
 
 struct ReplicatedStreamState {
-    pin: Option<AsyncTempPin>,
+    pin: Option<TempPin>,
     latest: Option<Link>,
     validated: Option<Link>,
     wanted: Option<Wanted>,
@@ -66,22 +65,22 @@ impl ReplicatedStreamState {
         }
     }
 
-    async fn pin(&mut self, store: &BlockStore) -> Result<&AsyncTempPin> {
+    fn pin(&mut self, store: &BlockStore) -> Result<&TempPin> {
         if self.pin.is_none() {
-            self.pin = Some(store.temp_pin().await?);
+            self.pin = Some(store.temp_pin());
         }
         Ok(self.pin.as_ref().unwrap())
     }
 
-    async fn set_root(&mut self, root: Link, store: &BlockStore) -> Result<AsyncTempPin> {
-        let pin = self.pin(store).await?.clone();
+    async fn set_root(&mut self, root: Link, store: &BlockStore) -> Result<&TempPin> {
         let same_root = self.latest.as_ref().map(|r| r == &root).unwrap_or_default();
+        let pin = self.pin(store)?;
         let cid = root.into();
         if !same_root {
-            store.assign_temp_pin(pin, Some(cid)).await?;
+            store.assign_temp_pin(pin, Some(cid))?;
             self.latest = Some(root);
         }
-        Ok(self.pin.as_ref().unwrap().clone())
+        Ok(self.pin.as_ref().unwrap())
     }
 }
 

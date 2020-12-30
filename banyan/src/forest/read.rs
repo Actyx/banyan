@@ -56,9 +56,9 @@ where
     // }
 
     /// load a leaf given a leaf index
-    pub(crate) async fn load_leaf(&self, index: &LeafIndex<T>) -> Result<Option<Leaf>> {
+    pub(crate) fn load_leaf(&self, index: &LeafIndex<T>) -> Result<Option<Leaf>> {
         Ok(if let Some(link) = &index.link {
-            let data = &self.store().get(link).await?;
+            let data = &self.store().get(link)?;
             let data = if let serde_cbor::Value::Bytes(data) = serde_cbor::from_slice(&data)? {
                 data
             } else {
@@ -85,7 +85,7 @@ where
         let index_key = self.index_key();
         let config = self.config;
         async move {
-            let bytes = store.get(&link).await?;
+            let bytes = store.get(&link)?;
             let children: Vec<Index<T>> = deserialize_compressed(&index_key, &bytes)?;
             let level = children.iter().map(|x| x.level()).max().unwrap() + 1;
             let count = children.iter().map(|x| x.count()).sum();
@@ -108,13 +108,13 @@ where
     }
 
     /// load a branch given a branch index, from the cache
-    async fn load_branch_cached(&self, index: &BranchIndex<T>) -> Result<Option<Branch<T>>> {
+    fn load_branch_cached(&self, index: &BranchIndex<T>) -> Result<Option<Branch<T>>> {
         if let Some(link) = &index.link {
             let res = self.branch_cache().get(link);
             match res {
                 Some(branch) => Ok(Some(branch)),
                 None => {
-                    let branch = self.load_branch(index).await?;
+                    let branch = self.load_branch(index)?;
                     if let Some(branch) = &branch {
                         self.branch_cache().put(*link, branch.clone());
                     }
@@ -131,14 +131,14 @@ where
     pub(crate) async fn load_node<'a>(&self, index: &'a Index<T>) -> Result<NodeInfo<'a, T>> {
         Ok(match index {
             Index::Branch(index) => {
-                if let Some(branch) = self.load_branch_cached(index).await? {
+                if let Some(branch) = self.load_branch_cached(index)? {
                     NodeInfo::Branch(index, branch)
                 } else {
                     NodeInfo::PurgedBranch(index)
                 }
             }
             Index::Leaf(index) => {
-                if let Some(leaf) = self.load_leaf(index).await? {
+                if let Some(leaf) = self.load_leaf(index)? {
                     NodeInfo::Leaf(index, leaf)
                 } else {
                     NodeInfo::PurgedLeaf(index)
@@ -148,9 +148,9 @@ where
     }
 
     /// load a branch given a branch index
-    pub(crate) async fn load_branch(&self, index: &BranchIndex<T>) -> Result<Option<Branch<T>>> {
+    pub(crate) fn load_branch(&self, index: &BranchIndex<T>) -> Result<Option<Branch<T>>> {
         Ok(if let Some(link) = &index.link {
-            let bytes = self.store.get(&link).await?;
+            let bytes = self.store.get(&link)?;
             let children: Vec<_> = deserialize_compressed(&self.index_key(), &bytes)?;
             Some(Branch::<T>::new(children))
         } else {
@@ -411,7 +411,7 @@ where
         } else {
             *level = (*level).min(index.level() as i32 - 1);
             if let Index::Branch(b) = index {
-                if let Some(branch) = self.load_branch(b).await? {
+                if let Some(branch) = self.load_branch(b)? {
                     for child in branch.children.iter() {
                         self.roots0r(child, level, res).await?;
                     }

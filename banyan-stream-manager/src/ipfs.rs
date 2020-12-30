@@ -136,34 +136,6 @@ pub(crate) async fn block_put(data: &[u8], codec: u64, pin: bool) -> Result<Cid>
     Ok(cid)
 }
 
-#[derive(Clone)]
-pub struct IpfsStore {}
-
-impl IpfsStore {
-    pub fn new() -> Self {
-        Self {}
-    }
-}
-
-impl ReadOnlyStore<Sha256Digest> for IpfsStore {
-    fn get(&self, link: &Sha256Digest) -> BoxFuture<Result<Box<[u8]>>> {
-        let cid: Cid = (*link).into();
-        async move { crate::ipfs::block_get(&cid).await }.boxed()
-    }
-}
-
-impl BlockWriter<Sha256Digest> for IpfsStore {
-    fn put(&self, data: Vec<u8>) -> BoxFuture<Result<Sha256Digest>> {
-        async move {
-            let cid = crate::ipfs::block_put(&data, 0x71, false).await?;
-            assert!(cid.hash().code() == 0x12);
-            assert!(cid.hash().digest().len() == 32);
-            cid.try_into()
-        }
-        .boxed()
-    }
-}
-
 #[derive(Deserialize)]
 struct IpfsBlockPutResponseIo {
     #[serde(rename = "Key")]

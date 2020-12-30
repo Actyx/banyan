@@ -6,17 +6,22 @@ use libipld::Cid;
 use multihash::MultihashDigest;
 use reqwest::multipart::Part;
 use serde::{de::IgnoredAny, de::Visitor, Deserialize, Deserializer, Serialize, Serializer};
-use std::{convert::TryInto, fmt, str::FromStr};
+use std::{
+    convert::TryInto,
+    fmt,
+    str::FromStr,
+    sync::{Arc, Mutex},
+};
 
 use crate::tags::Sha256Digest;
 
-pub(crate) async fn block_get(key: &Cid) -> Result<Box<[u8]>> {
+pub(crate) fn block_get(key: &Cid) -> Result<Box<[u8]>> {
     let url = reqwest::Url::parse_with_params(
         "http://localhost:5001/api/v0/block/get",
         &[("arg", format!("{}", key))],
     )?;
-    let client = reqwest::Client::new();
-    let data: Vec<u8> = client.post(url).send().await?.bytes().await?.to_vec();
+    let client = reqwest::blocking::Client::new();
+    let data: Vec<u8> = client.post(url).send()?.bytes()?.to_vec();
     Ok(data.into())
 }
 
@@ -118,49 +123,47 @@ fn format_codec(codec: u64) -> Result<&'static str> {
     }
 }
 
-pub(crate) async fn block_put(data: &[u8], codec: u64, pin: bool) -> Result<Cid> {
+pub(crate) fn block_put(data: &[u8], codec: u64, pin: bool) -> Result<Cid> {
     let url = reqwest::Url::parse_with_params(
         "http://localhost:5001/api/v0/block/put",
         &[("format", format_codec(codec)?), ("pin", &pin.to_string())],
     )?;
-    let client = reqwest::Client::new();
-    let form = reqwest::multipart::Form::new().part("file", Part::bytes(data.to_vec()));
-    let res: IpfsBlockPutResponseIo = client
-        .post(url)
-        .multipart(form)
-        .send()
-        .await?
-        .json()
-        .await?;
+    let client = reqwest::blocking::Client::new();
+    let form = reqwest::blocking::multipart::Form::new().part(
+        "file",
+        reqwest::blocking::multipart::Part::bytes(data.to_vec()),
+    );
+    let res: IpfsBlockPutResponseIo = client.post(url).multipart(form).send()?.json()?;
     let cid = Cid::from_str(&res.key)?;
     Ok(cid)
 }
 
 #[derive(Clone)]
-pub struct IpfsStore {}
+pub struct IpfsStore;
 
 impl IpfsStore {
-    pub fn new() -> Self {
-        Self {}
+    pub fn new() -> anyhow::Result<Self> {
+        Ok(Self)
     }
 }
 
 impl ReadOnlyStore<Sha256Digest> for IpfsStore {
-    fn get(&self, link: &Sha256Digest) -> BoxFuture<Result<Box<[u8]>>> {
+    fn get(&self, link: &Sha256Digest) -> Result<Box<[u8]>> {
         let cid: Cid = (*link).into();
-        async move { crate::ipfs::block_get(&cid).await }.boxed()
+        std::thread::spawn(move || crate::ipfs::block_get(&cid))
+            .join()
+            .map_err(|_| anyhow!("join error!"))?
     }
 }
 
 impl BlockWriter<Sha256Digest> for IpfsStore {
-    fn put(&self, data: Vec<u8>) -> BoxFuture<Result<Sha256Digest>> {
-        async move {
-            let cid = crate::ipfs::block_put(&data, 0x71, false).await?;
-            assert!(cid.hash().code() == 0x12);
-            assert!(cid.hash().digest().len() == 32);
-            cid.try_into()
-        }
-        .boxed()
+    fn put(&self, data: Vec<u8>) -> Result<Sha256Digest> {
+        let cid = std::thread::spawn(move || crate::ipfs::block_put(&data, 0x71, false))
+            .join()
+            .map_err(|_| anyhow!("join error!"))??;
+        assert!(cid.hash().code() == 0x12);
+        assert!(cid.hash().digest().len() == 32);
+        cid.try_into()
     }
 }
 

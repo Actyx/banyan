@@ -318,7 +318,7 @@ async fn main() -> Result<()> {
         }
     };
 
-    let store = Arc::new(IpfsStore::new());
+    let store = Arc::new(IpfsStore::new()?);
     let matches = app().get_matches();
     let index_key: salsa20::Key = matches
         .value_of("index_pass")

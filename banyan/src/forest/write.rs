@@ -82,7 +82,7 @@ where
         // todo: avoid the extra allocation by reserving space for the length prefix in tmp.
         let tmp = serde_cbor::to_vec(&serde_cbor::Value::Bytes(tmp))?;
         // store leaf
-        let link = self.writer.put(tmp).await?;
+        let link = self.writer.put(tmp)?;
         let index: LeafIndex<T> = LeafIndex {
             link: Some(link),
             value_bytes: leaf.as_ref().compressed().len() as u64,
@@ -200,7 +200,7 @@ where
         let value_bytes = children.iter().map(|x| x.value_bytes()).sum();
         let sealed = self.config.branch_sealed(&children, level);
         let summaries: T::Seq = summaries.into_iter().collect();
-        let (link, encoded_children_len) = self.persist_branch(&children).await?;
+        let (link, encoded_children_len) = self.persist_branch(&children)?;
         let key_bytes = children.iter().map(|x| x.key_bytes()).sum::<u64>() + encoded_children_len;
         Ok(BranchIndex {
             level,
@@ -366,7 +366,7 @@ where
         nonce.into()
     }
 
-    async fn persist_branch(&self, children: &[Index<T>]) -> Result<(T::Link, u64)> {
+    fn persist_branch(&self, children: &[Index<T>]) -> Result<(T::Link, u64)> {
         let cbor = serialize_compressed(
             &self.index_key(),
             &self.random_nonce(),
@@ -374,7 +374,7 @@ where
             self.config().zstd_level,
         )?;
         let len = cbor.len() as u64;
-        Ok((self.writer.put(cbor).await?, len))
+        Ok((self.writer.put(cbor)?, len))
     }
 
     pub(crate) async fn retain0<Q: Query<T> + Send + Sync>(
@@ -401,7 +401,7 @@ where
                     index.link = None;
                 }
                 // this will only be executed unless we are already purged
-                if let Some(node) = self.load_branch(&index).await? {
+                if let Some(node) = self.load_branch(&index)? {
                     let mut children = node.children.to_vec();
                     let mut changed = false;
                     let offsets = zip_with_offset_ref(node.children.iter(), offset);
@@ -415,7 +415,7 @@ where
                     }
                     // rewrite the node and update the link if children have changed
                     if changed {
-                        let (link, _) = self.persist_branch(&children).await?;
+                        let (link, _) = self.persist_branch(&children)?;
                         // todo: update size data
                         index.link = Some(link);
                     }
@@ -461,7 +461,7 @@ where
         match index {
             Index::Branch(index) => {
                 // important not to hit the cache here!
-                let branch = self.load_branch(index).await;
+                let branch = self.load_branch(index);
                 let mut index = index.clone();
                 match branch {
                     Ok(Some(node)) => {
@@ -476,7 +476,7 @@ where
                         }
                         // rewrite the node and update the link if children have changed
                         if changed {
-                            let (link, _) = self.persist_branch(&children).await?;
+                            let (link, _) = self.persist_branch(&children)?;
                             index.link = Some(link);
                         }
                     }
@@ -499,7 +499,7 @@ where
             Index::Leaf(index) => {
                 let mut index = index.clone();
                 // important not to hit the cache here!
-                if let Err(cause) = self.load_leaf(&index).await {
+                if let Err(cause) = self.load_leaf(&index) {
                     let link_txt = index.link.map(|x| x.to_string()).unwrap_or_default();
                     report.push(format!("forgetting leaf {} due to {}", link_txt, cause));
                     if !index.sealed {
