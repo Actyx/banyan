@@ -35,7 +35,7 @@ where
 impl<R: ReadOnlyStore<L> + Send + Sync + 'static, L: Copy + Eq + Hash + Send + Sync + 'static>
     ReadOnlyStore<L> for MemReader<R, L>
 {
-    fn get(&self, link: &L) -> BoxFuture<anyhow::Result<Arc<[u8]>>> {
+    fn get(&self, link: &L) -> BoxFuture<anyhow::Result<Box<[u8]>>> {
         match self.store.get0(link) {
             Some(block) => future::ok(block).boxed(),
             None => self.inner.get(link),
@@ -54,7 +54,7 @@ struct Inner<L> {
 
 #[derive(Debug)]
 struct Blocks<L> {
-    map: FnvHashMap<L, Arc<[u8]>>,
+    map: FnvHashMap<L, Box<[u8]>>,
     current_size: usize,
 }
 
@@ -70,26 +70,27 @@ impl<L: Eq + Hash + Copy> MemStore<L> {
         }))
     }
 
-    pub fn into_inner(self) -> anyhow::Result<FnvHashMap<L, Arc<[u8]>>> {
+    pub fn into_inner(self) -> anyhow::Result<FnvHashMap<L, Box<[u8]>>> {
         let inner = Arc::try_unwrap(self.0).map_err(|e| anyhow!("busy"))?;
         let blocks = inner.blocks.into_inner().map_err(|e| anyhow!("poisoned"))?;
         Ok(blocks.map)
     }
 
-    fn get0(&self, link: &L) -> Option<Arc<[u8]>> {
+    fn get0(&self, link: &L) -> Option<Box<[u8]>> {
         let blocks = self.0.as_ref().blocks.read().unwrap();
         blocks.map.get(link).cloned()
     }
 
-    fn put0(&self, data: &[u8]) -> anyhow::Result<L> {
-        let digest = (self.0.digest)(data);
+    fn put0(&self, data: Vec<u8>) -> anyhow::Result<L> {
+        let digest = (self.0.digest)(&data);
+        let len = data.len();
         let mut blocks = self.0.blocks.write().unwrap();
         if blocks.current_size + data.len() > self.0.max_size {
             anyhow::bail!("full");
         }
         let new = blocks.map.insert(digest, data.into()).is_none();
         if new {
-            blocks.current_size += data.len()
+            blocks.current_size += len;
         }
         std::mem::drop(blocks);
         Ok(digest)
@@ -97,7 +98,7 @@ impl<L: Eq + Hash + Copy> MemStore<L> {
 }
 
 impl<L: Eq + Hash + Copy> ReadOnlyStore<L> for MemStore<L> {
-    fn get(&self, link: &L) -> BoxFuture<anyhow::Result<Arc<[u8]>>> {
+    fn get(&self, link: &L) -> BoxFuture<anyhow::Result<Box<[u8]>>> {
         if let Some(value) = self.get0(link) {
             future::ok(value.clone()).boxed()
         } else {
@@ -107,7 +108,7 @@ impl<L: Eq + Hash + Copy> ReadOnlyStore<L> for MemStore<L> {
 }
 
 impl<L: Eq + Hash + Send + Sync + Copy + 'static> BlockWriter<L> for MemStore<L> {
-    fn put(&self, data: &[u8]) -> BoxFuture<anyhow::Result<L>> {
+    fn put(&self, data: Vec<u8>) -> BoxFuture<anyhow::Result<L>> {
         future::ready(self.put0(data)).boxed()
     }
 }

@@ -38,7 +38,7 @@ impl From<Sha256Digest> for Cid {
     fn from(value: Sha256Digest) -> Self {
         // https://github.com/multiformats/multicodec/blob/master/table.csv
         let mh = multihash::Multihash::wrap(0x12, &value.0).unwrap();
-        Cid::new_v1(0x71, mh).into()
+        Cid::new_v1(0x71, mh)
     }
 }
 
