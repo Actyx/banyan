@@ -29,13 +29,13 @@ type Link = Sha256Digest;
 type Tree = banyan::tree::Tree<TT, Event>;
 type AsyncResult<T> = BoxFuture<'static, anyhow::Result<T>>;
 
-enum StreamState {
-    Own { latest: Tree, forest: Forest },
+struct StreamState {
+    latest: Tree, forest: Forest,
 }
 
 impl StreamState {
     fn own(forest: Forest) -> Self {
-        Self::Own {
+        Self {
             forest,
             latest: Tree::empty(),
         }
@@ -43,18 +43,15 @@ impl StreamState {
 }
 
 struct StreamManagerImpl {
-    streams: BTreeMap<StreamId, StreamState>,
+    streams: BTreeMap<StreamId, Arc<tokio::sync::Mutex<StreamState>>>,
     store: AsyncBlockStore<TokioRuntime>,
     cache: BranchCache<TT>,
     config: Config,
 }
 
 impl StreamManagerImpl {
-    fn set_own_root(&mut self, stream: StreamId, tree: Tree) {
 
-    }
-
-    fn get_state(&mut self, stream: StreamId) -> &mut StreamState {
+    fn get_own_state(&mut self, stream: StreamId) -> Arc<tokio::sync::Mutex<StreamState>> {
         let config = self.config;
         let cache = self.cache.clone();
         let store = self.store.clone();
@@ -65,9 +62,9 @@ impl StreamManagerImpl {
                 config.crypto_config,
                 config.forest_config,
             );
-            StreamState::own(forest)
+            Arc::new(tokio::sync::Mutex::new(StreamState::own(forest)))
         });
-        state
+        state.clone()
     }
 }
 
@@ -93,28 +90,17 @@ impl StreamManager {
         })))
     }
 
-    fn append(&self, stream: StreamId, events: Vec<(Key, Event)>) -> AsyncResult<()> {
-        let sm2 = self.clone();
-        let mut lock = self.lock();        
-        let state = lock.get_state(stream);
-        if let StreamState::Own { forest, latest } = state {
-            let forest = forest.clone();
-            let latest = latest.clone();
-            let t: AsyncResult<()> = async move {
-                forest
-                    .transaction(|x| (x.clone(), x))
-                    .extend(&latest, events)
-                    .map_ok(|tree| {
-                        sm2.lock().set_own_root(stream, tree);
-                        ()
-                    })
-                    .await
-            }
-            .boxed();
-            todo!()
-        } else {
-            future::err(anyhow!("")).boxed()
-        }
+    pub async fn append(&self, stream: StreamId, events: Vec<(Key, Event)>) -> anyhow::Result<()> {
+        let state = self.lock().get_own_state(stream);
+        let mut state = state.lock().await;
+        state.forest
+            .transaction(|x| (x.clone(), x))
+            .extend(&state.latest.clone(), events)
+            .map_ok(|tree| {
+                state.latest = tree;
+                ()
+            })
+            .await
     }
 
     fn lock(&self) -> impl std::ops::DerefMut<Target = StreamManagerImpl> + '_ {
