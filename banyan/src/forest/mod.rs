@@ -2,12 +2,15 @@
 use super::index::*;
 use crate::store::{BlockWriter, ReadOnlyStore};
 use anyhow::Result;
-use lru::LruCache;
 use core::{fmt::Debug, hash::Hash, iter::FromIterator, marker::PhantomData, ops::Range};
 use futures::future::BoxFuture;
+use lru::LruCache;
 use rand::RngCore;
 use serde::{de::DeserializeOwned, Serialize};
-use std::{fmt::Display, sync::{Arc, Mutex, RwLock}};
+use std::{
+    fmt::Display,
+    sync::{Arc, Mutex, RwLock},
+};
 mod read;
 mod stream;
 mod write;
