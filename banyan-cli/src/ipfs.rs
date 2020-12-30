@@ -1,16 +1,13 @@
 //! helper methods to work with ipfs/ipld
 use anyhow::{anyhow, Result};
 use banyan::store::{BlockWriter, ReadOnlyStore};
-use futures::{future::BoxFuture, prelude::*};
+use futures::prelude::*;
 use libipld::Cid;
-use multihash::MultihashDigest;
-use reqwest::multipart::Part;
 use serde::{de::IgnoredAny, de::Visitor, Deserialize, Deserializer, Serialize, Serializer};
 use std::{
     convert::TryInto,
     fmt,
     str::FromStr,
-    sync::{Arc, Mutex},
 };
 
 use crate::tags::Sha256Digest;

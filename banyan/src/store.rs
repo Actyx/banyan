@@ -1,6 +1,5 @@
 //! interface to a content-addressed store
 use anyhow::Result;
-use futures::future::BoxFuture;
 use std::sync::Arc;
 
 pub trait BlockWriter<L>: Send + Sync {

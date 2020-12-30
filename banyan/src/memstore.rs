@@ -2,7 +2,6 @@ use crate::store::{BlockWriter, ReadOnlyStore};
 use anyhow::anyhow;
 use core::hash::Hash;
 use fnv::FnvHashMap;
-use futures::{future::BoxFuture, prelude::*};
 use std::sync::{Arc, RwLock};
 
 pub struct MemReader<R, L> {
@@ -71,8 +70,8 @@ impl<L: Eq + Hash + Copy> MemStore<L> {
     }
 
     pub fn into_inner(self) -> anyhow::Result<FnvHashMap<L, Box<[u8]>>> {
-        let inner = Arc::try_unwrap(self.0).map_err(|e| anyhow!("busy"))?;
-        let blocks = inner.blocks.into_inner().map_err(|e| anyhow!("poisoned"))?;
+        let inner = Arc::try_unwrap(self.0).map_err(|_| anyhow!("busy"))?;
+        let blocks = inner.blocks.into_inner().map_err(|_| anyhow!("poisoned"))?;
         Ok(blocks.map)
     }
 

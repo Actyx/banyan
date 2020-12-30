@@ -37,18 +37,18 @@ where
     }
 
     /// create a leaf from scratch from an interator
-    async fn leaf_from_iter(
+    fn leaf_from_iter(
         &self,
         from: &mut iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
     ) -> Result<LeafIndex<T>> {
         assert!(from.peek().is_some());
-        self.extend_leaf(&[], None, from).await
+        self.extend_leaf(&[], None, from)
     }
 
     /// Creates a leaf from a sequence that either contains all items from the sequence, or is full
     ///
     /// The result is the index of the leaf. The iterator will contain the elements that did not fit.
-    async fn extend_leaf(
+    fn extend_leaf(
         &self,
         compressed: &[u8],
         keys: Option<T::Seq>,
@@ -137,7 +137,7 @@ where
             summaries.push(summary);
             children.push(child);
         }
-        let index = self.new_branch(&children, mode).await?;
+        let index = self.new_branch(&children, mode)?;
         info!(
             "branch created count={} value_bytes={} key_bytes={} sealed={}",
             index.summaries.count(),
@@ -166,7 +166,7 @@ where
     ) -> Result<Index<T>> {
         assert!(from.peek().is_some());
         Ok(if level == 0 {
-            self.leaf_from_iter(from).await?.into()
+            self.leaf_from_iter(from)?.into()
         } else {
             self.extend_branch(Vec::new(), level, from, CreateMode::Packed)
                 .await?
@@ -186,7 +186,7 @@ where
     /// creates a new branch from the given children and returns the branch index as a result.
     ///
     /// The level will be the max level of the children + 1. We do not want to support branches that are artificially high.
-    async fn new_branch(&self, children: &[Index<T>], mode: CreateMode) -> Result<BranchIndex<T>> {
+    fn new_branch(&self, children: &[Index<T>], mode: CreateMode) -> Result<BranchIndex<T>> {
         assert!(!children.is_empty());
         if mode == CreateMode::Packed {
             assert!(is_sorted(children.iter().map(|x| x.level()).rev()));
@@ -230,7 +230,7 @@ where
         let mut node = if let Some(node) = node {
             self.extendr(node, from).await?
         } else {
-            self.leaf_from_iter(from).await?.into()
+            self.leaf_from_iter(from)?.into()
         };
         while (from.peek().is_some() || node.level() == 0) && node.level() < level {
             let level = node.level() + 1;
@@ -292,12 +292,11 @@ where
         if index.sealed() || from.peek().is_none() {
             return Ok(index.clone());
         }
-        Ok(match self.load_node(index).await? {
+        Ok(match self.load_node(index)? {
             NodeInfo::Leaf(index, leaf) => {
                 info!("extending existing leaf");
                 let keys = index.keys.clone();
-                self.extend_leaf(leaf.as_ref().compressed(), Some(keys), from)
-                    .await?
+                self.extend_leaf(leaf.as_ref().compressed(), Some(keys), from)?
                     .into()
             }
             NodeInfo::Branch(index, branch) => {
@@ -340,8 +339,7 @@ where
             BranchResult::Sealed(count) | BranchResult::Unsealed(count) => {
                 let range = from..from + count;
                 let node = self
-                    .new_branch(&roots[range.clone()], CreateMode::Packed)
-                    .await?;
+                    .new_branch(&roots[range.clone()], CreateMode::Packed)?;
                 roots.splice(range, Some(node.into()));
             }
             BranchResult::Skip(count) => {

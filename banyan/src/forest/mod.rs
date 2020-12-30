@@ -9,7 +9,7 @@ use rand::RngCore;
 use serde::{de::DeserializeOwned, Serialize};
 use std::{
     fmt::Display,
-    sync::{Arc, Mutex, RwLock},
+    sync::{Arc, Mutex},
 };
 mod read;
 mod stream;

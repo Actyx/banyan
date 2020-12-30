@@ -108,7 +108,6 @@ struct Config {
 }
 
 impl StreamManager {
-
     fn get_own_stream(
         &self,
         stream: StreamId,
@@ -175,7 +174,10 @@ impl StreamManager {
             let w = SqliteStoreWrite(this.0.store.clone(), pin);
             let txn = stream.forest.transaction(|x| (x, w));
             let tree = txn.extend(&stream.latest, events).await?;
-            this.0.store.alias(stream_id.0.to_vec(), tree.link().map(Into::into)).await?;
+            this.0
+                .store
+                .alias(stream_id.0.to_vec(), tree.link().map(Into::into))
+                .await?;
             stream.latest = tree;
             drop(txn);
             Ok(())

@@ -128,7 +128,7 @@ where
 
     /// load a node, returning a structure containing the index and value for convenient matching
     #[allow(clippy::needless_lifetimes)]
-    pub(crate) async fn load_node<'a>(&self, index: &'a Index<T>) -> Result<NodeInfo<'a, T>> {
+    pub(crate) fn load_node<'a>(&self, index: &'a Index<T>) -> Result<NodeInfo<'a, T>> {
         Ok(match index {
             Index::Branch(index) => {
                 if let Some(branch) = self.load_branch_cached(index)? {
@@ -164,7 +164,7 @@ where
         mut offset: u64,
     ) -> Result<Option<(T::Key, V)>> {
         assert!(offset < index.count());
-        match self.load_node(index).await? {
+        match self.load_node(index)? {
             NodeInfo::Branch(_, node) => {
                 for child in node.children.iter() {
                     if offset < child.count() {
@@ -221,7 +221,7 @@ where
     ) -> BoxStream<'static, Result<FilteredChunk<T, V, E>>> {
         let this: Forest<T, V, R> = self.clone();
         async move {
-            Ok(match this.load_node(&index).await? {
+            Ok(match this.load_node(&index)? {
                 NodeInfo::Leaf(index, node) => {
                     // todo: don't get the node here, since we might not need it
                     let mut matching = vec![true; index.keys.len()];
@@ -290,7 +290,7 @@ where
         let this = self.clone();
         let s =
             async move {
-                Ok(match this.load_node(&index).await? {
+                Ok(match this.load_node(&index)? {
                     NodeInfo::Leaf(index, node) => {
                         // todo: don't get the node here, since we might not need it
                         let mut matching = vec![true; index.keys.len()];
@@ -348,7 +348,7 @@ where
     }
 
     pub(crate) async fn dump0(&self, index: &Index<T>, prefix: &str) -> Result<()> {
-        match self.load_node(index).await? {
+        match self.load_node(index)? {
             NodeInfo::Leaf(index, _) => {
                 println!(
                     "{}Leaf(count={}, value_bytes={}, sealed={})",
@@ -448,7 +448,7 @@ where
         if !index.sealed() {
             *level = (*level).min((index.level() as i32) - 1);
         }
-        match self.load_node(index).await? {
+        match self.load_node(index)? {
             NodeInfo::Leaf(index, leaf) => {
                 let value_count = leaf.as_ref().count()?;
                 check!(value_count == index.keys.count());
@@ -499,7 +499,7 @@ where
     /// Checks if a node is packed to the left
     pub(crate) async fn is_packed0(&self, index: &Index<T>) -> Result<bool> {
         Ok(
-            if let NodeInfo::Branch(index, branch) = self.load_node(index).await? {
+            if let NodeInfo::Branch(index, branch) = self.load_node(index)? {
                 if index.sealed {
                     // sealed nodes, for themselves, are packed
                     true
