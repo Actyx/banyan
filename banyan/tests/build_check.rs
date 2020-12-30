@@ -15,7 +15,7 @@ mod store;
 
 type Txn = Transaction<TT, u64, MemStore<Sha256Digest>, MemStore<Sha256Digest>>;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct TT;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

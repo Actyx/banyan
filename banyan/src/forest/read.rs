@@ -110,16 +110,13 @@ where
     /// load a branch given a branch index, from the cache
     async fn load_branch_cached(&self, index: &BranchIndex<T>) -> Result<Option<Branch<T>>> {
         if let Some(link) = &index.link {
-            let res = self.branch_cache().write().unwrap().get(link).cloned();
+            let res = self.branch_cache().get(link);
             match res {
                 Some(branch) => Ok(Some(branch)),
                 None => {
                     let branch = self.load_branch(index).await?;
                     if let Some(branch) = &branch {
-                        self.branch_cache()
-                            .write()
-                            .unwrap()
-                            .put(*link, branch.clone());
+                        self.branch_cache().put(*link, branch.clone());
                     }
                     Ok(branch)
                 }
