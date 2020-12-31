@@ -326,7 +326,6 @@ async fn stream_test_simple() -> anyhow::Result<()> {
     println!("{:?}", trees);
     let res = forest
         .read()
-        .clone()
         .stream_roots(AllQuery, stream::iter(trees).boxed());
     let res = res.collect::<Vec<_>>().await;
     println!("{:?}", res);

@@ -480,7 +480,6 @@ async fn main() -> Result<()> {
         let cids = stream.filter_map(|x| future::ready(x.ok()));
         let mut stream = forest
             .read()
-            .clone()
             .stream_roots(AllQuery, cids.boxed())
             .boxed_local();
         while let Some(ev) = stream.next().await {

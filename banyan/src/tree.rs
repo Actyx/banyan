@@ -149,7 +149,6 @@ impl<
     ) -> impl Stream<Item = Result<(u64, T::Key, V)>> + 'static {
         match &tree.root {
             Some(index) => self
-                .clone()
                 .stream_filtered0(0, query, index.clone())
                 .left_stream(),
             None => stream::empty().right_stream(),
@@ -169,7 +168,6 @@ impl<
     {
         match &tree.root {
             Some(index) => self
-                .clone()
                 .stream_filtered_chunked0(0, query, index.clone(), mk_extra)
                 .left_stream(),
             None => stream::empty().right_stream(),
@@ -189,7 +187,6 @@ impl<
     {
         match &tree.root {
             Some(index) => self
-                .clone()
                 .stream_filtered_chunked_reverse0(0, query, index.clone(), mk_extra)
                 .left_stream(),
             None => stream::empty().right_stream(),

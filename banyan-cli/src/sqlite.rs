@@ -1,10 +1,9 @@
 //! helper methods to work with ipfs/ipld
 use anyhow::{anyhow, Result};
 use banyan::store::{BlockWriter, ReadOnlyStore};
-use futures::prelude::*;
 use ipfs_sqlite_block_store::{BlockStore, Config, OwnedBlock};
 use libipld::Cid;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex};
 
 use crate::tags::Sha256Digest;
 
