@@ -54,7 +54,7 @@ impl<
         let forest = self.clone();
         let forest2 = self.clone();
         roots
-            .filter_map(move |link| forest.load_branch_from_link(link).map(|r| r.ok()))
+            .filter_map(move |link| future::ready(forest.load_branch_from_link(link).ok()))
             .flat_map(move |index: Index<T>| {
                 // create an intersection of a range query and the main query
                 // and wrap it in an arc so it is cheap to clone
@@ -103,7 +103,7 @@ impl<
         let forest = self.clone();
         let forest2 = self.clone();
         roots
-            .filter_map(move |link| forest.clone().load_branch_from_link(link).map(|r| r.ok()))
+            .filter_map(move |link| future::ready(forest.clone().load_branch_from_link(link).ok()))
             .flat_map(move |index| {
                 let end_offset = end_offset_ref.load(Ordering::SeqCst);
                 // create an intersection of a range query and the main query

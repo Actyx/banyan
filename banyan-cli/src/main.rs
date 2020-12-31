@@ -216,7 +216,7 @@ async fn build_tree(
         }
     };
     let mut tree = match base {
-        Some(root) => forest.load_tree(root).await?,
+        Some(root) => forest.load_tree(root)?,
         None => Tree::<TT, String>::empty(),
     };
     let mut offset: u64 = 0;
@@ -268,7 +268,7 @@ async fn bench_build(
         }
     };
     let mut tree = match base {
-        Some(root) => forest.load_tree(root).await?,
+        Some(root) => forest.load_tree(root)?,
         None => Tree::<TT, String>::empty(),
     };
     let mut offset: u64 = 0;
@@ -348,7 +348,7 @@ async fn main() -> Result<()> {
                 .value_of("root")
                 .ok_or_else(|| anyhow!("root must be provided"))?,
         )?;
-        let tree = forest.load_tree(root).await?;
+        let tree = forest.load_tree(root)?;
         forest.dump(&tree)?;
         return Ok(());
     } else if let Some(matches) = matches.subcommand_matches("stream") {
@@ -357,7 +357,7 @@ async fn main() -> Result<()> {
                 .value_of("root")
                 .ok_or_else(|| anyhow!("root must be provided"))?,
         )?;
-        let tree = forest.load_tree(root).await?;
+        let tree = forest.load_tree(root)?;
         let mut stream = forest.stream_filtered(&tree, AllQuery).enumerate();
         while let Some((i, Ok(v))) = stream.next().await {
             if i % 1000 == 0 {
@@ -398,7 +398,7 @@ async fn main() -> Result<()> {
                 .value_of("root")
                 .ok_or_else(|| anyhow!("root must be provided"))?,
         )?;
-        let mut tree = forest.load_tree(root).await?;
+        let mut tree = forest.load_tree(root)?;
         forest.dump(&tree)?;
         tree = forest.pack(&tree).await?;
         forest.assert_invariants(&tree)?;
@@ -417,7 +417,7 @@ async fn main() -> Result<()> {
             .map(|tag| Key::filter_tags(TagSet::single(Tag::from(tag))))
             .collect::<Vec<_>>();
         let query = DnfQuery(tags).boxed();
-        let tree = forest.load_tree(root).await?;
+        let tree = forest.load_tree(root)?;
         forest.dump(&tree)?;
         let mut stream = forest.stream_filtered(&tree, query).enumerate();
         while let Some((i, Ok(v))) = stream.next().await {
@@ -431,7 +431,7 @@ async fn main() -> Result<()> {
                 .value_of("root")
                 .ok_or_else(|| anyhow!("root must be provided"))?,
         )?;
-        let tree = forest.load_tree(root).await?;
+        let tree = forest.load_tree(root)?;
         let (tree, _) = forest.repair(&tree)?;
         forest.dump(&tree)?;
         println!("{:?}", tree);
@@ -445,7 +445,7 @@ async fn main() -> Result<()> {
             .value_of("before")
             .ok_or_else(|| anyhow!("required arg before not provided"))?
             .parse()?;
-        let mut tree = forest.load_tree(root).await?;
+        let mut tree = forest.load_tree(root)?;
         tree = forest.retain(&tree, &OffsetRangeQuery::from(offset..))?;
         forest.dump(&tree)?;
         println!("{:?}", tree);

@@ -62,9 +62,9 @@ impl<
         R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static,
     > Forest<T, V, R>
 {
-    pub async fn load_tree(&self, link: T::Link) -> Result<Tree<T, V>> {
+    pub fn load_tree(&self, link: T::Link) -> Result<Tree<T, V>> {
         Ok(Tree {
-            root: Some(self.load_branch_from_link(link).await?),
+            root: Some(self.load_branch_from_link(link)?),
             _t: PhantomData,
         })
     }

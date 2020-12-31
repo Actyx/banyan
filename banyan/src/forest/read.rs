@@ -80,31 +80,29 @@ where
     pub(crate) fn load_branch_from_link(
         &self,
         link: T::Link,
-    ) -> impl Future<Output = Result<Index<T>>> {
+    ) -> Result<Index<T>> {
         let store = self.store.clone();
         let index_key = self.index_key();
         let config = self.config;
-        async move {
-            let bytes = store.get(&link)?;
-            let children: Vec<Index<T>> = deserialize_compressed(&index_key, &bytes)?;
-            let level = children.iter().map(|x| x.level()).max().unwrap() + 1;
-            let count = children.iter().map(|x| x.count()).sum();
-            let value_bytes = children.iter().map(|x| x.value_bytes()).sum();
-            let key_bytes =
-                children.iter().map(|x| x.key_bytes()).sum::<u64>() + (bytes.len() as u64);
-            let summaries = children.iter().map(|x| x.data().summarize()).collect();
-            let result = BranchIndex {
-                link: Some(link),
-                level,
-                count,
-                summaries,
-                sealed: config.branch_sealed(&children, level),
-                value_bytes,
-                key_bytes,
-            }
-            .into();
-            Ok(result)
+        let bytes = store.get(&link)?;
+        let children: Vec<Index<T>> = deserialize_compressed(&index_key, &bytes)?;
+        let level = children.iter().map(|x| x.level()).max().unwrap() + 1;
+        let count = children.iter().map(|x| x.count()).sum();
+        let value_bytes = children.iter().map(|x| x.value_bytes()).sum();
+        let key_bytes =
+            children.iter().map(|x| x.key_bytes()).sum::<u64>() + (bytes.len() as u64);
+        let summaries = children.iter().map(|x| x.data().summarize()).collect();
+        let result = BranchIndex {
+            link: Some(link),
+            level,
+            count,
+            summaries,
+            sealed: config.branch_sealed(&children, level),
+            value_bytes,
+            key_bytes,
         }
+        .into();
+        Ok(result)
     }
 
     /// load a branch given a branch index, from the cache
