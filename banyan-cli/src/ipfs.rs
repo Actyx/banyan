@@ -4,11 +4,7 @@ use banyan::store::{BlockWriter, ReadOnlyStore};
 use futures::prelude::*;
 use libipld::Cid;
 use serde::{de::IgnoredAny, de::Visitor, Deserialize, Deserializer, Serialize, Serializer};
-use std::{
-    convert::TryInto,
-    fmt,
-    str::FromStr,
-};
+use std::{convert::TryInto, fmt, str::FromStr};
 
 use crate::tags::Sha256Digest;
 

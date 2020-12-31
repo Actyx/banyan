@@ -70,43 +70,43 @@ impl<
     }
 
     /// dumps the tree structure
-    pub async fn dump(&self, tree: &Tree<T, V>) -> Result<()> {
+    pub fn dump(&self, tree: &Tree<T, V>) -> Result<()> {
         match &tree.root {
-            Some(index) => self.dump0(index, "").await,
+            Some(index) => self.dump0(index, ""),
             None => Ok(()),
         }
     }
 
     /// sealed roots of the tree
-    pub async fn roots(&self, tree: &Tree<T, V>) -> Result<Vec<Index<T>>> {
+    pub fn roots(&self, tree: &Tree<T, V>) -> Result<Vec<Index<T>>> {
         match &tree.root {
-            Some(index) => self.roots_impl(index).await,
+            Some(index) => self.roots_impl(index),
             None => Ok(Vec::new()),
         }
     }
 
-    pub async fn check_invariants(&self, tree: &Tree<T, V>) -> Result<Vec<String>> {
+    pub fn check_invariants(&self, tree: &Tree<T, V>) -> Result<Vec<String>> {
         let mut msgs = Vec::new();
         if let Some(root) = &tree.root {
             if root.level() == 0 {
                 msgs.push("tree should not have a leaf as direct child.".into());
             }
             let mut level = i32::max_value();
-            self.check_invariants0(&root, &mut level, &mut msgs).await?;
+            self.check_invariants0(&root, &mut level, &mut msgs)?;
         }
         Ok(msgs)
     }
 
-    pub async fn is_packed(&self, tree: &Tree<T, V>) -> Result<bool> {
+    pub fn is_packed(&self, tree: &Tree<T, V>) -> Result<bool> {
         if let Some(root) = &tree.root {
-            self.is_packed0(&root).await
+            self.is_packed0(&root)
         } else {
             Ok(true)
         }
     }
 
-    pub async fn assert_invariants(&self, tree: &Tree<T, V>) -> Result<()> {
-        let msgs = self.check_invariants(tree).await?;
+    pub fn assert_invariants(&self, tree: &Tree<T, V>) -> Result<()> {
+        let msgs = self.check_invariants(tree)?;
         if !msgs.is_empty() {
             for msg in msgs {
                 error!("Invariant failed: {}", msg);
@@ -197,9 +197,9 @@ impl<
     }
 
     /// element at index
-    pub async fn get(&self, tree: &Tree<T, V>, offset: u64) -> Result<Option<(T::Key, V)>> {
+    pub fn get(&self, tree: &Tree<T, V>, offset: u64) -> Result<Option<(T::Key, V)>> {
         Ok(match &tree.root {
-            Some(index) => self.get0(index, offset).await?,
+            Some(index) => self.get0(index, offset)?,
             None => None,
         })
     }
@@ -212,11 +212,11 @@ impl<
         W: BlockWriter<T::Link> + 'static,
     > Transaction<T, V, R, W>
 {
-    pub async fn tree_from_roots(&self, mut roots: Vec<Index<T>>) -> Result<Tree<T, V>> {
+    pub fn tree_from_roots(&self, mut roots: Vec<Index<T>>) -> Result<Tree<T, V>> {
         assert!(roots.iter().all(|x| x.sealed()));
         assert!(is_sorted(roots.iter().map(|x| x.level()).rev()));
         while roots.len() > 1 {
-            self.simplify_roots(&mut roots, 0).await?;
+            self.simplify_roots(&mut roots, 0)?;
         }
         Ok(Tree::new(roots.pop()))
     }
@@ -229,27 +229,22 @@ impl<
     ///
     /// ![packing illustration](https://ipfs.io/ipfs/QmaEDTjHSdCKyGQ3cFMCf73kE67NvffLA5agquLW5qSEVn/packing.jpg)
     pub async fn pack(&self, tree: &Tree<T, V>) -> Result<Tree<T, V>> {
-        let roots = self.roots(tree).await?;
-        let filled = self.tree_from_roots(roots).await?;
+        let roots = self.roots(tree)?;
+        let filled = self.tree_from_roots(roots)?;
         let remainder: Vec<_> = self.collect_from(tree, filled.count()).await?;
-        let extended = self.extend(&filled, remainder).await?;
+        let extended = self.extend(&filled, remainder)?;
         Ok(extended)
     }
 
     /// append a single element. This is just a shortcut for extend.
-    pub async fn push(
-        &mut self,
-        tree: &mut Tree<T, V>,
-        key: T::Key,
-        value: V,
-    ) -> Result<Tree<T, V>> {
-        self.extend(tree, Some((key, value))).await
+    pub fn push(&mut self, tree: &mut Tree<T, V>, key: T::Key, value: V) -> Result<Tree<T, V>> {
+        self.extend(tree, Some((key, value)))
     }
 
     /// extend the node with the given iterator of key/value pairs
     ///    
     /// ![extend illustration](https://ipfs.io/ipfs/QmaEDTjHSdCKyGQ3cFMCf73kE67NvffLA5agquLW5qSEVn/extend.jpg)
-    pub async fn extend<I>(&self, tree: &Tree<T, V>, from: I) -> Result<Tree<T, V>>
+    pub fn extend<I>(&self, tree: &Tree<T, V>, from: I) -> Result<Tree<T, V>>
     where
         I: IntoIterator<Item = (T::Key, V)>,
         I::IntoIter: Send,
@@ -259,10 +254,11 @@ impl<
             // nothing to do
             return Ok(tree.clone());
         }
-        Ok(Tree::new(Some(
-            self.extend_above(tree.root.as_ref(), u32::max_value(), from.by_ref())
-                .await?,
-        )))
+        Ok(Tree::new(Some(self.extend_above(
+            tree.root.as_ref(),
+            u32::max_value(),
+            from.by_ref(),
+        )?)))
     }
 
     /// extend the node with the given iterator of key/value pairs
@@ -274,14 +270,12 @@ impl<
     /// To pack a tree, use the pack method.
     ///    
     /// ![extend_unpacked illustration](https://ipfs.io/ipfs/QmaEDTjHSdCKyGQ3cFMCf73kE67NvffLA5agquLW5qSEVn/extend_unpacked.jpg)
-    pub async fn extend_unpacked<I>(&self, tree: &Tree<T, V>, from: I) -> Result<Tree<T, V>>
+    pub fn extend_unpacked<I>(&self, tree: &Tree<T, V>, from: I) -> Result<Tree<T, V>>
     where
         I: IntoIterator<Item = (T::Key, V)>,
         I::IntoIter: Send,
     {
-        Ok(Tree::new(
-            self.extend_unpacked0(tree.root.as_ref(), from).await?,
-        ))
+        Ok(Tree::new(self.extend_unpacked0(tree.root.as_ref(), from)?))
     }
 
     /// Retain just data matching the query
@@ -294,14 +288,14 @@ impl<
     ///
     /// note that offsets will not be affected by this. Also, unsealed nodes will not be forgotten
     /// even if they do not match the query.
-    pub async fn retain<'a, Q: Query<T> + Send + Sync>(
+    pub fn retain<'a, Q: Query<T> + Send + Sync>(
         &'a self,
         tree: &Tree<T, V>,
         query: &'a Q,
     ) -> Result<Tree<T, V>> {
         Ok(if let Some(index) = &tree.root {
             let mut level: i32 = i32::max_value();
-            let res = self.retain0(0, query, index, &mut level).await?;
+            let res = self.retain0(0, query, index, &mut level)?;
             Tree::new(Some(res))
         } else {
             Tree::empty()
@@ -315,12 +309,12 @@ impl<
     /// Note that this is an emergency measure to recover data if the tree is not completely
     /// available. It might result in a degenerate tree that can no longer be safely added to,
     /// especially if there are repaired blocks in the non-packed part.
-    pub async fn repair<'a>(&self, tree: &Tree<T, V>) -> Result<(Tree<T, V>, Vec<String>)> {
+    pub fn repair(&self, tree: &Tree<T, V>) -> Result<(Tree<T, V>, Vec<String>)> {
         let mut report = Vec::new();
         Ok(if let Some(index) = &tree.root {
             let mut level: i32 = i32::max_value();
             (
-                Tree::new(Some(self.repair0(index, &mut report, &mut level).await?)),
+                Tree::new(Some(self.repair0(index, &mut report, &mut level)?)),
                 report,
             )
         } else {

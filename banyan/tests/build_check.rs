@@ -95,8 +95,8 @@ where
     let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
     let forest = Txn::new(store.clone(), store, Config::debug(), Default::default());
     let mut tree = Tree::<TT, u64>::empty();
-    tree = forest.extend(&tree, xs).await?;
-    forest.assert_invariants(&tree).await?;
+    tree = forest.extend(&tree, xs)?;
+    forest.assert_invariants(&tree)?;
     Ok((tree, forest))
 }
 
@@ -249,7 +249,7 @@ async fn build_get(xs: Vec<(Key, u64)>) -> quickcheck::TestResult {
         let (tree, txn) = create_test_tree(xs.clone()).await?;
         let mut actual = Vec::new();
         for i in 0..xs.len() as u64 {
-            actual.push(txn.get(&tree, i).await?.unwrap());
+            actual.push(txn.get(&tree, i)?.unwrap());
         }
         Ok(actual == xs)
     })
@@ -266,14 +266,14 @@ async fn build_pack(xss: Vec<Vec<(Key, u64)>>) -> quickcheck::TestResult {
         let xs = xss.iter().cloned().flatten().collect::<Vec<_>>();
         // build complex unbalanced tree
         for xs in xss.iter() {
-            tree = forest.extend_unpacked(&tree, xs.clone()).await.unwrap();
+            tree = forest.extend_unpacked(&tree, xs.clone()).unwrap();
         }
         // check that the unbalanced tree itself matches the elements
         let actual: Vec<_> = forest.collect(&tree).await?;
         let unpacked_matches = xs == actual;
 
         tree = forest.pack(&tree).await?;
-        assert!(forest.is_packed(&tree).await?);
+        assert!(forest.is_packed(&tree)?);
         let actual: Vec<_> = forest.collect(&tree).await?;
         let packed_matches = xs == actual;
 
@@ -292,17 +292,13 @@ async fn retain(xss: Vec<Vec<(Key, u64)>>) -> quickcheck::TestResult {
         let xs = xss.iter().cloned().flatten().collect::<Vec<_>>();
         // build complex unbalanced tree
         for xs in xss.iter() {
-            tree = forest.extend_unpacked(&tree, xs.clone()).await.unwrap();
+            tree = forest.extend_unpacked(&tree, xs.clone()).unwrap();
         }
-        tree = forest
-            .retain(&tree, &OffsetRangeQuery::from(xs.len() as u64..))
-            .await?;
-        forest.assert_invariants(&tree).await?;
+        tree = forest.retain(&tree, &OffsetRangeQuery::from(xs.len() as u64..))?;
+        forest.assert_invariants(&tree)?;
         tree = forest.pack(&tree).await?;
-        tree = forest
-            .retain(&tree, &OffsetRangeQuery::from(xs.len() as u64..))
-            .await?;
-        forest.assert_invariants(&tree).await?;
+        tree = forest.retain(&tree, &OffsetRangeQuery::from(xs.len() as u64..))?;
+        forest.assert_invariants(&tree)?;
         Ok(true)
     })
     .await
@@ -323,8 +319,8 @@ async fn stream_test_simple() -> anyhow::Result<()> {
     let mut trees = Vec::new();
     for n in 1..=10u64 {
         let mut tree = Tree::<TT, u64>::empty();
-        tree = forest.extend(&tree, (0..n).map(|t| (Key(t), n))).await?;
-        forest.assert_invariants(&tree).await?;
+        tree = forest.extend(&tree, (0..n).map(|t| (Key(t), n)))?;
+        forest.assert_invariants(&tree)?;
         trees.push(tree.root().cloned().unwrap());
     }
     println!("{:?}", trees);

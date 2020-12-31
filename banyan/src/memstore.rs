@@ -99,7 +99,7 @@ impl<L: Eq + Hash + Copy> MemStore<L> {
 impl<L: Eq + Hash + Copy> ReadOnlyStore<L> for MemStore<L> {
     fn get(&self, link: &L) -> anyhow::Result<Box<[u8]>> {
         if let Some(value) = self.get0(link) {
-            Ok(value.clone())
+            Ok(value)
         } else {
             Err(anyhow!("not there"))
         }
