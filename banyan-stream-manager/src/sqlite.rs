@@ -1,5 +1,8 @@
 //! helper methods to work with ipfs/ipld
-use std::sync::{Arc, Mutex, RwLock};
+use std::{
+    ops::DerefMut,
+    sync::{Arc, Mutex, RwLock},
+};
 
 use anyhow::{anyhow, Result};
 use banyan::store::{BlockWriter, ReadOnlyStore};
@@ -24,12 +27,16 @@ impl SqliteStore {
         let store = BlockStore::memory(Config::default())?;
         Ok(SqliteStore(Arc::new(Mutex::new(store))))
     }
+
+    pub(crate) fn lock(&self) -> impl DerefMut<Target = BlockStore> + '_ {
+        self.0.lock().unwrap()
+    }
 }
 
 impl ReadOnlyStore<Sha256Digest> for SqliteStore {
     fn get(&self, link: &Sha256Digest) -> Result<Box<[u8]>> {
         let cid = Cid::from(*link);
-        let block = self.0.lock().unwrap().get_block(&cid)?;
+        let block = self.lock().get_block(&cid)?;
         if let Some(block) = block {
             Ok(block.into())
         } else {
@@ -38,14 +45,14 @@ impl ReadOnlyStore<Sha256Digest> for SqliteStore {
     }
 }
 
-pub struct SqliteStoreWrite(pub Arc<Mutex<BlockStore>>, pub TempPin);
+pub struct SqliteStoreWrite(pub SqliteStore, pub TempPin);
 
 impl BlockWriter<Sha256Digest> for SqliteStoreWrite {
     fn put(&self, data: Vec<u8>) -> Result<Sha256Digest> {
         let digest = Sha256Digest::new(&data);
         let cid = digest.into();
         let block = OwnedBlock::new(cid, data);
-        self.0.lock().unwrap().put_block(&block, Some(&self.1))?;
+        self.0.lock().put_block(&block, Some(&self.1))?;
         Ok(digest)
     }
 }

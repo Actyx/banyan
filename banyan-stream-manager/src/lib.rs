@@ -17,7 +17,6 @@ use tags::{Key, Sha256Digest, TT};
 use tracing::Level;
 use tracing_subscriber;
 
-mod ipfs;
 mod sqlite;
 mod tag_index;
 mod tags;
@@ -47,7 +46,7 @@ impl OwnStreamState {
 }
 
 struct ReplicatedStreamState {
-    pin: Option<TempPin>,
+    pin: TempPin,
     latest: Option<Link>,
     validated: Option<Link>,
     wanted: Option<Wanted>,
@@ -55,32 +54,24 @@ struct ReplicatedStreamState {
 }
 
 impl ReplicatedStreamState {
-    fn new(forest: Forest) -> Self {
+    fn new(forest: Forest, pin: TempPin) -> Self {
         Self {
             forest,
-            pin: None,
+            pin,
             latest: None,
             wanted: None,
             validated: None,
         }
     }
 
-    fn pin(&mut self, store: &BlockStore) -> Result<&TempPin> {
-        if self.pin.is_none() {
-            self.pin = Some(store.temp_pin());
-        }
-        Ok(self.pin.as_ref().unwrap())
-    }
-
-    async fn set_root(&mut self, root: Link, store: &BlockStore) -> Result<&TempPin> {
+    fn set_root(&mut self, root: Link, store: &SqliteStore) -> Result<()> {
         let same_root = self.latest.as_ref().map(|r| r == &root).unwrap_or_default();
-        let pin = self.pin(store)?;
-        let cid = root.into();
         if !same_root {
-            store.assign_temp_pin(pin, Some(cid))?;
+            let cid = root.into();
+            store.lock().assign_temp_pin(&self.pin, Some(cid))?;
             self.latest = Some(root);
         }
-        Ok(self.pin.as_ref().unwrap())
+        Ok(())
     }
 }
 
@@ -92,9 +83,7 @@ struct StreamMaps {
 struct StreamManagerInner {
     mutex: Mutex<StreamMaps>,
     validate_sender: futures::channel::mpsc::UnboundedSender<(StreamId, Link)>,
-    store: BlockStore,
-    cache: BranchCache<TT>,
-    config: Config,
+    forest: Forest,
 }
 
 #[derive(Clone)]
@@ -112,17 +101,9 @@ impl StreamManager {
         &self,
         stream: StreamId,
     ) -> anyhow::Result<Arc<tokio::sync::Mutex<OwnStreamState>>> {
-        let config = self.0.config;
-        let cache = self.0.cache.clone();
-        let store = self.0.store.clone();
         let mut maps = self.lock();
         let state = maps.own_streams.entry(stream).or_insert_with(|| {
-            let forest = Forest::new(
-                SqliteStore::new(store),
-                cache,
-                config.crypto_config,
-                config.forest_config,
-            );
+            let forest = self.0.forest.clone();
             Arc::new(tokio::sync::Mutex::new(OwnStreamState::new(forest)))
         });
         Ok(state.clone())
@@ -132,24 +113,23 @@ impl StreamManager {
         &self,
         stream: StreamId,
     ) -> anyhow::Result<Arc<tokio::sync::Mutex<ReplicatedStreamState>>> {
-        let config = self.0.config;
-        let cache = self.0.cache.clone();
-        let store = self.0.store.clone();
         let mut maps = self.lock();
         let state = maps.replicated_streams.entry(stream).or_insert_with(|| {
-            let forest = Forest::new(
-                SqliteStore::new(store),
-                cache,
-                config.crypto_config,
-                config.forest_config,
-            );
-            Arc::new(tokio::sync::Mutex::new(ReplicatedStreamState::new(forest)))
+            let pin = self.0.forest.store().lock().temp_pin();
+            let forest = self.0.forest.clone();
+            Arc::new(tokio::sync::Mutex::new(ReplicatedStreamState::new(
+                forest, pin,
+            )))
         });
         Ok(state.clone())
     }
 
-    pub fn new(store: BlockStore, config: Config) -> (Self, AsyncResult<()>) {
-        let cache = BranchCache::<TT>::new(config.branch_cache);
+    fn store(&self) -> &SqliteStore {
+        self.0.forest.store()
+    }
+
+    pub fn new(store: SqliteStore, config: Config) -> (Self, AsyncResult<()>) {
+        let branch_cache = BranchCache::<TT>::new(config.branch_cache);
         let (validate_sender, validate_receiver) = futures::channel::mpsc::unbounded();
         let res = Self(Arc::new(StreamManagerInner {
             mutex: Mutex::new(StreamMaps {
@@ -157,9 +137,12 @@ impl StreamManager {
                 replicated_streams: Default::default(),
             }),
             validate_sender,
-            store: store.clone(),
-            cache,
-            config,
+            forest: Forest::new(
+                store.clone(),
+                branch_cache,
+                config.crypto_config,
+                config.forest_config,
+            ),
         }));
         let fut = res.clone().validate(store, validate_receiver).boxed();
         (res, fut)
@@ -170,14 +153,13 @@ impl StreamManager {
         async move {
             let stream = this.get_own_stream(stream_id)?;
             let mut stream = stream.lock().await;
-            let pin = this.0.store.temp_pin().await?;
-            let w = SqliteStoreWrite(this.0.store.clone(), pin);
+            let pin = this.store().lock().temp_pin();
+            let w = SqliteStoreWrite(this.store().clone(), pin);
             let txn = stream.forest.transaction(|x| (x, w));
-            let tree = txn.extend(&stream.latest, events).await?;
-            this.0
-                .store
-                .alias(stream_id.0.to_vec(), tree.link().map(Into::into))
-                .await?;
+            let tree = txn.extend(&stream.latest, events)?;
+            this.store()
+                .lock()
+                .alias(stream_id.0.to_vec(), tree.link().map(Into::into).as_ref())?;
             stream.latest = tree;
             drop(txn);
             Ok(())
@@ -191,21 +173,22 @@ impl StreamManager {
 
     async fn validate(
         self,
-        store: BlockStore,
+        store: SqliteStore,
         mut streams: impl Stream<Item = (StreamId, Link)> + Unpin,
     ) -> Result<()> {
         while let Some((stream_id, root)) = streams.next().await {
             let cid = Cid::from(root);
             let stream = self.get_replicated_stream(stream_id)?;
             let mut state = stream.lock().await;
-            let pin = state.set_root(root, &store).await?;
-            let missing: Vec<Cid> = store.get_missing_blocks(cid).await?;
+            state.set_root(root, &store)?;
+            let missing: Vec<Cid> = store.lock().get_missing_blocks(&cid)?;
             if missing.is_empty() {
                 state.validated = Some(root);
                 state.latest = None;
                 state.wanted = None;
-                store.alias(stream_id.0.to_vec(), Some(root.into())).await?;
-                store.assign_temp_pin(pin.clone(), None).await?;
+                let mut store = store.lock();
+                store.alias(stream_id.0.to_vec(), Some(&cid))?;
+                store.assign_temp_pin(&state.pin, None)?;
             } else {
                 state.wanted = Some(self.wanted(missing));
             }

@@ -33,7 +33,7 @@ where
         self.crypto_config().index_key
     }
 
-    fn store(&self) -> &R {
+    pub fn store(&self) -> &R {
         &self.0.store
     }
 
