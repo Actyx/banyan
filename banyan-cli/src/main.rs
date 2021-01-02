@@ -14,7 +14,6 @@ mod tags;
 
 use banyan::{
     forest::*,
-    memstore::MemStore,
     query::{AllQuery, OffsetRangeQuery, QueryExt},
     store::{ArcBlockWriter, ArcReadOnlyStore},
     tree::*,
@@ -341,7 +340,14 @@ async fn main() -> Result<()> {
         index_key,
         value_key,
     };
-    let forest = Txn::new(store.clone(), store, config, crypto_config);
+    let txn = || {
+        let branch_cache = BranchCache::new(1000);
+        Txn::new(
+            Forest::new(store.clone(), branch_cache, crypto_config, config),
+            store.clone(),
+        )
+    };
+    let forest = txn();
     if let Some(matches) = matches.subcommand_matches("dump") {
         let root = Sha256Digest::from_str(
             matches
@@ -493,7 +499,11 @@ async fn main() -> Result<()> {
             index_key,
             value_key,
         };
-        let forest = Txn::new(store.clone(), store, config, crypto_config);
+        let branch_cache = BranchCache::new(1000);
+        let forest = Txn::new(
+            Forest::new(store.clone(), branch_cache, crypto_config, config),
+            store,
+        );
         let _t0 = std::time::Instant::now();
         let base = None;
         let batches = 1;

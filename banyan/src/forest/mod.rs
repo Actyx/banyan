@@ -140,12 +140,8 @@ where
     ///
     /// It is up to the caller to ensure that the reader reads the writes of the writer,
     /// if complex operations that require that should be performed in the transaction.
-    pub fn new(reader: R, writer: W, config: Config, crypto_config: CryptoConfig) -> Self {
-        let branch_cache = BranchCache::new(1000);
-        Self {
-            read: Forest::new(reader, branch_cache, crypto_config, config),
-            writer,
-        }
+    pub fn new(read: Forest<T, V, R>, writer: W) -> Self {
+        Self { read, writer }
     }
 }
 

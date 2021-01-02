@@ -1,13 +1,15 @@
+use actyxos_sdk::tagged::{NodeId, StreamId};
 use anyhow::anyhow;
-use banyan::forest::{self, BranchCache, CryptoConfig};
+use banyan::forest::{self, BranchCache, CryptoConfig, Transaction};
 use clap::{App, Arg, SubCommand};
 use forest::FutureResult;
 use futures::{future::BoxFuture, prelude::*};
 use ipfs_sqlite_block_store::{BlockStore, TempPin};
 use libipld::Cid;
-use sqlite::{SqliteStore, SqliteStoreWrite, TokioRuntime};
+use sqlite::{SqliteStore, SqliteStoreWrite};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
+    convert::{TryFrom, TryInto},
     str::FromStr,
     sync::{Arc, Mutex},
     time::Duration,
@@ -20,9 +22,6 @@ use tracing_subscriber;
 mod sqlite;
 mod tag_index;
 mod tags;
-
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Ord)]
-struct StreamId([u8; 16]);
 
 type Event = serde_cbor::Value;
 type Forest = banyan::forest::Forest<TT, Event, SqliteStore>;
@@ -42,6 +41,37 @@ impl OwnStreamState {
             forest,
             latest: Tree::empty(),
         }
+    }
+}
+
+struct StreamAlias([u8; 24]);
+
+impl AsRef<[u8]> for StreamAlias {
+    fn as_ref(&self) -> &[u8] {
+        self.0.as_ref()
+    }
+}
+
+impl From<StreamId> for StreamAlias {
+    fn from(value: StreamId) -> Self {
+        let mut result = [0; 24];
+        if let Some(id) = value.node_id() {
+            result[0..16].copy_from_slice(id.as_ref());
+        }
+        result[16..24].copy_from_slice(&value.stream_nr().to_le_bytes());
+        StreamAlias(result)
+    }
+}
+
+impl TryFrom<StreamAlias> for StreamId {
+    type Error = anyhow::Error;
+
+    fn try_from(value: StreamAlias) -> anyhow::Result<Self> {
+        let stream_nr = u64::from_le_bytes(value.0[16..24].try_into()?);
+        let node_id = NodeId::from_bytes(&value.0[0..16])?;
+        Ok(node_id
+            .stream(stream_nr)
+            .ok_or(anyhow!("invalid stream nr 0"))?)
     }
 }
 
@@ -80,10 +110,18 @@ struct StreamMaps {
     replicated_streams: BTreeMap<StreamId, Arc<tokio::sync::Mutex<ReplicatedStreamState>>>,
 }
 
+struct PublishUpdate {
+    stream: StreamId,
+    blocks: BTreeSet<Link>,
+    root: Option<Link>,
+}
+
 struct StreamManagerInner {
     mutex: Mutex<StreamMaps>,
     validate_sender: futures::channel::mpsc::UnboundedSender<(StreamId, Link)>,
+    publish_sender: futures::channel::mpsc::UnboundedSender<PublishUpdate>,
     forest: Forest,
+    node_id: NodeId,
 }
 
 #[derive(Clone)]
@@ -91,6 +129,7 @@ struct StreamManager(Arc<StreamManagerInner>);
 
 #[derive(Debug, Clone, Copy)]
 struct Config {
+    node_id: NodeId,
     branch_cache: usize,
     crypto_config: forest::CryptoConfig,
     forest_config: forest::Config,
@@ -131,12 +170,15 @@ impl StreamManager {
     pub fn new(store: SqliteStore, config: Config) -> (Self, AsyncResult<()>) {
         let branch_cache = BranchCache::<TT>::new(config.branch_cache);
         let (validate_sender, validate_receiver) = futures::channel::mpsc::unbounded();
+        let (publish_sender, publish_receiver) = futures::channel::mpsc::unbounded();
         let res = Self(Arc::new(StreamManagerInner {
             mutex: Mutex::new(StreamMaps {
                 own_streams: Default::default(),
                 replicated_streams: Default::default(),
             }),
             validate_sender,
+            publish_sender,
+            node_id: config.node_id,
             forest: Forest::new(
                 store.clone(),
                 branch_cache,
@@ -153,15 +195,23 @@ impl StreamManager {
         async move {
             let stream = this.get_own_stream(stream_id)?;
             let mut stream = stream.lock().await;
-            let pin = this.store().lock().temp_pin();
-            let w = SqliteStoreWrite(this.store().clone(), pin);
-            let txn = stream.forest.transaction(|x| (x, w));
+            let writer = this.store().write();
+            let txn = Transaction::new(stream.forest.clone(), writer);
             let tree = txn.extend(&stream.latest, events)?;
+            // root of the new tree
+            let root = tree.link();
+            // update the permanent alias
             this.store()
                 .lock()
-                .alias(stream_id.0.to_vec(), tree.link().map(Into::into).as_ref())?;
+                .alias(StreamAlias::from(stream_id), root.map(Into::into).as_ref())?;
             stream.latest = tree;
-            drop(txn);
+            // new blocks
+            let blocks = txn.into_writer().into_written();
+            this.publish_update(PublishUpdate {
+                stream: stream_id,
+                blocks,
+                root,
+            })?;
             Ok(())
         }
         .boxed()
@@ -169,6 +219,10 @@ impl StreamManager {
 
     pub fn update_root(&mut self, stream: StreamId, root: Link) -> Result<()> {
         Ok(self.0.validate_sender.unbounded_send((stream, root))?)
+    }
+
+    fn publish_update(&self, update: PublishUpdate) -> Result<()> {
+        Ok(self.0.publish_sender.unbounded_send(update)?)
     }
 
     async fn validate(
@@ -181,13 +235,13 @@ impl StreamManager {
             let stream = self.get_replicated_stream(stream_id)?;
             let mut state = stream.lock().await;
             state.set_root(root, &store)?;
-            let missing: Vec<Cid> = store.lock().get_missing_blocks(&cid)?;
+            let mut store = store.lock();
+            let missing: Vec<Cid> = store.get_missing_blocks(&cid)?;
             if missing.is_empty() {
                 state.validated = Some(root);
                 state.latest = None;
                 state.wanted = None;
-                let mut store = store.lock();
-                store.alias(stream_id.0.to_vec(), Some(&cid))?;
+                store.alias(StreamAlias::from(stream_id), Some(&cid))?;
                 store.assign_temp_pin(&state.pin, None)?;
             } else {
                 state.wanted = Some(self.wanted(missing));
