@@ -219,6 +219,7 @@ dependencies = [
  "clap",
  "derive_more",
  "env_logger",
+ "fnv",
  "futures",
  "hex",
  "ipfs-sqlite-block-store",
