@@ -1,16 +1,13 @@
 //! helper methods to work with ipfs/ipld
 use std::{
+    collections::BTreeSet,
     ops::DerefMut,
-    sync::{Arc, Mutex, RwLock},
+    sync::{Arc, Mutex},
 };
 
 use anyhow::{anyhow, Result};
 use banyan::store::{BlockWriter, ReadOnlyStore};
-use futures::{future::BoxFuture, prelude::*};
-use ipfs_sqlite_block_store::{
-    async_block_store::{AsyncBlockStore, AsyncTempPin, RuntimeAdapter},
-    BlockStore, Config, OwnedBlock, TempPin,
-};
+use ipfs_sqlite_block_store::{BlockStore, Config, OwnedBlock, TempPin};
 use libipld::Cid;
 
 use crate::tags::Sha256Digest;
@@ -31,6 +28,16 @@ impl SqliteStore {
     pub(crate) fn lock(&self) -> impl DerefMut<Target = BlockStore> + '_ {
         self.0.lock().unwrap()
     }
+
+    pub fn write(&self) -> SqliteStoreWrite {
+        let store = self.clone();
+        let pin = self.lock().temp_pin();
+        SqliteStoreWrite {
+            store,
+            pin,
+            written: Mutex::new(BTreeSet::new()),
+        }
+    }
 }
 
 impl ReadOnlyStore<Sha256Digest> for SqliteStore {
@@ -45,31 +52,25 @@ impl ReadOnlyStore<Sha256Digest> for SqliteStore {
     }
 }
 
-pub struct SqliteStoreWrite(pub SqliteStore, pub TempPin);
+pub struct SqliteStoreWrite {
+    store: SqliteStore,
+    pin: TempPin,
+    written: Mutex<BTreeSet<Sha256Digest>>,
+}
+
+impl SqliteStoreWrite {
+    pub fn into_written(self) -> BTreeSet<Sha256Digest> {
+        self.written.into_inner().unwrap()
+    }
+}
 
 impl BlockWriter<Sha256Digest> for SqliteStoreWrite {
     fn put(&self, data: Vec<u8>) -> Result<Sha256Digest> {
         let digest = Sha256Digest::new(&data);
         let cid = digest.into();
         let block = OwnedBlock::new(cid, data);
-        self.0.lock().put_block(&block, Some(&self.1))?;
+        self.store.lock().put_block(&block, Some(&self.pin))?;
+        self.written.lock().unwrap().insert(digest);
         Ok(digest)
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct TokioRuntime;
-
-impl RuntimeAdapter for TokioRuntime {
-    fn unblock<F, T>(self, f: F) -> BoxFuture<'static, Result<T>>
-    where
-        F: FnOnce() -> T + Send + 'static,
-        T: Send + 'static,
-    {
-        tokio::task::spawn_blocking(f).err_into().boxed()
-    }
-
-    fn sleep(&self, duration: std::time::Duration) -> BoxFuture<()> {
-        tokio::time::delay_for(duration).boxed()
     }
 }

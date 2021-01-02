@@ -148,9 +148,7 @@ impl<
         query: impl Query<T> + Clone + 'static,
     ) -> impl Stream<Item = Result<(u64, T::Key, V)>> + 'static {
         match &tree.root {
-            Some(index) => self
-                .stream_filtered0(0, query, index.clone())
-                .left_stream(),
+            Some(index) => self.stream_filtered0(0, query, index.clone()).left_stream(),
             None => stream::empty().right_stream(),
         }
     }
