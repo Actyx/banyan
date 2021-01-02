@@ -1,5 +1,5 @@
 [package]
-name = "banyan-cli"
+name = "banyan-stream-manager"
 version = "0.1.0"
 authors = ["Rüdiger Klaehn <rklaehn@protonmail.com>", "Actyx AG"]
 edition = "2018"
@@ -24,7 +24,7 @@ rand = "0.7.3"
 
 hex = "0.4.2"
 tokio = { version = "0.2.20", features = ["full"] }
-reqwest = { version = "0.10.4", features = ["json", "stream", "blocking"] }
+reqwest = { version = "0.10.4", features = ["json", "stream"] }
 clap = "2.33.1"
 tracing-subscriber = "0.2.5"
 env_logger = "0.7.1"

@@ -4,25 +4,42 @@ use crate::store::{BlockWriter, ReadOnlyStore};
 use anyhow::Result;
 use core::{fmt::Debug, hash::Hash, iter::FromIterator, marker::PhantomData, ops::Range};
 use futures::future::BoxFuture;
+use lru::LruCache;
 use rand::RngCore;
 use serde::{de::DeserializeOwned, Serialize};
 use std::{
     fmt::Display,
-    sync::{Arc, RwLock},
+    sync::{Arc, Mutex},
 };
 mod read;
 mod stream;
 mod write;
 
 pub type FutureResult<'a, T> = BoxFuture<'a, Result<T>>;
-pub type BranchCache<T: TreeTypes> = Arc<RwLock<lru::LruCache<T::Link, Branch<T>>>>;
+
+#[derive(Clone)]
+pub struct BranchCache<T: TreeTypes>(Arc<Mutex<lru::LruCache<T::Link, Branch<T>>>>);
+
+impl<T: TreeTypes> BranchCache<T> {
+    pub fn new(capacity: usize) -> Self {
+        Self(Arc::new(Mutex::new(LruCache::new(capacity))))
+    }
+
+    pub fn get<'a>(&'a self, link: &'a T::Link) -> Option<Branch<T>> {
+        self.0.lock().unwrap().get(link).cloned()
+    }
+
+    pub fn put(&self, link: T::Link, branch: Branch<T>) {
+        self.0.lock().unwrap().put(link, branch);
+    }
+}
 
 /// Trees can be parametrized with the key type and the sequence type. Also, to avoid a dependency
 /// on a link type with all its baggage, we parameterize the link type.
 ///
 /// There might be more types in the future, so this essentially acts as a module for the entire
 /// code base.
-pub trait TreeTypes: Debug + Send + Sync + 'static {
+pub trait TreeTypes: Debug + Send + Sync + Clone + 'static {
     /// key type. This also doubles as the type for a combination (union) of keys
     type Key: Debug + Eq + Send;
     /// compact sequence type to be used for indices
@@ -124,7 +141,7 @@ where
     /// It is up to the caller to ensure that the reader reads the writes of the writer,
     /// if complex operations that require that should be performed in the transaction.
     pub fn new(reader: R, writer: W, config: Config, crypto_config: CryptoConfig) -> Self {
-        let branch_cache = Arc::new(RwLock::new(lru::LruCache::<T::Link, Branch<T>>::new(1000)));
+        let branch_cache = BranchCache::new(1000);
         Self {
             read: Forest::new(reader, branch_cache, crypto_config, config),
             writer,

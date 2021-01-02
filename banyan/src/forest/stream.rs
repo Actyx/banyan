@@ -54,7 +54,7 @@ impl<
         let forest = self.clone();
         let forest2 = self.clone();
         roots
-            .filter_map(move |link| forest.load_branch_from_link(link).map(|r| r.ok()))
+            .filter_map(move |link| future::ready(forest.load_branch_from_link(link).ok()))
             .flat_map(move |index: Index<T>| {
                 // create an intersection of a range query and the main query
                 // and wrap it in an arc so it is cheap to clone
@@ -65,7 +65,6 @@ impl<
                 .boxed();
                 let offset = offset.clone();
                 forest2
-                    .clone()
                     .stream_filtered_chunked0(0, query, index, mk_extra)
                     .take_while(move |result| {
                         if let Ok(chunk) = result {
@@ -103,7 +102,7 @@ impl<
         let forest = self.clone();
         let forest2 = self.clone();
         roots
-            .filter_map(move |link| forest.clone().load_branch_from_link(link).map(|r| r.ok()))
+            .filter_map(move |link| future::ready(forest.load_branch_from_link(link).ok()))
             .flat_map(move |index| {
                 let end_offset = end_offset_ref.load(Ordering::SeqCst);
                 // create an intersection of a range query and the main query
@@ -111,7 +110,6 @@ impl<
                 let query = AndQuery(OffsetRangeQuery::from(..end_offset), query.clone()).boxed();
                 let end_offset_ref = end_offset_ref.clone();
                 forest2
-                    .clone()
                     .stream_filtered_chunked_reverse0(0, query, index, mk_extra)
                     .take_while(move |result| {
                         if let Ok(chunk) = result {

@@ -248,7 +248,7 @@ impl<T: TreeTypes> Index<T> {
 /// This is a wrapper around a non-empty sequence of child indices.
 pub struct Branch<T: TreeTypes> {
     // index data for the children
-    pub children: Arc<Vec<Index<T>>>,
+    pub children: Arc<[Index<T>]>,
 }
 
 impl<T: TreeTypes> Clone for Branch<T> {
@@ -263,7 +263,7 @@ impl<T: TreeTypes> Branch<T> {
     pub fn new(children: Vec<Index<T>>) -> Self {
         assert!(!children.is_empty());
         Self {
-            children: Arc::new(children),
+            children: children.into(),
         }
     }
     pub fn last_child(&mut self) -> &Index<T> {

@@ -2,7 +2,6 @@ use crate::store::{BlockWriter, ReadOnlyStore};
 use anyhow::anyhow;
 use core::hash::Hash;
 use fnv::FnvHashMap;
-use futures::{future::BoxFuture, prelude::*};
 use std::sync::{Arc, RwLock};
 
 pub struct MemReader<R, L> {
@@ -35,9 +34,9 @@ where
 impl<R: ReadOnlyStore<L> + Send + Sync + 'static, L: Copy + Eq + Hash + Send + Sync + 'static>
     ReadOnlyStore<L> for MemReader<R, L>
 {
-    fn get(&self, link: &L) -> BoxFuture<anyhow::Result<Box<[u8]>>> {
+    fn get(&self, link: &L) -> anyhow::Result<Box<[u8]>> {
         match self.store.get0(link) {
-            Some(block) => future::ok(block).boxed(),
+            Some(block) => Ok(block),
             None => self.inner.get(link),
         }
     }
@@ -71,8 +70,8 @@ impl<L: Eq + Hash + Copy> MemStore<L> {
     }
 
     pub fn into_inner(self) -> anyhow::Result<FnvHashMap<L, Box<[u8]>>> {
-        let inner = Arc::try_unwrap(self.0).map_err(|e| anyhow!("busy"))?;
-        let blocks = inner.blocks.into_inner().map_err(|e| anyhow!("poisoned"))?;
+        let inner = Arc::try_unwrap(self.0).map_err(|_| anyhow!("busy"))?;
+        let blocks = inner.blocks.into_inner().map_err(|_| anyhow!("poisoned"))?;
         Ok(blocks.map)
     }
 
@@ -98,17 +97,17 @@ impl<L: Eq + Hash + Copy> MemStore<L> {
 }
 
 impl<L: Eq + Hash + Copy> ReadOnlyStore<L> for MemStore<L> {
-    fn get(&self, link: &L) -> BoxFuture<anyhow::Result<Box<[u8]>>> {
+    fn get(&self, link: &L) -> anyhow::Result<Box<[u8]>> {
         if let Some(value) = self.get0(link) {
-            future::ok(value.clone()).boxed()
+            Ok(value)
         } else {
-            future::err(anyhow!("not there")).boxed()
+            Err(anyhow!("not there"))
         }
     }
 }
 
 impl<L: Eq + Hash + Send + Sync + Copy + 'static> BlockWriter<L> for MemStore<L> {
-    fn put(&self, data: Vec<u8>) -> BoxFuture<anyhow::Result<L>> {
-        future::ready(self.put0(data)).boxed()
+    fn put(&self, data: Vec<u8>) -> anyhow::Result<L> {
+        self.put0(data)
     }
 }

@@ -4,7 +4,11 @@
 members = [
   "banyan",
   "banyan-cli",
+  "banyan-stream-manager",
 ]
 
 [profile.release]
 debug = true
+
+# [patch.crates-io]
+# ipfs-sqlite-block-store = { path = "../ipfs-sqlite-block-store" }
