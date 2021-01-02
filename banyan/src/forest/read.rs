@@ -77,10 +77,7 @@ where
         })
     }
 
-    pub(crate) fn load_branch_from_link(
-        &self,
-        link: T::Link,
-    ) -> Result<Index<T>> {
+    pub(crate) fn load_branch_from_link(&self, link: T::Link) -> Result<Index<T>> {
         let store = self.store.clone();
         let index_key = self.index_key();
         let config = self.config;
@@ -89,8 +86,7 @@ where
         let level = children.iter().map(|x| x.level()).max().unwrap() + 1;
         let count = children.iter().map(|x| x.count()).sum();
         let value_bytes = children.iter().map(|x| x.value_bytes()).sum();
-        let key_bytes =
-            children.iter().map(|x| x.key_bytes()).sum::<u64>() + (bytes.len() as u64);
+        let key_bytes = children.iter().map(|x| x.key_bytes()).sum::<u64>() + (bytes.len() as u64);
         let summaries = children.iter().map(|x| x.data().summarize()).collect();
         let result = BranchIndex {
             link: Some(link),

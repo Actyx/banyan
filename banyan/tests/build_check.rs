@@ -1,4 +1,7 @@
-use banyan::index::CompactSeq;
+use banyan::{
+    forest::{BranchCache, CryptoConfig, Forest},
+    index::CompactSeq,
+};
 use banyan::{
     forest::{Config, Transaction, TreeTypes},
     memstore::MemStore,
@@ -87,13 +90,26 @@ impl Arbitrary for Key {
     }
 }
 
+fn txn(store: MemStore<Sha256Digest>) -> Txn {
+    let branch_cache = BranchCache::new(1000);
+    Txn::new(
+        Forest::new(
+            store.clone(),
+            branch_cache,
+            CryptoConfig::default(),
+            Config::debug(),
+        ),
+        store,
+    )
+}
+
 async fn create_test_tree<I>(xs: I) -> anyhow::Result<(Tree<TT, u64>, Txn)>
 where
     I: IntoIterator<Item = (Key, u64)>,
     I::IntoIter: Send,
 {
     let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
-    let forest = Txn::new(store.clone(), store, Config::debug(), Default::default());
+    let forest = txn(store);
     let mut tree = Tree::<TT, u64>::empty();
     tree = forest.extend(&tree, xs)?;
     forest.assert_invariants(&tree)?;
@@ -260,7 +276,7 @@ async fn build_get(xs: Vec<(Key, u64)>) -> quickcheck::TestResult {
 async fn build_pack(xss: Vec<Vec<(Key, u64)>>) -> quickcheck::TestResult {
     test(|| async {
         let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
-        let forest = Txn::new(store.clone(), store, Config::debug(), Default::default());
+        let forest = txn(store);
         let mut tree = Tree::<TT, u64>::empty();
         // flattened xss for reference
         let xs = xss.iter().cloned().flatten().collect::<Vec<_>>();
@@ -286,7 +302,7 @@ async fn build_pack(xss: Vec<Vec<(Key, u64)>>) -> quickcheck::TestResult {
 async fn retain(xss: Vec<Vec<(Key, u64)>>) -> quickcheck::TestResult {
     test(|| async {
         let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
-        let forest = Txn::new(store.clone(), store, Config::debug(), Default::default());
+        let forest = txn(store);
         let mut tree = Tree::<TT, u64>::empty();
         // flattened xss for reference
         let xs = xss.iter().cloned().flatten().collect::<Vec<_>>();
@@ -315,7 +331,7 @@ async fn filter_test_simple() -> anyhow::Result<()> {
 #[tokio::test]
 async fn stream_test_simple() -> anyhow::Result<()> {
     let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
-    let forest = Txn::new(store.clone(), store, Config::debug(), Default::default());
+    let forest = txn(store);
     let mut trees = Vec::new();
     for n in 1..=10u64 {
         let mut tree = Tree::<TT, u64>::empty();
