@@ -17,7 +17,7 @@ mod write;
 
 pub type FutureResult<'a, T> = BoxFuture<'a, Result<T>>;
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct BranchCache<T: TreeTypes>(Arc<Mutex<lru::LruCache<T::Link, Branch<T>>>>);
 
 impl<T: TreeTypes> BranchCache<T> {
@@ -59,6 +59,7 @@ pub trait TreeTypes: Debug + Send + Sync + Clone + 'static {
 }
 
 /// Everything that is needed to read trees
+#[derive(Debug)]
 pub struct ForestInner<T: TreeTypes, V, R> {
     pub(crate) store: R,
     pub(crate) branch_cache: BranchCache<T>,
@@ -67,6 +68,7 @@ pub struct ForestInner<T: TreeTypes, V, R> {
     pub(crate) _tt: PhantomData<(T, V, R)>,
 }
 
+#[derive(Debug)]
 pub struct Forest<TT: TreeTypes, V, R>(Arc<ForestInner<TT, V, R>>);
 
 impl<TT: TreeTypes, V, R> Clone for Forest<TT, V, R> {

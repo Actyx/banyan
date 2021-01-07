@@ -4,7 +4,6 @@
 members = [
   "banyan",
   "banyan-cli",
-  "banyan-stream-manager",
 ]
 
 [profile.release]

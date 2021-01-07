@@ -23,6 +23,15 @@ pub struct Tree<T: TreeTypes, V> {
     _t: PhantomData<V>,
 }
 
+impl<T: TreeTypes, V> Default for Tree<T, V> {
+    fn default() -> Self {
+        Self {
+            root: None,
+            _t: PhantomData,
+        }
+    }
+}
+
 impl<T: TreeTypes, V> fmt::Debug for Tree<T, V> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.root {
