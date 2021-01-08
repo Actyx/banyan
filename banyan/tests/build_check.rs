@@ -285,12 +285,12 @@ async fn build_pack(xss: Vec<Vec<(Key, u64)>>) -> quickcheck::TestResult {
             tree = forest.extend_unpacked(&tree, xs.clone()).unwrap();
         }
         // check that the unbalanced tree itself matches the elements
-        let actual: Vec<_> = forest.collect(&tree).await?;
+        let actual: Vec<_> = forest.collect(&tree)?.into_iter().collect::<Option<Vec<_>>>().unwrap();
         let unpacked_matches = xs == actual;
 
-        tree = forest.pack(&tree).await?;
+        tree = forest.pack(&tree)?;
         assert!(forest.is_packed(&tree)?);
-        let actual: Vec<_> = forest.collect(&tree).await?;
+        let actual: Vec<_> = forest.collect(&tree)?.into_iter().collect::<Option<Vec<_>>>().unwrap();
         let packed_matches = xs == actual;
 
         Ok(unpacked_matches && packed_matches)
@@ -312,7 +312,7 @@ async fn retain(xss: Vec<Vec<(Key, u64)>>) -> quickcheck::TestResult {
         }
         tree = forest.retain(&tree, &OffsetRangeQuery::from(xs.len() as u64..))?;
         forest.assert_invariants(&tree)?;
-        tree = forest.pack(&tree).await?;
+        tree = forest.pack(&tree)?;
         tree = forest.retain(&tree, &OffsetRangeQuery::from(xs.len() as u64..))?;
         forest.assert_invariants(&tree)?;
         Ok(true)

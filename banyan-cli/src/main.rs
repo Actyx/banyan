@@ -406,7 +406,7 @@ async fn main() -> Result<()> {
         )?;
         let mut tree = forest.load_tree(root)?;
         forest.dump(&tree)?;
-        tree = forest.pack(&tree).await?;
+        tree = forest.pack(&tree)?;
         forest.assert_invariants(&tree)?;
         assert!(forest.is_packed(&tree)?);
         forest.dump(&tree)?;
@@ -467,7 +467,7 @@ async fn main() -> Result<()> {
             tree = forest.extend_unpacked(&tree, Some((key, "xxx".into())))?;
             if tree.level() > 100 {
                 println!("packing the tree");
-                tree = forest.pack(&tree).await?;
+                tree = forest.pack(&tree)?;
             }
             offset += 1;
             if let Some(cid) = tree.link() {
@@ -514,7 +514,7 @@ async fn main() -> Result<()> {
         let unbalanced = false;
         let (tree, tcreate) = bench_build(&forest, base, batches, count, unbalanced).await?;
         let t0 = std::time::Instant::now();
-        let _values: Vec<_> = forest.collect(&tree).await?;
+        let _values: Vec<_> = forest.collect(&tree)?;
         let t1 = std::time::Instant::now();
         let tcollect = t1 - t0;
         let t0 = std::time::Instant::now();

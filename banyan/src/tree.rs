@@ -61,7 +61,7 @@ impl<T: TreeTypes> Clone for Tree<T> {
 }
 
 impl<
-        T: TreeTypes + 'static,
+        T: TreeTypes,
         V: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static,
         R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static,
     > Forest<T, V, R>
@@ -117,32 +117,6 @@ impl<
             panic!("assert_invariants failed");
         }
         Ok(())
-    }
-
-    /// Collects all elements from a stream. Might produce an OOM for large streams.
-    pub async fn collect<B: FromIterator<(T::Key, V)>>(&self, tree: &Tree<T>) -> Result<B> {
-        let query = AllQuery;
-        let items: Vec<Result<(T::Key, V)>> = self
-            .stream_filtered(tree, query)
-            .map_ok(|(_, k, v)| (k, v))
-            .collect::<Vec<_>>()
-            .await;
-        items.into_iter().collect::<Result<_>>()
-    }
-
-    /// Collects all elements from the given offset. Might produce an OOM for large streams.
-    pub async fn collect_from<B: FromIterator<(T::Key, V)>>(
-        &self,
-        tree: &Tree<T>,
-        offset: u64,
-    ) -> Result<B> {
-        let query = OffsetRangeQuery::from(offset..);
-        let items: Vec<Result<(T::Key, V)>> = self
-            .stream_filtered(tree, query)
-            .map_ok(|(_, k, v)| (k, v))
-            .collect::<Vec<_>>()
-            .await;
-        items.into_iter().collect::<Result<_>>()
     }
 
     pub fn stream_filtered(
@@ -201,10 +175,28 @@ impl<
             None => None,
         })
     }
+
+    /// Collects all elements from a stream. Might produce an OOM for large streams.
+    pub fn collect(&self, tree: &Tree<T>) -> Result<Vec<Option<(T::Key, V)>>> {
+        self.collect_from(tree, 0)
+    }
+
+    /// Collects all elements from the given offset. Might produce an OOM for large streams.
+    pub fn collect_from(
+        &self,
+        tree: &Tree<T>,
+        offset: u64,
+    ) -> Result<Vec<Option<(T::Key, V)>>> {
+        let mut res = Vec::new();
+        if let Some(index) = &tree.root {
+            self.collect0(index, offset, &mut res)?;
+        }
+        Ok(res)
+    }
 }
 
 impl<
-        T: TreeTypes + 'static,
+        T: TreeTypes,
         V: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static,
         R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static,
         W: BlockWriter<T::Link> + 'static,
@@ -226,10 +218,15 @@ impl<
     /// Likewise, sealed subtrees or leafs will be reused if possible.
     ///
     /// ![packing illustration](https://ipfs.io/ipfs/QmaEDTjHSdCKyGQ3cFMCf73kE67NvffLA5agquLW5qSEVn/packing.jpg)
-    pub async fn pack(&self, tree: &Tree<T>) -> Result<Tree<T>> {
+    pub fn pack(&self, tree: &Tree<T>) -> Result<Tree<T>> {
         let roots = self.roots(tree)?;
         let filled = self.tree_from_roots(roots)?;
-        let remainder: Vec<_> = self.collect_from(tree, filled.count()).await?;
+        // let remainder: Vec<_> = self.collect_from(tree, filled.count()).await?;
+        let remainder: Vec<_> = self
+            .collect_from(tree, filled.count())?
+            .into_iter()
+            .collect::<Option<Vec<_>>>()
+            .ok_or(anyhow::anyhow!("found purged data"))?;
         let extended = self.extend(&filled, remainder)?;
         Ok(extended)
     }
@@ -321,7 +318,7 @@ impl<
     }
 }
 
-impl<T: TreeTypes + 'static> Tree<T> {
+impl<T: TreeTypes> Tree<T> {
     pub(crate) fn new(root: Option<Index<T>>) -> Self {
         Self { root }
     }

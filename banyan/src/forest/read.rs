@@ -174,6 +174,43 @@ where
         }
     }
 
+    pub(crate) fn collect0(
+        &self,
+        index: &Index<T>,
+        mut offset: u64,
+        into: &mut Vec<Option<(T::Key, V)>>,
+    ) -> Result<()> {
+        assert!(offset < index.count());
+        match self.load_node(index)? {
+            NodeInfo::Branch(_, node) => {
+                for child in node.children.iter() {
+                    if offset < child.count() {
+                        self.collect0(child, offset, into)?;
+                    }
+                    offset = offset.saturating_sub(child.count());
+                }
+            }
+            NodeInfo::Leaf(index, node) => {
+                let vs = node.as_ref().items::<V>()?;
+                let ks = index.keys.to_vec();
+                for (k, v) in ks.into_iter().zip(vs.into_iter()).skip(offset as usize) {
+                    into.push(Some((k, v)));
+                }
+            }
+            NodeInfo::PurgedLeaf(index) => {
+                for _ in offset..index.keys.count() {
+                    into.push(None);
+                }
+            }
+            NodeInfo::PurgedBranch(index) => {
+                for _ in offset..index.count {
+                    into.push(None);
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Convenience method to stream filtered.
     ///
     /// Implemented in terms of stream_filtered_chunked
