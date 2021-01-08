@@ -198,7 +198,7 @@ async fn build_tree(
     count: u64,
     unbalanced: bool,
     print_every: u64,
-) -> anyhow::Result<Tree<TT, String>> {
+) -> anyhow::Result<Tree<TT>> {
     let mut tagger = Tagger::new();
     // function to add some arbitrary tags to test out tag querying and compression
     let mut tags_from_offset = |i: u64| -> TagSet {
@@ -216,7 +216,7 @@ async fn build_tree(
     };
     let mut tree = match base {
         Some(root) => forest.load_tree(root)?,
-        None => Tree::<TT, String>::empty(),
+        None => Tree::<TT>::empty(),
     };
     let mut offset: u64 = 0;
     for _ in 0..batches {
@@ -250,7 +250,7 @@ async fn bench_build(
     batches: u64,
     count: u64,
     unbalanced: bool,
-) -> anyhow::Result<(Tree<TT, String>, std::time::Duration)> {
+) -> anyhow::Result<(Tree<TT>, std::time::Duration)> {
     let mut tagger = Tagger::new();
     // function to add some arbitrary tags to test out tag querying and compression
     let mut tags_from_offset = |i: u64| -> TagSet {
@@ -268,7 +268,7 @@ async fn bench_build(
     };
     let mut tree = match base {
         Some(root) => forest.load_tree(root)?,
-        None => Tree::<TT, String>::empty(),
+        None => Tree::<TT>::empty(),
     };
     let mut offset: u64 = 0;
     let data = (0..batches)
@@ -460,7 +460,7 @@ async fn main() -> Result<()> {
             .value_of("topic")
             .ok_or_else(|| anyhow!("topic must be provided"))?;
         let mut ticks = tokio::time::interval(Duration::from_secs(1));
-        let mut tree = Tree::<TT, String>::empty();
+        let mut tree = Tree::<TT>::empty();
         let mut offset = 0;
         while ticks.next().await.is_some() {
             let key = Key::single(offset, offset, tags_from_offset(offset));

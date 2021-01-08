@@ -103,14 +103,14 @@ fn txn(store: MemStore<Sha256Digest>) -> Txn {
     )
 }
 
-async fn create_test_tree<I>(xs: I) -> anyhow::Result<(Tree<TT, u64>, Txn)>
+async fn create_test_tree<I>(xs: I) -> anyhow::Result<(Tree<TT>, Txn)>
 where
     I: IntoIterator<Item = (Key, u64)>,
     I::IntoIter: Send,
 {
     let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
     let forest = txn(store);
-    let mut tree = Tree::<TT, u64>::empty();
+    let mut tree = Tree::<TT>::empty();
     tree = forest.extend(&tree, xs)?;
     forest.assert_invariants(&tree)?;
     Ok((tree, forest))
@@ -277,7 +277,7 @@ async fn build_pack(xss: Vec<Vec<(Key, u64)>>) -> quickcheck::TestResult {
     test(|| async {
         let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
         let forest = txn(store);
-        let mut tree = Tree::<TT, u64>::empty();
+        let mut tree = Tree::<TT>::empty();
         // flattened xss for reference
         let xs = xss.iter().cloned().flatten().collect::<Vec<_>>();
         // build complex unbalanced tree
@@ -303,7 +303,7 @@ async fn retain(xss: Vec<Vec<(Key, u64)>>) -> quickcheck::TestResult {
     test(|| async {
         let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
         let forest = txn(store);
-        let mut tree = Tree::<TT, u64>::empty();
+        let mut tree = Tree::<TT>::empty();
         // flattened xss for reference
         let xs = xss.iter().cloned().flatten().collect::<Vec<_>>();
         // build complex unbalanced tree
@@ -334,7 +334,7 @@ async fn stream_test_simple() -> anyhow::Result<()> {
     let forest = txn(store);
     let mut trees = Vec::new();
     for n in 1..=10u64 {
-        let mut tree = Tree::<TT, u64>::empty();
+        let mut tree = Tree::<TT>::empty();
         tree = forest.extend(&tree, (0..n).map(|t| (Key(t), n)))?;
         forest.assert_invariants(&tree)?;
         trees.push(tree.root().cloned().unwrap());
