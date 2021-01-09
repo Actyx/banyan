@@ -9,10 +9,10 @@ use banyan::{
     tree::Tree,
 };
 use futures::prelude::*;
-use libipld::{cbor::DagCborCodec, prelude::*, Cid};
+use libipld::{cbor::DagCborCodec, prelude::*, Cid, Ipld};
 use quickcheck::{Arbitrary, Gen, TestResult};
 use serde::{Deserialize, Serialize};
-use std::{convert::TryFrom, iter, iter::FromIterator, ops::Range};
+use std::{collections::BTreeMap, convert::TryFrom, iter, iter::FromIterator, ops::Range};
 use store::Sha256Digest;
 mod store;
 
@@ -53,28 +53,25 @@ impl FromIterator<Key> for KeySeq {
 }
 
 #[derive(libipld::DagCbor)]
-struct IpldNode(Vec<Cid>, Box<[u8]>);
+struct IpldNode(BTreeMap<usize, Ipld>, Box<[u8]>);
 
 impl TreeTypes for TT {
     type Key = Key;
     type Seq = KeySeq;
     type Link = Sha256Digest;
 
-    fn serialize_branch(links: &[&Self::Link], data: Vec<u8>) -> anyhow::Result<Vec<u8>> {
-        let node = IpldNode(
-            links.iter().map(|x| Cid::from(**x)).collect::<Vec<_>>(),
-            data.into(),
-        );
+    fn serialize_branch(
+        links: Vec<(usize, libipld::Ipld)>,
+        data: Vec<u8>,
+    ) -> anyhow::Result<Vec<u8>> {
+        let node = IpldNode(links.into_iter().collect(), data.into());
         let bytes = DagCborCodec.encode(&node)?;
         Ok(bytes)
     }
-    fn deserialize_branch(bytes: &[u8]) -> anyhow::Result<(Vec<Self::Link>, Vec<u8>)> {
-        let IpldNode(links, data) = DagCborCodec.decode(bytes)?;
-        let links = links
-            .into_iter()
-            .map(Self::Link::try_from)
-            .collect::<anyhow::Result<Vec<_>>>()?;
-        Ok((links, data.into()))
+
+    fn deserialize_branch(data: &[u8]) -> anyhow::Result<(Vec<(usize, libipld::Ipld)>, Vec<u8>)> {
+        let IpldNode(links, data) = DagCborCodec.decode(data)?;
+        Ok((links.into_iter().collect(), data.into()))
     }
 }
 
@@ -285,12 +282,20 @@ async fn build_pack(xss: Vec<Vec<(Key, u64)>>) -> quickcheck::TestResult {
             tree = forest.extend_unpacked(&tree, xs.clone()).unwrap();
         }
         // check that the unbalanced tree itself matches the elements
-        let actual: Vec<_> = forest.collect(&tree)?.into_iter().collect::<Option<Vec<_>>>().unwrap();
+        let actual: Vec<_> = forest
+            .collect(&tree)?
+            .into_iter()
+            .collect::<Option<Vec<_>>>()
+            .unwrap();
         let unpacked_matches = xs == actual;
 
         tree = forest.pack(&tree)?;
         assert!(forest.is_packed(&tree)?);
-        let actual: Vec<_> = forest.collect(&tree)?.into_iter().collect::<Option<Vec<_>>>().unwrap();
+        let actual: Vec<_> = forest
+            .collect(&tree)?
+            .into_iter()
+            .collect::<Option<Vec<_>>>()
+            .unwrap();
         let packed_matches = xs == actual;
 
         Ok(unpacked_matches && packed_matches)

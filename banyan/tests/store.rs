@@ -1,5 +1,9 @@
 //! helper methods for the tests
-use libipld::Cid;
+use libipld::{
+    cbor::{decode::TryReadCbor, DagCborCodec},
+    codec::{Decode, Encode},
+    Cid,
+};
 use sha2::{Digest, Sha256};
 use std::{
     convert::{TryFrom, TryInto},
@@ -9,6 +13,23 @@ use std::{
 /// For tests, we use a Sha2-256 digest as a link
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Sha256Digest([u8; 32]);
+
+impl Decode<DagCborCodec> for Sha256Digest {
+    fn decode<R: std::io::Read>(c: DagCborCodec, r: &mut R) -> anyhow::Result<Self> {
+        Self::try_from(libipld::Cid::decode(c, r)?)
+    }
+}
+impl Encode<DagCborCodec> for Sha256Digest {
+    fn encode<W: std::io::Write>(&self, c: DagCborCodec, w: &mut W) -> anyhow::Result<()> {
+        libipld::Cid::encode(&Cid::from(*self), c, w)
+    }
+}
+
+impl TryReadCbor for Sha256Digest {
+    fn try_read_cbor<R: std::io::Read>(r: &mut R, major: u8) -> anyhow::Result<Option<Self>> {
+        Ok(None)
+    }
+}
 
 impl Sha256Digest {
     pub fn digest(data: &[u8]) -> Self {

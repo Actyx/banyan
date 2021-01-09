@@ -41,12 +41,13 @@
 use super::zstd_array::ZstdArray;
 use anyhow::{anyhow, Result};
 use derive_more::From;
+use libipld::{cbor::DagCborCodec, codec::Codec, Ipld};
 use salsa20::{
     stream_cipher::{NewStreamCipher, SyncStreamCipher},
     XSalsa20,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use std::{convert::From, sync::Arc};
+use std::{collections::BTreeMap, convert::From, sync::Arc};
 
 /// a compact representation of a sequence of 1 or more items
 ///
@@ -338,8 +339,6 @@ struct IndexWC<'a, T> {
     value_bytes: u64,
     // block is sealed
     sealed: bool,
-    // block is purged
-    purged: bool,
     // extra data
     data: &'a T,
 }
@@ -349,7 +348,6 @@ impl<'a, T: TreeTypes> From<&'a Index<T>> for IndexWC<'a, T::Seq> {
         match value {
             Index::Branch(i) => Self {
                 sealed: i.sealed,
-                purged: i.link.is_none(),
                 data: &i.summaries,
                 value_bytes: i.value_bytes,
                 count: Some(i.count),
@@ -358,7 +356,6 @@ impl<'a, T: TreeTypes> From<&'a Index<T>> for IndexWC<'a, T::Seq> {
             },
             Index::Leaf(i) => Self {
                 sealed: i.sealed,
-                purged: i.link.is_none(),
                 data: &i.keys,
                 value_bytes: i.value_bytes,
                 count: None,
@@ -373,8 +370,6 @@ impl<'a, T: TreeTypes> From<&'a Index<T>> for IndexWC<'a, T::Seq> {
 struct IndexRC<T> {
     // block is sealed
     sealed: bool,
-    // block is purged
-    purged: bool,
     // extra data
     data: T,
     // number of events, for branches
@@ -392,9 +387,11 @@ impl<
         X: CompactSeq<Item = I> + Clone + Debug + FromIterator<I> + Send + Sync,
     > IndexRC<X>
 {
-    fn into_index<T: TreeTypes<Seq = X, Key = I>>(self, links: &mut VecDeque<T::Link>) -> Index<T> {
-        let link = if !self.purged {
-            links.pop_front()
+    fn into_index<T: TreeTypes<Seq = X, Key = I>>(self, links: Option<&Ipld>) -> Index<T> {
+        let link = if let Some(link) = links {
+            let bytes = DagCborCodec.encode(link).unwrap();
+            let link: T::Link = DagCborCodec.decode(&bytes).unwrap();
+            Some(link)
         } else {
             None
         };
@@ -425,7 +422,6 @@ impl<
 
 use crate::forest::TreeTypes;
 use std::{
-    collections::VecDeque,
     fmt::Debug,
     io::{Cursor, Write},
     iter::FromIterator,
@@ -440,21 +436,24 @@ pub(crate) fn serialize_compressed<T: TreeTypes>(
     items: &[Index<T>],
     level: i32,
 ) -> Result<Vec<u8>> {
-    let mut links: Vec<&T::Link> = Vec::new();
+    let mut links: Vec<(usize, Ipld)> = Vec::new();
     let mut compressed: Vec<u8> = Vec::new();
     compressed.extend_from_slice(&nonce);
     let mut writer = zstd::stream::write::Encoder::new(compressed.by_ref(), level)?;
     writer.write_all(&[CBOR_ARRAY_START])?;
-    for item in items.iter() {
+    for (index, item) in items.iter().enumerate() {
         if let Some(link) = item.link() {
-            links.push(link);
+            // transcode to an IPLD AST
+            let bytes = DagCborCodec.encode(link)?;
+            let ipld = DagCborCodec.decode(&bytes)?;
+            links.push((index, ipld));
         }
         serde_cbor::to_writer(writer.by_ref(), &IndexWC::from(item))?;
     }
     writer.write_all(&[CBOR_BREAK])?;
     writer.finish()?;
     salsa20::XSalsa20::new(key, nonce).apply_keystream(&mut compressed[24..]);
-    Ok(T::serialize_branch(&links, compressed)?)
+    Ok(T::serialize_branch(links, compressed)?)
 }
 
 pub(crate) fn deserialize_compressed<T: TreeTypes>(
@@ -462,7 +461,7 @@ pub(crate) fn deserialize_compressed<T: TreeTypes>(
     ipld: &[u8],
 ) -> Result<Vec<Index<T>>> {
     let (links, mut compressed) = T::deserialize_branch(ipld)?;
-    let mut links = links.into();
+    let links: BTreeMap<usize, Ipld> = links.into_iter().collect();
     if compressed.len() < 24 {
         return Err(anyhow!("nonce missing"));
     }
@@ -473,7 +472,8 @@ pub(crate) fn deserialize_compressed<T: TreeTypes>(
     let data: Vec<IndexRC<T::Seq>> = serde_cbor::from_reader(reader)?;
     let result = data
         .into_iter()
-        .map(|data| data.into_index(&mut links))
+        .enumerate()
+        .map(|(index, data)| data.into_index(links.get(&index)))
         .collect::<Vec<_>>();
     Ok(result)
 }
