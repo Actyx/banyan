@@ -1,4 +1,11 @@
-use std::ops::{Bound, RangeBounds};
+use std::{
+    collections::BTreeMap,
+    ops::{Bound, RangeBounds},
+    usize,
+};
+
+use anyhow::anyhow;
+use libipld::Ipld;
 
 fn lt<T: Ord>(end: Bound<T>, start: Bound<T>) -> bool {
     match (end, start) {
@@ -45,6 +52,23 @@ impl BoolSliceExt for &mut [bool] {
     fn or_with(self, rhs: &[bool]) {
         for i in 0..self.len().min(rhs.len()) {
             self[i] |= rhs[i]
+        }
+    }
+}
+
+#[derive(libipld::DagCbor)]
+pub(crate) struct IpldNode(BTreeMap<usize, Ipld>, Ipld);
+
+impl IpldNode {
+    pub fn new(links: BTreeMap<usize, Ipld>, data: impl Into<Vec<u8>>) -> Self {
+        Self(links, Ipld::Bytes(data.into()))
+    }
+
+    pub fn into_data(self) -> anyhow::Result<Vec<u8>> {
+        if let Ipld::Bytes(data) = self.1 {
+            Ok(data)
+        } else {
+            Err(anyhow::anyhow!("expected ipld bytes"))
         }
     }
 }

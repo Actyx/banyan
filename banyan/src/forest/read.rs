@@ -2,11 +2,12 @@ use super::{BranchCache, Config, CryptoConfig, FilteredChunk, Forest, TreeTypes}
 use crate::{
     index::deserialize_compressed, index::zip_with_offset, index::Branch, index::BranchIndex,
     index::CompactSeq, index::Index, index::IndexRef, index::Leaf, index::LeafIndex,
-    index::NodeInfo, query::Query, store::ReadOnlyStore,
+    index::NodeInfo, query::Query, store::ReadOnlyStore, util::IpldNode,
 };
 use anyhow::{anyhow, Result};
 use core::fmt::Debug;
 use futures::{prelude::*, stream::BoxStream};
+use libipld::{cbor::DagCborCodec, codec::Codec};
 use salsa20::{stream_cipher::NewStreamCipher, stream_cipher::SyncStreamCipher, XSalsa20};
 use serde::{de::DeserializeOwned, Serialize};
 
@@ -59,11 +60,7 @@ where
     pub(crate) fn load_leaf(&self, index: &LeafIndex<T>) -> Result<Option<Leaf>> {
         Ok(if let Some(link) = &index.link {
             let data = &self.store().get(link)?;
-            let data = if let serde_cbor::Value::Bytes(data) = serde_cbor::from_slice(&data)? {
-                data
-            } else {
-                anyhow::bail!("expected cbor byte array");
-            };
+            let data: Vec<u8> = DagCborCodec.decode::<IpldNode>(&data)?.into_data()?;
             if data.len() < 24 {
                 anyhow::bail!("leaf data without nonce");
             }

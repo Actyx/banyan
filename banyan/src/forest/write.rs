@@ -2,6 +2,7 @@ use crate::{
     forest::{BranchResult, Config, CreateMode, Forest, Transaction, TreeTypes},
     index::zip_with_offset_ref,
     store::{BlockWriter, ReadOnlyStore},
+    util::IpldNode,
     zstd_array::ZstdArray,
 };
 use crate::{
@@ -17,10 +18,15 @@ use crate::{
 };
 use anyhow::{ensure, Result};
 use core::fmt::Debug;
+use libipld::{
+    cbor::{DagCbor, DagCborCodec},
+    codec::Codec,
+    Ipld,
+};
 use rand::RngCore;
 use salsa20::{stream_cipher::NewStreamCipher, stream_cipher::SyncStreamCipher, XSalsa20};
 use serde::{de::DeserializeOwned, Serialize};
-use std::iter;
+use std::{collections::BTreeMap, iter};
 use tracing::info;
 
 /// basic random access append only tree
@@ -78,8 +84,7 @@ where
         tmp.extend(nonce.as_slice());
         tmp.extend(leaf.as_ref().compressed());
         XSalsa20::new(&self.value_key(), &nonce).apply_keystream(&mut tmp[24..]);
-        // todo: avoid the extra allocation by reserving space for the length prefix in tmp.
-        let tmp = serde_cbor::to_vec(&serde_cbor::Value::Bytes(tmp))?;
+        let tmp = DagCborCodec.encode(&IpldNode::new(BTreeMap::new(), tmp))?;
         // store leaf
         let link = self.writer.put(tmp)?;
         let index: LeafIndex<T> = LeafIndex {
