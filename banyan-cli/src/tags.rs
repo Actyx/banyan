@@ -1,10 +1,15 @@
 use crate::{tag_index::map_to_index_set, tag_index::TagIndex, tag_index::TagSet};
 use banyan::index::*;
 use banyan::{forest::*, query::Query};
-use libipld::{cbor::DagCborCodec, codec::Codec, Cid};
+use libipld::{
+    cbor::{decode::TryReadCbor, DagCborCodec},
+    codec::{Codec, Decode, Encode},
+    Cid, Ipld,
+};
 use multihash::MultihashDigest;
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::BTreeMap,
     convert::{TryFrom, TryInto},
     fmt,
     iter::FromIterator,
@@ -17,6 +22,23 @@ pub struct TT {}
 
 #[derive(Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Sha256Digest([u8; 32]);
+
+impl Decode<DagCborCodec> for Sha256Digest {
+    fn decode<R: std::io::Read>(c: DagCborCodec, r: &mut R) -> anyhow::Result<Self> {
+        Self::try_from(libipld::Cid::decode(c, r)?)
+    }
+}
+impl Encode<DagCborCodec> for Sha256Digest {
+    fn encode<W: std::io::Write>(&self, c: DagCborCodec, w: &mut W) -> anyhow::Result<()> {
+        libipld::Cid::encode(&Cid::from(*self), c, w)
+    }
+}
+
+impl TryReadCbor for Sha256Digest {
+    fn try_read_cbor<R: std::io::Read>(r: &mut R, _major: u8) -> anyhow::Result<Option<Self>> {
+        Ok(None)
+    }
+}
 
 impl Sha256Digest {
     pub fn new(data: &[u8]) -> Self {
@@ -69,26 +91,27 @@ impl TreeTypes for TT {
     type Seq = KeySeq;
     type Link = Sha256Digest;
 
-    fn serialize_branch(links: &[&Self::Link], data: Vec<u8>) -> anyhow::Result<Vec<u8>> {
-        let node = IpldNode(
-            links.iter().map(|x| Cid::from(**x)).collect::<Vec<_>>(),
-            data.into(),
-        );
+    fn serialize_branch(
+        links: Vec<(usize, libipld::Ipld)>,
+        data: Vec<u8>,
+    ) -> anyhow::Result<Vec<u8>> {
+        let node = IpldNode(links.into_iter().collect(), Ipld::Bytes(data));
         let bytes = DagCborCodec.encode(&node)?;
         Ok(bytes)
     }
-    fn deserialize_branch(bytes: &[u8]) -> anyhow::Result<(Vec<Self::Link>, Vec<u8>)> {
-        let IpldNode(links, data) = DagCborCodec.decode(bytes)?;
-        let links = links
-            .into_iter()
-            .map(Self::Link::try_from)
-            .collect::<anyhow::Result<Vec<_>>>()?;
-        Ok((links, data.into()))
+
+    fn deserialize_branch(data: &[u8]) -> anyhow::Result<(Vec<(usize, libipld::Ipld)>, Vec<u8>)> {
+        let IpldNode(links, data) = DagCborCodec.decode(data)?;
+        if let Ipld::Bytes(data) = data {
+            Ok((links.into_iter().collect(), data))
+        } else {
+            Err(anyhow::anyhow!("unexpected CBOR!"))
+        }
     }
 }
 
 #[derive(libipld::DagCbor)]
-struct IpldNode(Vec<Cid>, Box<[u8]>);
+struct IpldNode(BTreeMap<usize, Ipld>, Ipld);
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Key {

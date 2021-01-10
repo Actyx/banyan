@@ -4,6 +4,7 @@ use crate::store::{BlockWriter, ReadOnlyStore};
 use anyhow::Result;
 use core::{fmt::Debug, hash::Hash, iter::FromIterator, marker::PhantomData, ops::Range};
 use futures::future::BoxFuture;
+use libipld::{cbor::DagCbor, Ipld};
 use lru::LruCache;
 use rand::RngCore;
 use serde::{de::DeserializeOwned, Serialize};
@@ -52,10 +53,10 @@ pub trait TreeTypes: Debug + Send + Sync + Clone + 'static {
         + Send
         + Sync;
     /// link type to use over block boundaries
-    type Link: Display + Debug + Hash + Eq + Clone + Copy + Send + Sync;
+    type Link: Display + Debug + Hash + Eq + Clone + Copy + Send + Sync + DagCbor;
 
-    fn serialize_branch(links: &[&Self::Link], data: Vec<u8>) -> anyhow::Result<Vec<u8>>;
-    fn deserialize_branch(data: &[u8]) -> anyhow::Result<(Vec<Self::Link>, Vec<u8>)>;
+    fn serialize_branch(links: Vec<(usize, Ipld)>, data: Vec<u8>) -> anyhow::Result<Vec<u8>>;
+    fn deserialize_branch(data: &[u8]) -> anyhow::Result<(Vec<(usize, Ipld)>, Vec<u8>)>;
 }
 
 /// Everything that is needed to read trees

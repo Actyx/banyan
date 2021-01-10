@@ -182,11 +182,7 @@ impl<
     }
 
     /// Collects all elements from the given offset. Might produce an OOM for large streams.
-    pub fn collect_from(
-        &self,
-        tree: &Tree<T>,
-        offset: u64,
-    ) -> Result<Vec<Option<(T::Key, V)>>> {
+    pub fn collect_from(&self, tree: &Tree<T>, offset: u64) -> Result<Vec<Option<(T::Key, V)>>> {
         let mut res = Vec::new();
         if let Some(index) = &tree.root {
             self.collect0(index, offset, &mut res)?;
