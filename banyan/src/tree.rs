@@ -319,16 +319,16 @@ impl<T: TreeTypes> Tree<T> {
         Self { root: root.map(Arc::new) }
     }
 
-    pub fn as_index_ref(&self) -> Option<&Index<T>> {
-        self.root.as_ref().map(|arc| arc.as_ref())
-    }
-
     pub fn link(&self) -> Option<T::Link> {
         self.root.as_ref().and_then(|r| *r.link())
     }
 
     pub fn into_inner(self) -> Option<Arc<Index<T>>> {
         self.root
+    }
+
+    pub fn as_index_ref(&self) -> Option<&Index<T>> {
+        self.root.as_ref().map(|arc| arc.as_ref())
     }
 
     pub fn level(&self) -> i32 {
