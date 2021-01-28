@@ -2,11 +2,12 @@
 use crate::{
     index::{Index, IndexRef},
     store::ReadOnlyStore,
+    tree::Tree,
 };
 
 use super::{FilteredChunk, Forest, TreeTypes};
 use crate::query::*;
-use futures::{prelude::*, stream::BoxStream};
+use futures::prelude::*;
 use serde::{de::DeserializeOwned, Serialize};
 use std::sync::atomic::Ordering;
 use std::{fmt::Debug, ops::RangeInclusive, sync::atomic::AtomicU64, sync::Arc};
@@ -19,13 +20,17 @@ impl<
 {
     /// Given a sequence of roots, will stream matching events in ascending order indefinitely.
     ///
-    /// This is implemented by calling [stream_roots_chunked] and just flattening the chunks.
-    pub fn stream_roots<Q: Query<T> + Clone + 'static>(
+    /// This is implemented by calling [stream_trees_chunked] and just flattening the chunks.
+    pub fn stream_trees<Q, S>(
         &self,
         query: Q,
-        roots: BoxStream<'static, T::Link>,
-    ) -> impl Stream<Item = anyhow::Result<(u64, T::Key, V)>> + Send {
-        self.stream_roots_chunked(query, roots, 0..=u64::max_value(), &|_| ())
+        trees: S,
+    ) -> impl Stream<Item = anyhow::Result<(u64, T::Key, V)>> + Send
+    where
+        Q: Query<T> + Clone + 'static,
+        S: Stream<Item = Tree<T>> + Send + 'static,
+    {
+        self.stream_trees_chunked(query, trees, 0..=u64::max_value(), &|_| ())
             .map_ok(|chunk| stream::iter(chunk.data.into_iter().map(Ok)))
             .try_flatten()
     }
@@ -39,10 +44,10 @@ impl<
     /// - range: the range which to stream. It is up to the caller to ensure that we have events for this range.
     /// - mk_extra: a fn that allows to compute extra info from indices.
     ///     this can be useful to get progress info even if the query does not match any events
-    pub fn stream_roots_chunked<S, Q, E, F>(
+    pub fn stream_trees_chunked<S, Q, E, F>(
         &self,
         query: Q,
-        roots: S,
+        trees: S,
         range: RangeInclusive<u64>,
         mk_extra: &'static F,
     ) -> impl Stream<Item = anyhow::Result<FilteredChunk<T, V, E>>> + Send + 'static
@@ -50,20 +55,19 @@ impl<
         Q: Query<T> + Clone + Send + 'static,
         E: Send + 'static,
         F: Send + Sync + 'static + Fn(IndexRef<T>) -> E,
-        S: Stream<Item = T::Link> + Send + 'static,
+        S: Stream<Item = Tree<T>> + Send + 'static,
     {
         let offset = Arc::new(AtomicU64::new(*range.start()));
         let forest = self.clone();
-        let forest2 = self.clone();
-        roots
-            .filter_map(move |link| future::ready(forest.load_branch_from_link(link).ok()))
+        trees
+            .filter_map(move |link| future::ready(link.into_inner()))
             .flat_map(move |index: Index<T>| {
                 // create an intersection of a range query and the main query
                 // and wrap it in an arc so it is cheap to clone
                 let range = offset.load(Ordering::SeqCst)..=*range.end();
                 let query = AndQuery(OffsetRangeQuery::from(range), query.clone()).boxed();
                 let offset = offset.clone();
-                forest2
+                forest
                     .stream_filtered_chunked0(0, query, index, mk_extra)
                     .take_while(move |result| {
                         if let Ok(chunk) = result {
@@ -80,14 +84,14 @@ impl<
     ///
     /// Values within chunks are in ascending offset order, so if you flatten them you have to reverse them first.
     /// - query: the query
-    /// - roots: the stream of roots. It is assumed that trees later in this stream will be bigger
+    /// - trees: the stream of roots. It is assumed that trees later in this stream will be bigger
     /// - range: the range which to stream. It is up to the caller to ensure that we have events for this range.
     /// - mk_extra: a fn that allows to compute extra info from indices.
     ///     this can be useful to get progress info even if the query does not match any events
-    pub fn stream_roots_chunked_reverse<S, Q, E, F>(
+    pub fn stream_trees_chunked_reverse<S, Q, E, F>(
         &self,
         query: Q,
-        roots: S,
+        trees: S,
         range: RangeInclusive<u64>,
         mk_extra: &'static F,
     ) -> impl Stream<Item = anyhow::Result<FilteredChunk<T, V, E>>> + Send + 'static
@@ -95,13 +99,12 @@ impl<
         Q: Query<T> + Clone + Send + 'static,
         E: Send + 'static,
         F: Send + Sync + 'static + Fn(IndexRef<T>) -> E,
-        S: Stream<Item = T::Link> + Send + 'static,
+        S: Stream<Item = Tree<T>> + Send + 'static,
     {
         let end_offset_ref = Arc::new(AtomicU64::new(*range.end()));
         let forest = self.clone();
-        let forest2 = self.clone();
-        roots
-            .filter_map(move |link| future::ready(forest.load_branch_from_link(link).ok()))
+        trees
+            .filter_map(move |tree| future::ready(tree.into_inner()))
             .flat_map(move |index| {
                 let end_offset = end_offset_ref.load(Ordering::SeqCst);
                 // create an intersection of a range query and the main query
@@ -112,7 +115,7 @@ impl<
                 )
                 .boxed();
                 let end_offset_ref = end_offset_ref.clone();
-                forest2
+                forest
                     .stream_filtered_chunked_reverse0(0, query, index, mk_extra)
                     .take_while(move |result| {
                         if let Ok(chunk) = result {

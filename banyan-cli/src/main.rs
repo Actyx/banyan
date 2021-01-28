@@ -483,11 +483,12 @@ async fn main() -> Result<()> {
             .map_err(anyhow::Error::new)
             .and_then(|data| future::ready(String::from_utf8(data).map_err(anyhow::Error::new)))
             .and_then(|data| future::ready(Sha256Digest::from_str(&data)));
-        let cids = stream.filter_map(|x| future::ready(x.ok()));
-        let mut stream = forest
-            .read()
-            .stream_roots(AllQuery, cids.boxed())
-            .boxed_local();
+        let forest2 = forest.clone();
+        let trees = stream.filter_map(move |x| {
+            let forest = forest2.clone();
+            future::ready(x.and_then(move |link| forest.load_tree(link)).ok())
+        });
+        let mut stream = forest.read().stream_trees(AllQuery, trees).boxed_local();
         while let Some(ev) = stream.next().await {
             println!("{:?}", ev);
         }

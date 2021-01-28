@@ -342,12 +342,12 @@ async fn stream_test_simple() -> anyhow::Result<()> {
         let mut tree = Tree::<TT>::empty();
         tree = forest.extend(&tree, (0..n).map(|t| (Key(t), n)))?;
         forest.assert_invariants(&tree)?;
-        trees.push(tree.root().cloned().unwrap());
+        trees.push(tree);
     }
     println!("{:?}", trees);
     let res = forest
         .read()
-        .stream_roots(AllQuery, stream::iter(trees).boxed());
+        .stream_trees(AllQuery, stream::iter(trees).boxed());
     let res = res.collect::<Vec<_>>().await;
     println!("{:?}", res);
     Ok(())
