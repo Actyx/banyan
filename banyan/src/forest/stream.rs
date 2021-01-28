@@ -61,7 +61,7 @@ impl<
         let forest = self.clone();
         trees
             .filter_map(move |link| future::ready(link.into_inner()))
-            .flat_map(move |index: Index<T>| {
+            .flat_map(move |index| {
                 // create an intersection of a range query and the main query
                 // and wrap it in an arc so it is cheap to clone
                 let range = offset.load(Ordering::SeqCst)..=*range.end();

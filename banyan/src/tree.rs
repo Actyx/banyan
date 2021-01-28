@@ -11,7 +11,7 @@ use crate::{
 use anyhow::Result;
 use futures::prelude::*;
 use serde::{de::DeserializeOwned, Serialize};
-use std::fmt::Debug;
+use std::{fmt::Debug, sync::Arc};
 use std::{fmt, iter::FromIterator};
 use tracing::*;
 
@@ -19,7 +19,7 @@ use tracing::*;
 ///
 /// Most of the logic except for handling the empty case is implemented in the forest
 pub struct Tree<T: TreeTypes> {
-    root: Option<Index<T>>,
+    root: Option<Arc<Index<T>>>,
 }
 
 impl<T: TreeTypes> Default for Tree<T> {
@@ -68,7 +68,7 @@ impl<
 {
     pub fn load_tree(&self, link: T::Link) -> Result<Tree<T>> {
         Ok(Tree {
-            root: Some(self.load_branch_from_link(link)?),
+            root: Some(Arc::new(self.load_branch_from_link(link)?)),
         })
     }
 
@@ -246,7 +246,7 @@ impl<
             return Ok(tree.clone());
         }
         Ok(Tree::new(Some(self.extend_above(
-            tree.root.as_ref(),
+            tree.as_index_ref(),
             u32::max_value(),
             from.by_ref(),
         )?)))
@@ -266,7 +266,7 @@ impl<
         I: IntoIterator<Item = (T::Key, V)>,
         I::IntoIter: Send,
     {
-        Ok(Tree::new(self.extend_unpacked0(tree.root.as_ref(), from)?))
+        Ok(Tree::new(self.extend_unpacked0(tree.as_index_ref(), from)?))
     }
 
     /// Retain just data matching the query
@@ -316,14 +316,18 @@ impl<
 
 impl<T: TreeTypes> Tree<T> {
     pub(crate) fn new(root: Option<Index<T>>) -> Self {
-        Self { root }
+        Self { root: root.map(Arc::new) }
+    }
+
+    pub fn as_index_ref(&self) -> Option<&Index<T>> {
+        self.root.as_ref().map(|arc| arc.as_ref())
     }
 
     pub fn link(&self) -> Option<T::Link> {
         self.root.as_ref().and_then(|r| *r.link())
     }
 
-    pub fn into_inner(self) -> Option<Index<T>> {
+    pub fn into_inner(self) -> Option<Arc<Index<T>>> {
         self.root
     }
 

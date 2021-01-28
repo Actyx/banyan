@@ -6,6 +6,7 @@ use crate::{
 };
 use anyhow::{anyhow, Result};
 use core::fmt::Debug;
+use std::sync::Arc;
 use futures::{prelude::*, stream::BoxStream};
 use libipld::{cbor::DagCborCodec, codec::Codec};
 use salsa20::{stream_cipher::NewStreamCipher, stream_cipher::SyncStreamCipher, XSalsa20};
@@ -215,7 +216,7 @@ where
         &self,
         offset: u64,
         query: Q,
-        index: Index<T>,
+        index: Arc<Index<T>>,
     ) -> BoxStream<'static, Result<(u64, T::Key, V)>> {
         self.stream_filtered_chunked0(offset, query, index, &|_| {})
             .map_ok(|chunk| stream::iter(chunk.data).map(Ok))
@@ -231,7 +232,7 @@ where
         &self,
         offset: u64,
         query: Q,
-        index: Index<T>,
+        index: Arc<Index<T>>,
         mk_extra: &'static F,
     ) -> BoxStream<'static, Result<FilteredChunk<T, V, E>>> {
         let this: Forest<T, V, R> = self.clone();
@@ -266,7 +267,7 @@ where
                                     .stream_filtered_chunked0(
                                         offset,
                                         query.clone(),
-                                        child,
+                                        Arc::new(child),
                                         mk_extra,
                                     )
                                     .right_stream()
@@ -299,7 +300,7 @@ where
         &self,
         offset: u64,
         query: Q,
-        index: Index<T>,
+        index: Arc<Index<T>>,
         mk_extra: &'static F,
     ) -> BoxStream<'static, Result<FilteredChunk<T, V, E>>> {
         let this = self.clone();
@@ -337,7 +338,7 @@ where
                                         .stream_filtered_chunked_reverse0(
                                             offset,
                                             query.clone(),
-                                            child,
+                                            Arc::new(child),
                                             mk_extra,
                                         )
                                         .right_stream()
