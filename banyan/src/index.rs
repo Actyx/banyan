@@ -267,11 +267,18 @@ impl<T: TreeTypes> Branch<T> {
             children: children.into(),
         }
     }
-    pub fn last_child(&mut self) -> &Index<T> {
+    pub fn last_child(&self) -> &Index<T> {
         self.children
             .last()
             .expect("branch can never have 0 children")
     }
+
+    pub fn first_child(&self) -> &Index<T> {
+        self.children
+            .first()
+            .expect("branch can never have 0 children")
+    }
+
     pub fn count(&self) -> u64 {
         self.children.len() as u64
     }

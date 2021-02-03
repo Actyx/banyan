@@ -11,8 +11,8 @@ use crate::{
 use anyhow::Result;
 use futures::prelude::*;
 use serde::{de::DeserializeOwned, Serialize};
-use std::{fmt::Debug, sync::Arc};
 use std::{fmt, iter::FromIterator};
+use std::{fmt::Debug, sync::Arc};
 use tracing::*;
 
 /// A tree. This is mostly an user friendly handle.
@@ -86,6 +86,33 @@ impl<
             Some(index) => self.roots_impl(index),
             None => Ok(Vec::new()),
         }
+    }
+
+    /// leftmost branches of the tree as separate trees
+    pub fn left_roots(&self, tree: &Tree<T>) -> Result<Vec<Tree<T>>> {
+        Ok(if let Some(index) = tree.as_index_ref() {
+            self.left_roots0(index)?
+                .into_iter()
+                .map(|x| Tree::new(Some(x)))
+                .collect()
+        } else {
+            Vec::new()
+        })
+    }
+
+    /// leftmost branches of the tree as separate trees
+    fn left_roots0(&self, index: &Index<T>) -> Result<Vec<Index<T>>> {
+        let mut result = if let Index::Branch(branch) = index {
+            if let Some(branch) = self.load_branch_cached(branch)? {
+                self.left_roots0(branch.first_child())?
+            } else {
+                Vec::new()
+            }
+        } else {
+            Vec::new()
+        };
+        result.push(index.clone());
+        Ok(result)
     }
 
     pub fn check_invariants(&self, tree: &Tree<T>) -> Result<Vec<String>> {
@@ -316,7 +343,9 @@ impl<
 
 impl<T: TreeTypes> Tree<T> {
     pub(crate) fn new(root: Option<Index<T>>) -> Self {
-        Self { root: root.map(Arc::new) }
+        Self {
+            root: root.map(Arc::new),
+        }
     }
 
     pub fn link(&self) -> Option<T::Link> {

@@ -6,11 +6,11 @@ use crate::{
 };
 use anyhow::{anyhow, Result};
 use core::fmt::Debug;
-use std::sync::Arc;
 use futures::{prelude::*, stream::BoxStream};
 use libipld::{cbor::DagCborCodec, codec::Codec};
 use salsa20::{stream_cipher::NewStreamCipher, stream_cipher::SyncStreamCipher, XSalsa20};
 use serde::{de::DeserializeOwned, Serialize};
+use std::sync::Arc;
 
 /// basic random access append only tree
 impl<T, V, R> Forest<T, V, R>
@@ -100,7 +100,7 @@ where
     }
 
     /// load a branch given a branch index, from the cache
-    fn load_branch_cached(&self, index: &BranchIndex<T>) -> Result<Option<Branch<T>>> {
+    pub(crate) fn load_branch_cached(&self, index: &BranchIndex<T>) -> Result<Option<Branch<T>>> {
         if let Some(link) = &index.link {
             let res = self.branch_cache().get(link);
             match res {
