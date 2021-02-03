@@ -460,14 +460,14 @@ pub(crate) fn serialize_compressed<T: TreeTypes>(
     writer.write_all(&[CBOR_BREAK])?;
     writer.finish()?;
     salsa20::XSalsa20::new(key, nonce).apply_keystream(&mut compressed[24..]);
-    Ok(T::serialize_branch(links, compressed)?)
+    Ok(serialize_branch(links, compressed)?)
 }
 
 pub(crate) fn deserialize_compressed<T: TreeTypes>(
     key: &salsa20::Key,
     ipld: &[u8],
 ) -> Result<Vec<Index<T>>> {
-    let (links, mut compressed) = T::deserialize_branch(ipld)?;
+    let (links, mut compressed) = deserialize_branch(ipld)?;
     let links: BTreeMap<usize, Ipld> = links.into_iter().collect();
     if compressed.len() < 24 {
         return Err(anyhow!("nonce missing"));
@@ -511,4 +511,20 @@ pub(crate) fn zip_with_offset_ref<
         *offset += x.count();
         Some((x, o0))
     })
+}
+
+#[derive(libipld::DagCbor)]
+struct IpldNode(BTreeMap<usize, Ipld>, Box<[u8]>);
+
+type LinksAndData = (Vec<(usize, libipld::Ipld)>, Vec<u8>);
+
+fn serialize_branch(links: Vec<(usize, libipld::Ipld)>, data: Vec<u8>) -> anyhow::Result<Vec<u8>> {
+    let node = IpldNode(links.into_iter().collect(), data.into());
+    let bytes = DagCborCodec.encode(&node)?;
+    Ok(bytes)
+}
+
+fn deserialize_branch(data: &[u8]) -> anyhow::Result<LinksAndData> {
+    let IpldNode(links, data) = DagCborCodec.decode(data)?;
+    Ok((links.into_iter().collect(), data.into()))
 }

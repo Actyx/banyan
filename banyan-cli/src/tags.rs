@@ -90,28 +90,7 @@ impl TreeTypes for TT {
     type Key = Key;
     type Seq = KeySeq;
     type Link = Sha256Digest;
-
-    fn serialize_branch(
-        links: Vec<(usize, libipld::Ipld)>,
-        data: Vec<u8>,
-    ) -> anyhow::Result<Vec<u8>> {
-        let node = IpldNode(links.into_iter().collect(), Ipld::Bytes(data));
-        let bytes = DagCborCodec.encode(&node)?;
-        Ok(bytes)
-    }
-
-    fn deserialize_branch(data: &[u8]) -> anyhow::Result<(Vec<(usize, libipld::Ipld)>, Vec<u8>)> {
-        let IpldNode(links, data) = DagCborCodec.decode(data)?;
-        if let Ipld::Bytes(data) = data {
-            Ok((links.into_iter().collect(), data))
-        } else {
-            Err(anyhow::anyhow!("unexpected CBOR!"))
-        }
-    }
 }
-
-#[derive(libipld::DagCbor)]
-struct IpldNode(BTreeMap<usize, Ipld>, Ipld);
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Key {

@@ -54,9 +54,6 @@ pub trait TreeTypes: Debug + Send + Sync + Clone + 'static {
         + Sync;
     /// link type to use over block boundaries
     type Link: Display + Debug + Hash + Eq + Clone + Copy + Send + Sync + DagCbor;
-
-    fn serialize_branch(links: Vec<(usize, Ipld)>, data: Vec<u8>) -> anyhow::Result<Vec<u8>>;
-    fn deserialize_branch(data: &[u8]) -> anyhow::Result<(Vec<(usize, Ipld)>, Vec<u8>)>;
 }
 
 /// Everything that is needed to read trees
