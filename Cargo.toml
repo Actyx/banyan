@@ -9,5 +9,6 @@ members = [
 [profile.release]
 debug = true
 
-# [patch.crates-io]
-# ipfs-sqlite-block-store = { path = "../ipfs-sqlite-block-store" }
+[patch.crates-io]
+#ipfs-sqlite-block-store = { path = "../ipfs-sqlite-block-store" }
+ipfs-sqlite-block-store = { git = "https://github.com/Actyx/ipfs-sqlite-block-store", branch = "ow/bundle-sqlite" }
