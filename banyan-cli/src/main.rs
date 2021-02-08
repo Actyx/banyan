@@ -1,11 +1,11 @@
 use anyhow::anyhow;
 use clap::{App, Arg, SubCommand};
+use futures::future::poll_fn;
 use futures::prelude::*;
 use sqlite::SqliteStore;
 use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Duration};
 use tag_index::{Tag, TagSet};
 use tracing::Level;
-use tracing_subscriber;
 
 mod ipfs;
 mod sqlite;
@@ -176,10 +176,7 @@ impl Tagger {
     }
 
     pub fn tags(&mut self, names: &[&'static str]) -> TagSet {
-        names
-            .into_iter()
-            .map(|name| self.tag(name))
-            .collect::<TagSet>()
+        names.iter().map(|name| self.tag(name)).collect::<TagSet>()
     }
 }
 
@@ -393,7 +390,7 @@ async fn main() -> Result<()> {
         forest.dump(&tree)?;
         let roots = forest.roots(&tree)?;
         let levels = roots.iter().map(|x| x.level()).collect::<Vec<_>>();
-        let tree2 = forest.tree_from_roots(roots)?;
+        let _tree2 = forest.tree_from_roots(roots)?;
         println!("{:?}", tree);
         println!("{}", tree);
         println!("{:?}", levels);
@@ -462,7 +459,8 @@ async fn main() -> Result<()> {
         let mut ticks = tokio::time::interval(Duration::from_secs(1));
         let mut tree = Tree::<TT>::empty();
         let mut offset = 0;
-        while ticks.next().await.is_some() {
+        loop {
+            poll_fn(|cx| ticks.poll_tick(cx)).await;
             let key = Key::single(offset, offset, tags_from_offset(offset));
             tree = forest.extend_unpacked(&tree, Some((key, "xxx".into())))?;
             if tree.level() > 100 {

@@ -4,7 +4,7 @@ use crate::store::{BlockWriter, ReadOnlyStore};
 use anyhow::Result;
 use core::{fmt::Debug, hash::Hash, iter::FromIterator, marker::PhantomData, ops::Range};
 use futures::future::BoxFuture;
-use libipld::{cbor::DagCbor, Ipld};
+use libipld::cbor::DagCbor;
 use lru::LruCache;
 use rand::RngCore;
 use serde::{de::DeserializeOwned, Serialize};

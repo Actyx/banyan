@@ -1,9 +1,5 @@
 //! helper methods to stream trees
-use crate::{
-    index::{Index, IndexRef},
-    store::ReadOnlyStore,
-    tree::Tree,
-};
+use crate::{index::IndexRef, store::ReadOnlyStore, tree::Tree};
 
 use super::{FilteredChunk, Forest, TreeTypes};
 use crate::query::*;

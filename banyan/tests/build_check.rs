@@ -9,10 +9,9 @@ use banyan::{
     tree::Tree,
 };
 use futures::prelude::*;
-use libipld::{cbor::DagCborCodec, prelude::*, Cid, Ipld};
 use quickcheck::{Arbitrary, Gen, TestResult};
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeMap, convert::TryFrom, iter, iter::FromIterator, ops::Range};
+use std::{iter, iter::FromIterator, ops::Range};
 use store::Sha256Digest;
 mod store;
 
@@ -65,7 +64,7 @@ impl Key {
 }
 
 impl Arbitrary for Key {
-    fn arbitrary<G: Gen>(g: &mut G) -> Self {
+    fn arbitrary(g: &mut Gen) -> Self {
         Self(Arbitrary::arbitrary(g))
     }
 }
@@ -338,17 +337,17 @@ async fn stream_test_simple() -> anyhow::Result<()> {
 
 fn build(items: &mut Vec<u32>) {
     const MAX_BRANCH: usize = 8;
-    if items.len() <= 1 {
-        // nothing we can do
-        return;
-    } else {
+    if items.len() > 1 {
         let pos = items
             .iter()
             .position(|x| *x != items[0])
             .unwrap_or(items.len());
         if pos >= MAX_BRANCH || pos == items.len() || pos == items.len() - 1 {
             // a valid node can be built from the start
-            items.splice(0..MAX_BRANCH.min(items.len()), vec![items[0] + 1]);
+            items.splice(
+                0..MAX_BRANCH.min(items.len()),
+                vec![items[0].wrapping_add(1)],
+            );
         } else {
             // temporarily remove the start and recurse
             let removed = items.splice(0..pos, iter::empty()).collect::<Vec<_>>();
@@ -373,7 +372,7 @@ fn build_test() {
 #[quickcheck_async::tokio]
 async fn build_converges(data: Vec<u32>) -> bool {
     let mut v = data;
-    v.sort();
+    v.sort_unstable();
     v.reverse();
     while v.len() > 1 {
         build(&mut v);

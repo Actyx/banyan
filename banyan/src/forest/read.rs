@@ -8,7 +8,7 @@ use anyhow::{anyhow, Result};
 use core::fmt::Debug;
 use futures::{prelude::*, stream::BoxStream};
 use libipld::{cbor::DagCborCodec, codec::Codec};
-use salsa20::{stream_cipher::NewStreamCipher, stream_cipher::SyncStreamCipher, XSalsa20};
+use salsa20::{cipher::NewStreamCipher, cipher::SyncStreamCipher, XSalsa20};
 use serde::{de::DeserializeOwned, Serialize};
 use std::sync::Arc;
 

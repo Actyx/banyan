@@ -43,7 +43,7 @@ use anyhow::{anyhow, Result};
 use derive_more::From;
 use libipld::{cbor::DagCborCodec, codec::Codec, Ipld};
 use salsa20::{
-    stream_cipher::{NewStreamCipher, SyncStreamCipher},
+    cipher::{NewStreamCipher, SyncStreamCipher},
     XSalsa20,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -162,7 +162,7 @@ impl<T: TreeTypes> Clone for BranchIndex<T> {
 }
 
 impl<T: TreeTypes> BranchIndex<T> {
-    pub fn summaries<'a>(&'a self) -> impl Iterator<Item = T::Key> + 'a {
+    pub fn summaries(&self) -> impl Iterator<Item = T::Key> + '_ {
         self.summaries.to_vec().into_iter()
     }
 }
@@ -293,7 +293,7 @@ pub struct Leaf(ZstdArray);
 impl Leaf {
     /// Create a leaf from data in readonly mode. Conversion to writeable will only happen on demand.
     ///
-    /// Note that this does not provide any validation that the passed data is in fact zstd compressed cbor.    
+    /// Note that this does not provide any validation that the passed data is in fact zstd compressed cbor.
     /// If you pass random data, you will only notice that something is wrong once you try to use it.
     pub fn new(data: Arc<[u8]>) -> Self {
         Self(ZstdArray::new(data))
@@ -443,7 +443,7 @@ pub(crate) fn serialize_compressed<T: TreeTypes>(
     items: &[Index<T>],
     level: i32,
 ) -> Result<Vec<u8>> {
-    let mut links: Vec<(usize, Ipld)> = Vec::new();
+    let mut links: Vec<(u64, Ipld)> = Vec::new();
     let mut compressed: Vec<u8> = Vec::new();
     compressed.extend_from_slice(&nonce);
     let mut writer = zstd::stream::write::Encoder::new(compressed.by_ref(), level)?;
@@ -453,7 +453,7 @@ pub(crate) fn serialize_compressed<T: TreeTypes>(
             // transcode to an IPLD AST
             let bytes = DagCborCodec.encode(link)?;
             let ipld = DagCborCodec.decode(&bytes)?;
-            links.push((index, ipld));
+            links.push((index as _, ipld));
         }
         serde_cbor::to_writer(writer.by_ref(), &IndexWC::from(item))?;
     }
@@ -468,7 +468,7 @@ pub(crate) fn deserialize_compressed<T: TreeTypes>(
     ipld: &[u8],
 ) -> Result<Vec<Index<T>>> {
     let (links, mut compressed) = deserialize_branch(ipld)?;
-    let links: BTreeMap<usize, Ipld> = links.into_iter().collect();
+    let links: BTreeMap<u64, Ipld> = links.into_iter().collect();
     if compressed.len() < 24 {
         return Err(anyhow!("nonce missing"));
     }
@@ -480,7 +480,7 @@ pub(crate) fn deserialize_compressed<T: TreeTypes>(
     let result = data
         .into_iter()
         .enumerate()
-        .map(|(index, data)| data.into_index(links.get(&index)))
+        .map(|(index, data)| data.into_index(links.get(&(index as _))))
         .collect::<Vec<_>>();
     Ok(result)
 }
@@ -514,11 +514,11 @@ pub(crate) fn zip_with_offset_ref<
 }
 
 #[derive(libipld::DagCbor)]
-struct IpldNode(BTreeMap<usize, Ipld>, Box<[u8]>);
+struct IpldNode(BTreeMap<u64, Ipld>, Box<[u8]>);
 
-type LinksAndData = (Vec<(usize, libipld::Ipld)>, Vec<u8>);
+type LinksAndData = (Vec<(u64, libipld::Ipld)>, Vec<u8>);
 
-fn serialize_branch(links: Vec<(usize, libipld::Ipld)>, data: Vec<u8>) -> anyhow::Result<Vec<u8>> {
+fn serialize_branch(links: Vec<(u64, libipld::Ipld)>, data: Vec<u8>) -> anyhow::Result<Vec<u8>> {
     let node = IpldNode(links.into_iter().collect(), data.into());
     let bytes = DagCborCodec.encode(&node)?;
     Ok(bytes)
@@ -527,4 +527,39 @@ fn serialize_branch(links: Vec<(usize, libipld::Ipld)>, data: Vec<u8>) -> anyhow
 fn deserialize_branch(data: &[u8]) -> anyhow::Result<LinksAndData> {
     let IpldNode(links, data) = DagCborCodec.decode(data)?;
     Ok((links.into_iter().collect(), data.into()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_disk_format() {
+        let bytes = serialize_branch(
+            vec![(42, Ipld::Integer(255)), (43, Ipld::Integer(-367))],
+            b"abcd".to_vec(),
+        )
+        .unwrap();
+        assert_eq!(
+            bytes,
+            vec![
+                0x82, // list 0x80 of length 2
+                0xa2, // map 0xa0 of length 2
+                0x18, // u8
+                42,   // value
+                0x18, // u8
+                255,  // value
+                0x18, // u8
+                43,   // value
+                0x39, // i16
+                1,    // -1 - (256 + 110) = -367
+                110,  // second byte of i16
+                0x44, // bytes 0x40 of length 4
+                97,   // a
+                98,   // b
+                99,   // c
+                100,  // d
+            ]
+        );
+    }
 }

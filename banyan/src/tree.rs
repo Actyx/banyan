@@ -4,15 +4,11 @@ use crate::{
     forest::{FilteredChunk, Forest, Transaction, TreeTypes},
     store::BlockWriter,
 };
-use crate::{
-    query::{AllQuery, OffsetRangeQuery, Query},
-    store::ReadOnlyStore,
-};
+use crate::{query::Query, store::ReadOnlyStore};
 use anyhow::Result;
 use futures::prelude::*;
 use serde::{de::DeserializeOwned, Serialize};
-use std::{fmt, iter::FromIterator};
-use std::{fmt::Debug, sync::Arc};
+use std::{fmt, fmt::Debug, sync::Arc};
 use tracing::*;
 
 /// A tree. This is mostly an user friendly handle.
@@ -204,11 +200,13 @@ impl<
     }
 
     /// Collects all elements from a stream. Might produce an OOM for large streams.
+    #[allow(clippy::type_complexity)]
     pub fn collect(&self, tree: &Tree<T>) -> Result<Vec<Option<(T::Key, V)>>> {
         self.collect_from(tree, 0)
     }
 
     /// Collects all elements from the given offset. Might produce an OOM for large streams.
+    #[allow(clippy::type_complexity)]
     pub fn collect_from(&self, tree: &Tree<T>, offset: u64) -> Result<Vec<Option<(T::Key, V)>>> {
         let mut res = Vec::new();
         if let Some(index) = &tree.root {
@@ -249,7 +247,7 @@ impl<
             .collect_from(tree, filled.count())?
             .into_iter()
             .collect::<Option<Vec<_>>>()
-            .ok_or(anyhow::anyhow!("found purged data"))?;
+            .ok_or_else(|| anyhow::anyhow!("found purged data"))?;
         let extended = self.extend(&filled, remainder)?;
         Ok(extended)
     }
@@ -260,7 +258,7 @@ impl<
     }
 
     /// extend the node with the given iterator of key/value pairs
-    ///    
+    ///
     /// ![extend illustration](https://ipfs.io/ipfs/QmaEDTjHSdCKyGQ3cFMCf73kE67NvffLA5agquLW5qSEVn/extend.jpg)
     pub fn extend<I>(&self, tree: &Tree<T>, from: I) -> Result<Tree<T>>
     where
@@ -286,7 +284,7 @@ impl<
     /// that resembles a linked list.
     ///
     /// To pack a tree, use the pack method.
-    ///    
+    ///
     /// ![extend_unpacked illustration](https://ipfs.io/ipfs/QmaEDTjHSdCKyGQ3cFMCf73kE67NvffLA5agquLW5qSEVn/extend_unpacked.jpg)
     pub fn extend_unpacked<I>(&self, tree: &Tree<T>, from: I) -> Result<Tree<T>>
     where

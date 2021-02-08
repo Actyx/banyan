@@ -18,13 +18,9 @@ use crate::{
 };
 use anyhow::{ensure, Result};
 use core::fmt::Debug;
-use libipld::{
-    cbor::{DagCbor, DagCborCodec},
-    codec::Codec,
-    Ipld,
-};
+use libipld::{cbor::DagCborCodec, codec::Codec};
 use rand::RngCore;
-use salsa20::{stream_cipher::NewStreamCipher, stream_cipher::SyncStreamCipher, XSalsa20};
+use salsa20::{cipher::NewStreamCipher, cipher::SyncStreamCipher, XSalsa20};
 use serde::{de::DeserializeOwned, Serialize};
 use std::{collections::BTreeMap, iter};
 use tracing::info;
@@ -268,7 +264,7 @@ where
 
     /// extends an existing node with some values
     ///
-    /// The result will have the same level as the input. `from` will contain all elements that did not fit.        
+    /// The result will have the same level as the input. `from` will contain all elements that did not fit.
     fn extend0(
         &self,
         index: &Index<T>,
