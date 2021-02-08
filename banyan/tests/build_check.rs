@@ -344,7 +344,10 @@ fn build(items: &mut Vec<u32>) {
             .unwrap_or(items.len());
         if pos >= MAX_BRANCH || pos == items.len() || pos == items.len() - 1 {
             // a valid node can be built from the start
-            items.splice(0..MAX_BRANCH.min(items.len()), vec![items[0].wrapping_add(1)]);
+            items.splice(
+                0..MAX_BRANCH.min(items.len()),
+                vec![items[0].wrapping_add(1)],
+            );
         } else {
             // temporarily remove the start and recurse
             let removed = items.splice(0..pos, iter::empty()).collect::<Vec<_>>();

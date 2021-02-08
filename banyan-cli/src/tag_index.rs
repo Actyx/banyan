@@ -363,7 +363,6 @@ macro_rules! tags {
 mod tests {
     use super::*;
     use quickcheck::{quickcheck, Arbitrary, Gen};
-    use rand::seq::SliceRandom;
 
     fn l(x: &str) -> Expression {
         Expression::literal(x.into())
@@ -468,13 +467,13 @@ mod tests {
     struct IndexString(&'static str);
 
     impl Arbitrary for IndexString {
-        fn arbitrary<G: Gen>(g: &mut G) -> Self {
-            IndexString(STRINGS.choose(g).unwrap())
+        fn arbitrary(g: &mut Gen) -> Self {
+            IndexString(g.choose(STRINGS).unwrap())
         }
     }
 
     impl Arbitrary for TagIndex {
-        fn arbitrary<G: Gen>(g: &mut G) -> Self {
+        fn arbitrary(g: &mut Gen) -> Self {
             let xs: Vec<BTreeSet<IndexString>> = Arbitrary::arbitrary(g);
             let xs: Vec<TagSet> = xs
                 .iter()
