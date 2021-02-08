@@ -8,6 +8,7 @@ use sha2::{Digest, Sha256};
 use std::{
     convert::{TryFrom, TryInto},
     fmt,
+    io::{Read, Seek, Write},
 };
 
 /// For tests, we use a Sha2-256 digest as a link
@@ -15,19 +16,23 @@ use std::{
 pub struct Sha256Digest([u8; 32]);
 
 impl Decode<DagCborCodec> for Sha256Digest {
-    fn decode<R: std::io::Read>(c: DagCborCodec, r: &mut R) -> anyhow::Result<Self> {
+    fn decode<R: Read + Seek>(c: DagCborCodec, r: &mut R) -> anyhow::Result<Self> {
         Self::try_from(libipld::Cid::decode(c, r)?)
     }
 }
 impl Encode<DagCborCodec> for Sha256Digest {
-    fn encode<W: std::io::Write>(&self, c: DagCborCodec, w: &mut W) -> anyhow::Result<()> {
+    fn encode<W: Write>(&self, c: DagCborCodec, w: &mut W) -> anyhow::Result<()> {
         libipld::Cid::encode(&Cid::from(*self), c, w)
     }
 }
 
 impl TryReadCbor for Sha256Digest {
-    fn try_read_cbor<R: std::io::Read>(r: &mut R, major: u8) -> anyhow::Result<Option<Self>> {
-        Ok(None)
+    fn try_read_cbor<R: Read + Seek>(r: &mut R, major: u8) -> anyhow::Result<Option<Self>> {
+        if let Some(cid) = libipld::Cid::try_read_cbor(r, major)? {
+            Ok(Some(Self::try_from(cid)?))
+        } else {
+            Ok(None)
+        }
     }
 }
 

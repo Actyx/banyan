@@ -168,14 +168,12 @@ mod tests {
             return Ok(false);
         }
         // remaining items must match input up to where they fit in
-        if &decompressed[..] != &data[..decompressed.len()] {
+        if decompressed[..] != data[..decompressed.len()] {
             return Ok(false);
         }
         //
-        if decompressed.len() < data.len() {
-            if (za.compressed().len() as u64) < target_size {
-                return Ok(false);
-            }
+        if decompressed.len() < data.len() && (za.compressed().len() as u64) < target_size {
+            return Ok(false);
         }
         Ok(true)
     }

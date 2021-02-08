@@ -1,11 +1,8 @@
+use libipld::Ipld;
 use std::{
     collections::BTreeMap,
     ops::{Bound, RangeBounds},
-    usize,
 };
-
-use anyhow::anyhow;
-use libipld::Ipld;
 
 fn lt<T: Ord>(end: Bound<T>, start: Bound<T>) -> bool {
     match (end, start) {
@@ -57,10 +54,10 @@ impl BoolSliceExt for &mut [bool] {
 }
 
 #[derive(libipld::DagCbor)]
-pub(crate) struct IpldNode(BTreeMap<usize, Ipld>, Ipld);
+pub(crate) struct IpldNode(BTreeMap<u64, Ipld>, Ipld);
 
 impl IpldNode {
-    pub fn new(links: BTreeMap<usize, Ipld>, data: impl Into<Vec<u8>>) -> Self {
+    pub fn new(links: BTreeMap<u64, Ipld>, data: impl Into<Vec<u8>>) -> Self {
         Self(links, Ipld::Bytes(data.into()))
     }
 
