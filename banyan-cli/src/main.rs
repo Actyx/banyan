@@ -21,6 +21,10 @@ use banyan::{
 use ipfs::{pubsub_pub, pubsub_sub, IpfsStore};
 use tags::{DnfQuery, Key, Sha256Digest, TT};
 
+#[cfg(target_env = "musl")]
+#[global_allocator]
+static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
+
 pub type Error = anyhow::Error;
 pub type Result<T> = anyhow::Result<T>;
 
