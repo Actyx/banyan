@@ -1,9 +1,5 @@
 use super::{BranchCache, Config, CryptoConfig, FilteredChunk, Forest, TreeTypes};
-use crate::{
-    index::deserialize_compressed, index::zip_with_offset, index::Branch, index::BranchIndex,
-    index::CompactSeq, index::Index, index::IndexRef, index::Leaf, index::LeafIndex,
-    index::NodeInfo, query::Query, store::ReadOnlyStore, util::IpldNode,
-};
+use crate::{index::Branch, index::BranchIndex, index::CompactSeq, index::Index, index::IndexRef, index::Leaf, index::LeafIndex, index::NodeInfo, index::deserialize_compressed, index::{HasSummary, zip_with_offset}, query::Query, store::ReadOnlyStore, util::IpldNode};
 use anyhow::{anyhow, Result};
 use core::fmt::Debug;
 use futures::{prelude::*, stream::BoxStream};

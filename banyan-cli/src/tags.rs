@@ -92,7 +92,9 @@ impl fmt::Debug for Sha256Digest {
 
 impl TreeTypes for TT {
     type Key = Key;
-    type Seq = KeySeq;
+    type KeySeq = KeySeq;
+    type Summary = Key;
+    type SummarySeq = KeySeq;
     type Link = Sha256Digest;
 }
 
@@ -326,6 +328,9 @@ impl CompactSeq for KeySeq {
     fn len(&self) -> usize {
         self.tags.elements.len()
     }
+}
+
+impl HasSummary<Key> for KeySeq {
 
     fn summarize(&self) -> Key {
         let max_time = *self.max_time.iter().max().unwrap();

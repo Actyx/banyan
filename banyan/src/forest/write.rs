@@ -1,10 +1,4 @@
-use crate::{
-    forest::{BranchResult, Config, CreateMode, Forest, Transaction, TreeTypes},
-    index::zip_with_offset_ref,
-    store::{BlockWriter, ReadOnlyStore},
-    util::IpldNode,
-    zstd_array::ZstdArray,
-};
+use crate::{forest::{BranchResult, Config, CreateMode, Forest, Transaction, TreeTypes}, index::{HasSummary, zip_with_offset_ref}, store::{BlockWriter, ReadOnlyStore}, util::IpldNode, zstd_array::ZstdArray};
 use crate::{
     index::serialize_compressed,
     index::BranchIndex,
@@ -52,7 +46,7 @@ where
     fn extend_leaf(
         &self,
         compressed: &[u8],
-        keys: Option<T::Seq>,
+        keys: Option<T::KeySeq>,
         from: &mut iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
     ) -> Result<LeafIndex<T>> {
         assert!(from.peek().is_some());
@@ -73,7 +67,7 @@ where
             self.config().target_leaf_size,
         )?;
         let leaf = Leaf::new(data.into());
-        let keys = keys.into_iter().collect::<T::Seq>();
+        let keys = keys.into_iter().collect::<T::KeySeq>();
         // encrypt leaf
         let mut tmp: Vec<u8> = Vec::with_capacity(leaf.as_ref().compressed().len() + 24);
         let nonce = self.random_nonce();
@@ -189,7 +183,7 @@ where
             .collect::<Vec<_>>();
         let value_bytes = children.iter().map(|x| x.value_bytes()).sum();
         let sealed = self.config.branch_sealed(&children, level);
-        let summaries: T::Seq = summaries.into_iter().collect();
+        let summaries: T::KeySeq = summaries.into_iter().collect();
         let (link, encoded_children_len) = self.persist_branch(&children)?;
         let key_bytes = children.iter().map(|x| x.key_bytes()).sum::<u64>() + encoded_children_len;
         Ok(BranchIndex {
