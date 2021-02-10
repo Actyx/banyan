@@ -142,7 +142,7 @@ pub struct BranchIndex<T: TreeTypes> {
     // link to the branch node
     pub link: Option<T::Link>,
     // extra data
-    pub summaries: T::KeySeq,
+    pub summaries: T::SummarySeq,
     // serialized size of the children
     pub value_bytes: u64,
     // serialized size of the data
@@ -164,7 +164,7 @@ impl<T: TreeTypes> Clone for BranchIndex<T> {
 }
 
 impl<T: TreeTypes> BranchIndex<T> {
-    pub fn summaries(&self) -> impl Iterator<Item = T::Key> + '_ {
+    pub fn summaries(&self) -> impl Iterator<Item = T::Summary> + '_ {
         self.summaries.to_vec().into_iter()
     }
 }
@@ -200,10 +200,10 @@ impl<T: TreeTypes> Index<T> {
         }
     }
 
-    pub fn data(&self) -> &T::KeySeq {
+    pub fn summarize(&self) -> T::Summary {
         match self {
-            Index::Leaf(x) => &x.keys,
-            Index::Branch(x) => &x.summaries,
+            Index::Leaf(x) => x.keys.summarize(),
+            Index::Branch(x) => x.summaries.summarize(),
         }
     }
 
@@ -339,7 +339,7 @@ pub(crate) enum NodeInfo<'a, T: TreeTypes> {
 }
 
 #[derive(Debug, Clone, Serialize)]
-struct IndexWC<'a, T> {
+struct IndexWC<'a, K, S> {
     // number of events
     count: Option<u64>,
     // level of the tree node
@@ -348,16 +348,19 @@ struct IndexWC<'a, T> {
     value_bytes: u64,
     // block is sealed
     sealed: bool,
-    // extra data
-    data: &'a T,
+    // keys
+    keys: Option<&'a K>,
+    // summaries
+    summaries: Option<&'a S>,
 }
 
-impl<'a, T: TreeTypes> From<&'a Index<T>> for IndexWC<'a, T::KeySeq> {
+impl<'a, T: TreeTypes> From<&'a Index<T>> for IndexWC<'a, T::KeySeq, T::SummarySeq> {
     fn from(value: &'a Index<T>) -> Self {
         match value {
             Index::Branch(i) => Self {
                 sealed: i.sealed,
-                data: &i.summaries,
+                summaries: Some(&i.summaries),
+                keys: None,
                 value_bytes: i.value_bytes,
                 count: Some(i.count),
                 level: Some(i.level),
@@ -365,7 +368,8 @@ impl<'a, T: TreeTypes> From<&'a Index<T>> for IndexWC<'a, T::KeySeq> {
             },
             Index::Leaf(i) => Self {
                 sealed: i.sealed,
-                data: &i.keys,
+                summaries: None,
+                keys: Some(&i.keys),
                 value_bytes: i.value_bytes,
                 count: None,
                 level: None,
@@ -376,11 +380,13 @@ impl<'a, T: TreeTypes> From<&'a Index<T>> for IndexWC<'a, T::KeySeq> {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-struct IndexRC<T> {
+struct IndexRC<K, S> {
     // block is sealed
     sealed: bool,
     // extra data
-    data: T,
+    keys: Option<K>,
+    // extra data
+    summaries: Option<S>,
     // number of events, for branches
     count: Option<u64>,
     // level of the tree node, for branches
@@ -392,11 +398,16 @@ struct IndexRC<T> {
 }
 
 impl<
-        I: Eq + Debug + Send,
-        X: CompactSeq<Item = I> + Clone + Debug + FromIterator<I> + Send + Sync,
-    > IndexRC<X>
+        K: Eq + Debug + Send,
+        KS: CompactSeq<Item = K> + Clone + Debug + FromIterator<K> + Send + Sync,
+        S: Eq + Debug + Send,
+        SS: CompactSeq<Item = S> + Clone + Debug + FromIterator<S> + Send + Sync,
+    > IndexRC<KS, SS>
 {
-    fn into_index<T: TreeTypes<KeySeq = X, Key = I>>(self, links: Option<&Ipld>) -> Index<T> {
+    fn into_index<T: TreeTypes<KeySeq = KS, Key = K, SummarySeq = SS, Summary = S>>(
+        self,
+        links: Option<&Ipld>,
+    ) -> Index<T> {
         let link = if let Some(link) = links {
             let bytes = DagCborCodec.encode(link).unwrap();
             let link: T::Link = DagCborCodec.decode(&bytes).unwrap();
@@ -404,11 +415,11 @@ impl<
         } else {
             None
         };
-        if let (Some(level), Some(count), Some(key_bytes)) =
-            (self.level, self.count, self.key_bytes)
+        if let (Some(level), Some(count), Some(key_bytes), Some(summaries)) =
+            (self.level, self.count, self.key_bytes, self.summaries)
         {
             BranchIndex {
-                summaries: self.data,
+                summaries,
                 sealed: self.sealed,
                 value_bytes: self.value_bytes,
                 key_bytes,
@@ -419,7 +430,7 @@ impl<
             .into()
         } else {
             LeafIndex {
-                keys: self.data,
+                keys: self.keys.unwrap(),
                 sealed: self.sealed,
                 value_bytes: self.value_bytes,
                 link,
@@ -478,7 +489,7 @@ pub(crate) fn deserialize_compressed<T: TreeTypes>(
     XSalsa20::new(key, (&*nonce).into()).apply_keystream(compressed);
     let reader = zstd::stream::read::Decoder::new(Cursor::new(compressed))?;
 
-    let data: Vec<IndexRC<T::KeySeq>> = serde_cbor::from_reader(reader)?;
+    let data: Vec<IndexRC<T::KeySeq, T::SummarySeq>> = serde_cbor::from_reader(reader)?;
     let result = data
         .into_iter()
         .enumerate()

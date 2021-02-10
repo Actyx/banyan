@@ -1,4 +1,10 @@
-use crate::{forest::{BranchResult, Config, CreateMode, Forest, Transaction, TreeTypes}, index::{HasSummary, zip_with_offset_ref}, store::{BlockWriter, ReadOnlyStore}, util::IpldNode, zstd_array::ZstdArray};
+use crate::{
+    forest::{BranchResult, Config, CreateMode, Forest, Transaction, TreeTypes},
+    index::zip_with_offset_ref,
+    store::{BlockWriter, ReadOnlyStore},
+    util::IpldNode,
+    zstd_array::ZstdArray,
+};
 use crate::{
     index::serialize_compressed,
     index::BranchIndex,
@@ -123,11 +129,11 @@ where
         }
         let mut summaries = children
             .iter()
-            .map(|child| child.data().summarize())
+            .map(|child| child.summarize())
             .collect::<Vec<_>>();
         while from.peek().is_some() && ((children.len() as u64) < self.config().max_branch_count) {
             let child = self.fill_node(level - 1, from)?;
-            let summary = child.data().summarize();
+            let summary = child.summarize();
             summaries.push(summary);
             children.push(child);
         }
@@ -179,11 +185,11 @@ where
         let count = children.iter().map(|x| x.count()).sum();
         let summaries = children
             .iter()
-            .map(|child| child.data().summarize())
+            .map(|child| child.summarize())
             .collect::<Vec<_>>();
         let value_bytes = children.iter().map(|x| x.value_bytes()).sum();
         let sealed = self.config.branch_sealed(&children, level);
-        let summaries: T::KeySeq = summaries.into_iter().collect();
+        let summaries: T::SummarySeq = summaries.into_iter().collect();
         let (link, encoded_children_len) = self.persist_branch(&children)?;
         let key_bytes = children.iter().map(|x| x.key_bytes()).sum::<u64>() + encoded_children_len;
         Ok(BranchIndex {

@@ -54,7 +54,7 @@ pub trait TreeTypes: Debug + Send + Sync + Clone + 'static {
         + FromIterator<Self::Key>
         + Send
         + Sync
-        + HasSummary<Self::Key>;
+        + HasSummary<Self::Summary>;
     /// compact sequence type to be used for indices
     type SummarySeq: CompactSeq<Item = Self::Summary>
         + Serialize

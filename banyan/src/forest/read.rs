@@ -1,5 +1,9 @@
 use super::{BranchCache, Config, CryptoConfig, FilteredChunk, Forest, TreeTypes};
-use crate::{index::Branch, index::BranchIndex, index::CompactSeq, index::Index, index::IndexRef, index::Leaf, index::LeafIndex, index::NodeInfo, index::deserialize_compressed, index::{HasSummary, zip_with_offset}, query::Query, store::ReadOnlyStore, util::IpldNode};
+use crate::{
+    index::deserialize_compressed, index::zip_with_offset, index::Branch, index::BranchIndex,
+    index::CompactSeq, index::Index, index::IndexRef, index::Leaf, index::LeafIndex,
+    index::NodeInfo, query::Query, store::ReadOnlyStore, util::IpldNode,
+};
 use anyhow::{anyhow, Result};
 use core::fmt::Debug;
 use futures::{prelude::*, stream::BoxStream};
@@ -81,7 +85,7 @@ where
         let count = children.iter().map(|x| x.count()).sum();
         let value_bytes = children.iter().map(|x| x.value_bytes()).sum();
         let key_bytes = children.iter().map(|x| x.key_bytes()).sum::<u64>() + (bytes.len() as u64);
-        let summaries = children.iter().map(|x| x.data().summarize()).collect();
+        let summaries = children.iter().map(|x| x.summarize()).collect();
         let result = BranchIndex {
             link: Some(link),
             level,
@@ -459,7 +463,7 @@ where
                     }
                 }
                 for (child, summary) in branch.children.iter().zip(index.summaries()) {
-                    let child_summary = child.data().summarize();
+                    let child_summary = child.summarize();
                     check!(child_summary == summary);
                 }
                 let branch_sealed = self.config.branch_sealed(&branch.children, index.level);

@@ -1,4 +1,7 @@
-use banyan::{forest::{BranchCache, CryptoConfig, Forest}, index::{CompactSeq, HasSummary}};
+use banyan::{
+    forest::{BranchCache, CryptoConfig, Forest},
+    index::{CompactSeq, HasSummary},
+};
 use banyan::{
     forest::{Config, Transaction, TreeTypes},
     memstore::MemStore,
