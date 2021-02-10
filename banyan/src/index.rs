@@ -49,7 +49,7 @@ use salsa20::{
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{collections::BTreeMap, convert::From, sync::Arc};
 
-pub trait HasSummary<T> {
+pub trait Summarizable<T> {
     fn summarize(&self) -> T;
 }
 

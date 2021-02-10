@@ -1,6 +1,6 @@
 use banyan::{
     forest::{BranchCache, CryptoConfig, Forest},
-    index::{CompactSeq, HasSummary},
+    index::{CompactSeq, Summarizable},
 };
 use banyan::{
     forest::{Config, Transaction, TreeTypes},
@@ -38,7 +38,7 @@ impl CompactSeq for KeySeq {
     }
 }
 
-impl HasSummary<Key> for KeySeq {
+impl Summarizable<Key> for KeySeq {
     fn summarize(&self) -> Key {
         let mut res = self.0[0].clone();
         for i in 1..self.0.len() {

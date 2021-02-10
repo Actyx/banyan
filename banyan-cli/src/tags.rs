@@ -330,7 +330,7 @@ impl CompactSeq for KeySeq {
     }
 }
 
-impl HasSummary<Key> for KeySeq {
+impl Summarizable<Key> for KeySeq {
     fn summarize(&self) -> Key {
         let max_time = *self.max_time.iter().max().unwrap();
         let min_time = *self.min_time.iter().min().unwrap();
