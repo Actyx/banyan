@@ -49,6 +49,7 @@ use salsa20::{
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{collections::BTreeMap, convert::From, sync::Arc};
 
+/// An object that can compute a summary of type T of itself
 pub trait Summarizable<T> {
     fn summarize(&self) -> T;
 }
@@ -102,7 +103,7 @@ pub trait CompactSeq: Serialize + DeserializeOwned {
 pub struct LeafIndex<T: TreeTypes> {
     // block is sealed
     pub sealed: bool,
-    // link to the block
+    // link to the block containing the values
     pub link: Option<T::Link>,
     /// A sequence of keys with the same number of values as the data block the link points to.
     pub keys: T::KeySeq,
@@ -143,9 +144,9 @@ pub struct BranchIndex<T: TreeTypes> {
     pub link: Option<T::Link>,
     // extra data
     pub summaries: T::SummarySeq,
-    // serialized size of the children
+    // accumulated serialized size of all values in this tree
     pub value_bytes: u64,
-    // serialized size of the data
+    // accumulated serialized size of all keys and summaries in this tree
     pub key_bytes: u64,
 }
 
