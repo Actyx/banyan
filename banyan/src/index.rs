@@ -339,62 +339,68 @@ pub(crate) enum NodeInfo<'a, T: TreeTypes> {
 }
 
 #[derive(Debug, Clone, Serialize)]
-struct IndexWC<'a, K, S> {
-    // number of events
-    count: Option<u64>,
-    // level of the tree node
-    level: Option<u32>,
-    key_bytes: Option<u64>,
-    value_bytes: u64,
-    // block is sealed
-    sealed: bool,
-    // keys
-    keys: Option<&'a K>,
-    // summaries
-    summaries: Option<&'a S>,
+#[serde(untagged)]
+enum IndexWC<'a, KS, SS> {
+    Branch {
+        // block is sealed
+        sealed: bool,
+        // value bytes statistics
+        value_bytes: u64,
+        // number of events
+        count: u64,
+        // level of the tree node
+        level: u32,
+        // key bytes statistics
+        key_bytes: u64,
+        // summaries
+        summaries: &'a SS,
+    },
+    Leaf {
+        // block is sealed
+        sealed: bool,
+        // value bytes statistics
+        value_bytes: u64,
+        // keys
+        keys: &'a KS,
+    },
 }
 
 impl<'a, T: TreeTypes> From<&'a Index<T>> for IndexWC<'a, T::KeySeq, T::SummarySeq> {
     fn from(value: &'a Index<T>) -> Self {
         match value {
-            Index::Branch(i) => Self {
+            Index::Branch(i) => Self::Branch {
                 sealed: i.sealed,
-                summaries: Some(&i.summaries),
-                keys: None,
+                summaries: &i.summaries,
                 value_bytes: i.value_bytes,
-                count: Some(i.count),
-                level: Some(i.level),
-                key_bytes: Some(i.key_bytes),
+                count: i.count,
+                level: i.level,
+                key_bytes: i.key_bytes,
             },
-            Index::Leaf(i) => Self {
+            Index::Leaf(i) => Self::Leaf {
                 sealed: i.sealed,
-                summaries: None,
-                keys: Some(&i.keys),
+                keys: &i.keys,
                 value_bytes: i.value_bytes,
-                count: None,
-                level: None,
-                key_bytes: None,
             },
         }
     }
 }
 
 #[derive(Debug, Clone, Deserialize)]
-struct IndexRC<K, S> {
-    // block is sealed
-    sealed: bool,
-    // extra data
-    keys: Option<K>,
-    // extra data
-    summaries: Option<S>,
-    // number of events, for branches
-    count: Option<u64>,
-    // level of the tree node, for branches
-    level: Option<u32>,
-    // value bytes
-    value_bytes: u64,
-    // key bytes
-    key_bytes: Option<u64>,
+#[serde(untagged)]
+enum IndexRC<KS, SS> {
+    Branch {
+        sealed: bool,
+        value_bytes: u64,
+        summaries: SS,
+        count: u64,
+        level: u32,
+        key_bytes: u64,
+    },
+    Leaf {
+        sealed: bool,
+        value_bytes: u64,
+        keys: KS,
+    },
 }
 
 impl<
@@ -415,27 +421,35 @@ impl<
         } else {
             None
         };
-        if let (Some(level), Some(count), Some(key_bytes), Some(summaries)) =
-            (self.level, self.count, self.key_bytes, self.summaries)
-        {
-            BranchIndex {
+        match self {
+            Self::Branch {
+                sealed,
+                value_bytes,
                 summaries,
-                sealed: self.sealed,
-                value_bytes: self.value_bytes,
+                count,
+                level,
                 key_bytes,
+            } => BranchIndex {
+                summaries,
+                sealed,
+                key_bytes,
+                value_bytes,
                 count,
                 level,
                 link,
             }
-            .into()
-        } else {
-            LeafIndex {
-                keys: self.keys.unwrap(),
-                sealed: self.sealed,
-                value_bytes: self.value_bytes,
+            .into(),
+            Self::Leaf {
+                sealed,
+                value_bytes,
+                keys,
+            } => LeafIndex {
+                keys,
+                sealed,
+                value_bytes,
                 link,
             }
-            .into()
+            .into(),
         }
     }
 }
