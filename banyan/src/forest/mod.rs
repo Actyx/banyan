@@ -41,17 +41,30 @@ impl<T: TreeTypes> BranchCache<T> {
 /// There might be more types in the future, so this essentially acts as a module for the entire
 /// code base.
 pub trait TreeTypes: Debug + Send + Sync + Clone + 'static {
-    /// key type. This also doubles as the type for a combination (union) of keys
+    /// key type
     type Key: Debug + Eq + Send;
+    /// Type for a summary of keys. In some cases this can be the same type as the key type.
+    type Summary: Debug + Eq + Send;
     /// compact sequence type to be used for indices
-    type Seq: CompactSeq<Item = Self::Key>
+    type KeySeq: CompactSeq<Item = Self::Key>
         + Serialize
         + DeserializeOwned
         + Clone
         + Debug
         + FromIterator<Self::Key>
         + Send
-        + Sync;
+        + Sync
+        + Summarizable<Self::Summary>;
+    /// compact sequence type to be used for indices
+    type SummarySeq: CompactSeq<Item = Self::Summary>
+        + Serialize
+        + DeserializeOwned
+        + Clone
+        + Debug
+        + FromIterator<Self::Summary>
+        + Send
+        + Sync
+        + Summarizable<Self::Summary>;
     /// link type to use over block boundaries
     type Link: Display + Debug + Hash + Eq + Clone + Copy + Send + Sync + DagCbor;
 }

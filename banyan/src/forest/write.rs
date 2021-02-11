@@ -52,7 +52,7 @@ where
     fn extend_leaf(
         &self,
         compressed: &[u8],
-        keys: Option<T::Seq>,
+        keys: Option<T::KeySeq>,
         from: &mut iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
     ) -> Result<LeafIndex<T>> {
         assert!(from.peek().is_some());
@@ -73,7 +73,7 @@ where
             self.config().target_leaf_size,
         )?;
         let leaf = Leaf::new(data.into());
-        let keys = keys.into_iter().collect::<T::Seq>();
+        let keys = keys.into_iter().collect::<T::KeySeq>();
         // encrypt leaf
         let mut tmp: Vec<u8> = Vec::with_capacity(leaf.as_ref().compressed().len() + 24);
         let nonce = self.random_nonce();
@@ -129,11 +129,11 @@ where
         }
         let mut summaries = children
             .iter()
-            .map(|child| child.data().summarize())
+            .map(|child| child.summarize())
             .collect::<Vec<_>>();
         while from.peek().is_some() && ((children.len() as u64) < self.config().max_branch_count) {
             let child = self.fill_node(level - 1, from)?;
-            let summary = child.data().summarize();
+            let summary = child.summarize();
             summaries.push(summary);
             children.push(child);
         }
@@ -185,11 +185,11 @@ where
         let count = children.iter().map(|x| x.count()).sum();
         let summaries = children
             .iter()
-            .map(|child| child.data().summarize())
+            .map(|child| child.summarize())
             .collect::<Vec<_>>();
         let value_bytes = children.iter().map(|x| x.value_bytes()).sum();
         let sealed = self.config.branch_sealed(&children, level);
-        let summaries: T::Seq = summaries.into_iter().collect();
+        let summaries: T::SummarySeq = summaries.into_iter().collect();
         let (link, encoded_children_len) = self.persist_branch(&children)?;
         let key_bytes = children.iter().map(|x| x.key_bytes()).sum::<u64>() + encoded_children_len;
         Ok(BranchIndex {

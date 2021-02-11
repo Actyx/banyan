@@ -85,7 +85,7 @@ where
         let count = children.iter().map(|x| x.count()).sum();
         let value_bytes = children.iter().map(|x| x.value_bytes()).sum();
         let key_bytes = children.iter().map(|x| x.key_bytes()).sum::<u64>() + (bytes.len() as u64);
-        let summaries = children.iter().map(|x| x.data().summarize()).collect();
+        let summaries = children.iter().map(|x| x.summarize()).collect();
         let result = BranchIndex {
             link: Some(link),
             level,
@@ -463,7 +463,7 @@ where
                     }
                 }
                 for (child, summary) in branch.children.iter().zip(index.summaries()) {
-                    let child_summary = child.data().summarize();
+                    let child_summary = child.summarize();
                     check!(child_summary == summary);
                 }
                 let branch_sealed = self.config.branch_sealed(&branch.children, index.level);
