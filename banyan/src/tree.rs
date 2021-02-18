@@ -30,9 +30,9 @@ impl<T: TreeTypes> fmt::Debug for Tree<T> {
             Some(root) => f
                 .debug_struct("Tree")
                 .field("count", &self.count())
-                .field("link", &root.link())
                 .field("key_bytes", &root.key_bytes())
                 .field("value_bytes", &root.value_bytes())
+                .field("link", &root.link())
                 .finish(),
             None => f
                 .debug_struct("Tree")

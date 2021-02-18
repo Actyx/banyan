@@ -73,8 +73,6 @@ impl ZstdArray {
         while let Some((_, value)) = from.peek() {
             // do this check here, in case somebody calls us with an already full keys vec
             if keys.len() >= max_keys {
-                // keys are full
-                full = true;
                 break;
             }
             let bytes = serde_cbor::to_vec(value)?;
@@ -82,6 +80,8 @@ impl ZstdArray {
             anyhow::ensure!(bytes.len() <= uncompressed_size, "single item too large!");
             // check that we don't exceed the uncompressed_size goal before adding
             if size + bytes.len() > uncompressed_size {
+                // we know that the next item does not fit, so we are full even if
+                // there is some space left.
                 full = true;
                 break;
             }
@@ -92,8 +92,6 @@ impl ZstdArray {
             encoder.write_all(&bytes)?;
             keys.push(key);
             if encoder.get_ref().len() >= compressed_size {
-                // approximate compressed size is exceeded
-                full = true;
                 break;
             }
         }
@@ -106,6 +104,9 @@ impl ZstdArray {
             data.len(),
             size
         );
+        full |= data.len() >= compressed_size;
+        full |= keys.len() >= max_keys;
+        full |= size >= uncompressed_size;
         // box into an arc
         Ok((Self::new(data.into()), full))
     }
@@ -193,39 +194,106 @@ impl fmt::Debug for ZstdArray {
 mod tests {
     use super::*;
     use quickcheck::quickcheck;
-    use std::collections::VecDeque;
 
-    // /// basic test to ensure that the decompress works and properly clears the thread local buffer
-    // #[quickcheck]
-    // fn zstd_array_fill_roundtrip(first: Vec<u8>, data: Vec<Vec<u8>>) -> anyhow::Result<bool> {
-    //     let bytes = data.iter().map(|x| x.len()).sum::<usize>() as u64;
-    //     let target_size = bytes / 2;
-    //     let initial = ZstdArray::single(&first, 0)?;
-    //     let mut x: VecDeque<Vec<u8>> = data.clone().into();
-    //     let (za, full) = ZstdArray::fill(
-    //         &initial.compressed(),
-    //         || x.pop_front(),
-    //         0,
-    //         target_size,
-    //         1024 * 1024 * 4,
-    //     )?;
-    //     // println!("compressed={} n={} bytes={}", za.compressed().len(), data.len(), bytes);
-    //     let mut decompressed = za.items::<Vec<u8>>()?;
-    //     let first1 = decompressed
-    //         .splice(0..1, std::iter::empty())
-    //         .collect::<Vec<_>>();
-    //     // first item must always be included
-    //     if first != first1[0] {
-    //         return Ok(false);
-    //     }
-    //     // remaining items must match input up to where they fit in
-    //     if decompressed[..] != data[..decompressed.len()] {
-    //         return Ok(false);
-    //     }
-    //     //
-    //     if decompressed.len() < data.len() && (za.compressed().len() as u64) < target_size {
-    //         return Ok(false);
-    //     }
-    //     Ok(true)
-    // }
+    #[test]
+    fn zstd_array_fill_oversized() -> anyhow::Result<()> {
+        // one byte too large. Does not fit!
+        let mut items = vec![(1u8, vec![0u8; 10001])].into_iter().peekable();
+        let mut keys = Vec::new();
+        let res = ZstdArray::fill(
+            &[],
+            &mut items,
+            10,
+            1000,
+            10002, // one byte too small
+            &mut keys,
+            1000,
+        );
+        assert!(res.is_err());
+        assert_eq!(
+            res.err().unwrap().to_string(),
+            "single item too large!".to_string()
+        );
+        assert!(items.peek().is_some());
+        // fits exactly
+        let mut items = vec![(1usize, vec![0u8; 10000])].into_iter().peekable();
+        let mut keys = Vec::new();
+        let (_, full) = ZstdArray::fill(
+            &[],
+            &mut items,
+            10,
+            1000,
+            10003, // exactly the right size
+            &mut keys,
+            1000,
+        )?;
+        assert!(full);
+        Ok(())
+    }
+
+    #[test]
+    fn zstd_array_fill_keys() -> anyhow::Result<()> {
+        let mut items = vec![
+            (1u8, vec![0u8; 1]),
+            (2u8, vec![0u8; 1]),
+            (3u8, vec![0u8; 1]),
+            (4u8, vec![0u8; 1]),
+        ]
+        .into_iter()
+        .peekable();
+        let mut keys = Vec::new();
+        let (_, full) = ZstdArray::fill(
+            &[],
+            &mut items,
+            10,
+            1000,
+            10002, // one byte too small
+            &mut keys,
+            2,
+        )?;
+        // has reported full
+        assert!(full);
+        // has taken 2 keys
+        assert_eq!(keys.len(), 2);
+        // 3 is the first elemeent that is left
+        assert_eq!(items.peek().unwrap().0, 3u8);
+        Ok(())
+    }
+
+    /// basic test to ensure that the decompress works and properly clears the thread local buffer
+    #[quickcheck]
+    fn zstd_array_fill_roundtrip(first: Vec<u8>, data: Vec<Vec<u8>>) -> anyhow::Result<bool> {
+        let bytes = data.iter().map(|x| x.len()).sum::<usize>() as u64;
+        let target_size = bytes / 2;
+        let initial = ZstdArray::single(&first, 0)?;
+        let mut iter = data.iter().cloned().enumerate().peekable();
+        let mut keys = Vec::new();
+        let (za, _) = ZstdArray::fill(
+            &initial.compressed(),
+            &mut iter,
+            0,
+            target_size,
+            1024 * 1024 * 4,
+            &mut keys,
+            usize::max_value(),
+        )?;
+        // println!("compressed={} n={} bytes={}", za.compressed().len(), data.len(), bytes);
+        let mut decompressed = za.items::<Vec<u8>>()?;
+        let first1 = decompressed
+            .splice(0..1, std::iter::empty())
+            .collect::<Vec<_>>();
+        // first item must always be included
+        if first != first1[0] {
+            return Ok(false);
+        }
+        // remaining items must match input up to where they fit in
+        if decompressed[..] != data[..decompressed.len()] {
+            return Ok(false);
+        }
+        //
+        if decompressed.len() < data.len() && (za.compressed().len() as u64) < target_size {
+            return Ok(false);
+        }
+        Ok(true)
+    }
 }
