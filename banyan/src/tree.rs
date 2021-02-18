@@ -27,14 +27,17 @@ impl<T: TreeTypes> Default for Tree<T> {
 impl<T: TreeTypes> fmt::Debug for Tree<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.root {
-            Some(root) => write!(
-                f,
-                "Tree(root={:?},key_bytes={},value_bytes={})",
-                root.link(),
-                root.key_bytes(),
-                root.value_bytes()
-            ),
-            None => write!(f, "empty tree"),
+            Some(root) => f
+                .debug_struct("Tree")
+                .field("count", &self.count())
+                .field("key_bytes", &root.key_bytes())
+                .field("value_bytes", &root.value_bytes())
+                .field("link", &root.link())
+                .finish(),
+            None => f
+                .debug_struct("Tree")
+                .field("count", &self.count())
+                .finish(),
         }
     }
 }

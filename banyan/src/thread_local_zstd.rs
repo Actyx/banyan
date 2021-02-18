@@ -5,7 +5,7 @@ use zstd::block::Decompressor;
 /// minimum size of the buffer
 const MIN_CAPACITY: usize = 1024 * 16;
 /// max capacity the buffer will grow to.
-const MAX_CAPACITY: usize = 1024 * 1024 * 4;
+const MAX_CAPACITY: usize = 1024 * 1024 * 16;
 
 /// thread-local decompression state
 pub(crate) struct DecompressionState {
@@ -39,7 +39,14 @@ impl DecompressionState {
         }
     }
 
-    fn decompress_and_transform<F, R>(&mut self, compressed: &[u8], f: &mut F) -> std::io::Result<R>
+    /// Decompress some data and apply a transform to it, e.g. deserialization.
+    ///
+    /// Returns the result of the transform and the uncompressed size.
+    fn decompress_and_transform<F, R>(
+        &mut self,
+        compressed: &[u8],
+        f: &mut F,
+    ) -> std::io::Result<(usize, R)>
     where
         F: FnMut(&[u8]) -> R,
     {
@@ -47,14 +54,14 @@ impl DecompressionState {
         let result = f(&self.buffer[0..len]);
         self.buffer.truncate(MIN_CAPACITY);
         self.buffer.shrink_to_fit();
-        Ok(result)
+        Ok((len, result))
     }
 }
 
 thread_local!(static DECOMPRESSOR: RefCell<DecompressionState> = RefCell::new(DecompressionState::new()));
 
 /// decompress some data into an internal thread-local buffer, and, on success, applies a transform to the buffer
-pub fn decompress_and_transform<F, R>(compressed: &[u8], f: &mut F) -> std::io::Result<R>
+pub fn decompress_and_transform<F, R>(compressed: &[u8], f: &mut F) -> std::io::Result<(usize, R)>
 where
     F: FnMut(&[u8]) -> R,
 {
@@ -72,7 +79,7 @@ mod tests {
     fn thread_local_compression_decompression(data: Vec<u8>) -> anyhow::Result<bool> {
         let cursor = Cursor::new(&data);
         let compressed = zstd::encode_all(cursor, 0)?;
-        let decompressed = decompress_and_transform(&compressed, &mut |x| x.to_vec())?;
-        Ok(data == decompressed)
+        let (size, decompressed) = decompress_and_transform(&compressed, &mut |x| x.to_vec())?;
+        Ok(size == decompressed.len() && data == decompressed)
     }
 }

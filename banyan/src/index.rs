@@ -302,18 +302,6 @@ impl Leaf {
         Self(ZstdArray::new(data))
     }
 
-    /// Push an item. The compression level will only be used if this leaf is in readonly mode, otherwise
-    /// the compression level of the builder will be used.
-    pub fn fill<V: Serialize>(
-        self,
-        from: impl FnMut() -> Option<V>,
-        compressed_size: u64,
-        level: i32,
-    ) -> Result<Self> {
-        let data = ZstdArray::fill(&[], from, level, compressed_size)?;
-        Ok(Leaf::new(data.into()))
-    }
-
     pub fn child_at<T: DeserializeOwned>(&self, offset: u64) -> Result<T> {
         self.as_ref()
             .get(offset)?

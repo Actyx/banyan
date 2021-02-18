@@ -205,6 +205,9 @@ pub struct Config {
     /// note that this might overshoot due to the fact that the zstd encoder has internal state, and it is not possible
     /// to flush after each value without losing compression efficiency. The overshoot is bounded though.
     pub target_leaf_size: u64,
+    /// Maximum uncompressed size of leafs. This is limited to prevent accidentally creating
+    /// decompression bombs.
+    pub max_uncompressed_leaf_size: u64,
 }
 
 impl Config {
@@ -217,6 +220,7 @@ impl Config {
             max_leaf_count: 10,
             max_branch_count: 4,
             zstd_level: 10,
+            max_uncompressed_leaf_size: 16 * 1024 * 1024,
         }
     }
 
@@ -227,6 +231,7 @@ impl Config {
             max_leaf_count: 1 << 14,
             max_branch_count: 32,
             zstd_level: 10,
+            max_uncompressed_leaf_size: 16 * 1024 * 1024,
         }
     }
 
@@ -249,11 +254,6 @@ impl Config {
         }
         // we must be full
         items.len() as u64 >= self.max_branch_count
-    }
-
-    /// predicate to determine if a leaf is sealed, based on the config
-    pub fn leaf_sealed(&self, bytes: u64, count: u64) -> bool {
-        bytes >= self.target_leaf_size || count >= self.max_leaf_count
     }
 }
 

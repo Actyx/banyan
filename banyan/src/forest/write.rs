@@ -22,7 +22,7 @@ use libipld::{cbor::DagCborCodec, codec::Codec};
 use rand::RngCore;
 use salsa20::{cipher::NewStreamCipher, cipher::SyncStreamCipher, XSalsa20};
 use serde::{de::DeserializeOwned, Serialize};
-use std::{collections::BTreeMap, iter};
+use std::{collections::BTreeMap, iter, time::Instant};
 use tracing::info;
 
 /// basic random access append only tree
@@ -55,22 +55,17 @@ where
         keys: Option<T::KeySeq>,
         from: &mut iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
     ) -> Result<LeafIndex<T>> {
+        let t0 = Instant::now();
         assert!(from.peek().is_some());
         let mut keys = keys.map(|keys| keys.to_vec()).unwrap_or_default();
-        let data = ZstdArray::fill(
+        let (data, sealed) = ZstdArray::fill(
             compressed,
-            || {
-                if (keys.len() as u64) < self.config().max_leaf_count {
-                    from.next().map(|(k, v)| {
-                        keys.push(k);
-                        v
-                    })
-                } else {
-                    None
-                }
-            },
+            from,
             self.config().zstd_level,
             self.config().target_leaf_size,
+            self.config().max_uncompressed_leaf_size,
+            &mut keys,
+            self.config().max_leaf_count as usize,
         )?;
         let leaf = Leaf::new(data.into());
         let keys = keys.into_iter().collect::<T::KeySeq>();
@@ -81,22 +76,22 @@ where
         tmp.extend(leaf.as_ref().compressed());
         XSalsa20::new(&self.value_key(), &nonce).apply_keystream(&mut tmp[24..]);
         let tmp = DagCborCodec.encode(&IpldNode::new(BTreeMap::new(), tmp))?;
+        let len = tmp.len();
         // store leaf
         let link = self.writer.put(tmp)?;
         let index: LeafIndex<T> = LeafIndex {
             link: Some(link),
             value_bytes: leaf.as_ref().compressed().len() as u64,
-            sealed: self
-                .config()
-                .leaf_sealed(leaf.as_ref().compressed().len() as u64, keys.count()),
+            sealed,
             keys,
         };
-        info!(
+        tracing::info!(
             "leaf created count={} bytes={} sealed={}",
             index.keys.count(),
             index.value_bytes,
             index.sealed
         );
+        tracing::debug!("extend_leaf {} {}", t0.elapsed().as_secs_f64(), len);
         Ok(index)
     }
 
@@ -327,6 +322,7 @@ where
     }
 
     fn persist_branch(&self, children: &[Index<T>]) -> Result<(T::Link, u64)> {
+        let t0 = Instant::now();
         let cbor = serialize_compressed(
             &self.index_key(),
             &self.random_nonce(),
@@ -334,7 +330,9 @@ where
             self.config().zstd_level,
         )?;
         let len = cbor.len() as u64;
-        Ok((self.writer.put(cbor)?, len))
+        let result = Ok((self.writer.put(cbor)?, len));
+        tracing::debug!("persist_branch {}", t0.elapsed().as_secs_f64());
+        result
     }
 
     pub(crate) fn retain0<Q: Query<T> + Send + Sync>(
