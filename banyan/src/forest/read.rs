@@ -10,7 +10,7 @@ use futures::{prelude::*, stream::BoxStream};
 use libipld::{cbor::DagCborCodec, codec::Codec};
 use salsa20::{cipher::NewStreamCipher, cipher::SyncStreamCipher, XSalsa20};
 use serde::{de::DeserializeOwned, Serialize};
-use std::sync::Arc;
+use std::{sync::Arc, time::Instant};
 
 /// basic random access append only tree
 impl<T, V, R> Forest<T, V, R>
@@ -121,7 +121,8 @@ where
     /// load a node, returning a structure containing the index and value for convenient matching
     #[allow(clippy::needless_lifetimes)]
     pub(crate) fn load_node<'a>(&self, index: &'a Index<T>) -> Result<NodeInfo<'a, T>> {
-        Ok(match index {
+        let t0 = Instant::now();
+        let result = Ok(match index {
             Index::Branch(index) => {
                 if let Some(branch) = self.load_branch_cached(index)? {
                     NodeInfo::Branch(index, branch)
@@ -136,18 +137,23 @@ where
                     NodeInfo::PurgedLeaf(index)
                 }
             }
-        })
+        });
+        tracing::debug!("load_node {}", t0.elapsed().as_secs_f64());
+        result
     }
 
     /// load a branch given a branch index
     pub(crate) fn load_branch(&self, index: &BranchIndex<T>) -> Result<Option<Branch<T>>> {
-        Ok(if let Some(link) = &index.link {
+        let t0 = Instant::now();
+        let result = Ok(if let Some(link) = &index.link {
             let bytes = self.store.get(&link)?;
             let children = deserialize_compressed(&self.index_key(), &bytes)?;
             Some(Branch::<T>::new(children))
         } else {
             None
-        })
+        });
+        tracing::debug!("load_branch {}", t0.elapsed().as_secs_f64());
+        result
     }
 
     pub(crate) fn get0(&self, index: &Index<T>, mut offset: u64) -> Result<Option<(T::Key, V)>> {
@@ -448,10 +454,6 @@ where
             NodeInfo::Leaf(index, leaf) => {
                 let value_count = leaf.as_ref().count()?;
                 check!(value_count == index.keys.count());
-                let leaf_sealed = self
-                    .config()
-                    .leaf_sealed(index.value_bytes, index.keys.count());
-                check!(index.sealed == leaf_sealed);
             }
             NodeInfo::Branch(index, branch) => {
                 check!(branch.count() == index.summaries.count());
