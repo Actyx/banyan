@@ -16,14 +16,14 @@ impl<
     /// Given a sequence of roots, will iterate matching events in ascending order indefinitely.
     ///
     /// This is implemented by calling [iter_trees_chunked] and just flattening the chunks.
-    pub fn iter_trees<Q, S>(
-        &self,
+    pub fn iter_trees<'a, Q, S>(
+        &'a self,
         query: Q,
         trees: S,
-    ) -> impl Iterator<Item = anyhow::Result<(u64, T::Key, V)>>
+    ) -> impl Iterator<Item = anyhow::Result<(u64, T::Key, V)>> + 'a
     where
         Q: Query<T> + Clone + 'static,
-        S: Iterator<Item = Tree<T>> + Send + 'static,
+        S: Iterator<Item = Tree<T>> + Send + 'a,
     {
         self.iter_trees_chunked(query, trees, 0..=u64::max_value(), &|_| ())
             .map(|res| match res {
@@ -42,21 +42,20 @@ impl<
     /// - range: the range which to stream. It is up to the caller to ensure that we have events for this range.
     /// - mk_extra: a fn that allows to compute extra info from indices.
     ///     this can be useful to get progress info even if the query does not match any events
-    pub fn iter_trees_chunked<I, Q, E, F>(
-        &self,
+    pub fn iter_trees_chunked<'a, I, Q, E, F>(
+        &'a self,
         query: Q,
         trees: I,
         range: RangeInclusive<u64>,
-        mk_extra: &'static F,
-    ) -> impl Iterator<Item = anyhow::Result<FilteredChunk<T, V, E>>> + Send
+        mk_extra: &'a F,
+    ) -> impl Iterator<Item = anyhow::Result<FilteredChunk<T, V, E>>> + Send + 'a
     where
         Q: Query<T> + Clone + Send + 'static,
-        E: Send + 'static,
-        F: Send + Sync + Fn(IndexRef<T>) -> E + 'static,
-        I: Iterator<Item = Tree<T>> + Send,
+        E: Send + 'a,
+        F: Send + Sync + Fn(IndexRef<T>) -> E + 'a,
+        I: Iterator<Item = Tree<T>> + Send + 'a,
     {
         let offset = Arc::new(AtomicU64::new(*range.start()));
-        let forest = self.clone();
         trees
             .filter_map(move |link| link.into_inner())
             .flat_map(move |index| {
@@ -65,8 +64,7 @@ impl<
                 let range = offset.load(Ordering::SeqCst)..=*range.end();
                 let query = AndQuery(OffsetRangeQuery::from(range), query.clone()).boxed();
                 let offset = offset.clone();
-                forest
-                    .iter_filtered_chunked0(0, query, index, mk_extra)
+                self.iter_filtered_chunked0(0, query, index, mk_extra)
                     .take_while(move |result| {
                         if let Ok(chunk) = result {
                             // update the offset

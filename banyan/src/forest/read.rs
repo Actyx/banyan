@@ -310,19 +310,19 @@ where
     }
 
     pub(crate) fn iter_filtered_chunked0<
-        Q: Query<T> + Clone + Send + 'static,
-        E: Send + 'static,
-        F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
+        'a,
+        Q: Query<T> + Clone + Send + 'a,
+        E: Send + 'a,
+        F: Fn(IndexRef<T>) -> E + Send + Sync + 'a,
     >(
-        &self,
+        &'a self,
         offset: u64,
         query: Q,
         index: Arc<Index<T>>,
-        mk_extra: &'static F,
-    ) -> BoxedIter<'static, Result<FilteredChunk<T, V, E>>> {
-        let this: Forest<T, V, R> = self.clone();
+        mk_extra: &'a F,
+    ) -> BoxedIter<'a, Result<FilteredChunk<T, V, E>>> {
         let inner = || {
-            Ok(match this.load_node(&index)? {
+            Ok(match self.load_node(&index)? {
                 NodeInfo::Leaf(index, node) => {
                     // todo: don't get the node here, since we might not need it
                     let mut matching = vec![true; index.keys.len()];
@@ -348,14 +348,13 @@ where
                     let iter = matching.into_iter().zip(offsets).map(
                         move |(is_matching, (child, offset))| {
                             if is_matching {
-                                this.clone()
-                                    .iter_filtered_chunked0(
-                                        offset,
-                                        query.clone(),
-                                        Arc::new(child),
-                                        mk_extra,
-                                    )
-                                    .left_iter()
+                                self.iter_filtered_chunked0(
+                                    offset,
+                                    query.clone(),
+                                    Arc::new(child),
+                                    mk_extra,
+                                )
+                                .left_iter()
                             } else {
                                 let placeholder = FilteredChunk {
                                     range: offset..offset + child.count(),
