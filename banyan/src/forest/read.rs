@@ -309,18 +309,37 @@ where
         .boxed()
     }
 
-    pub(crate) fn iter_filtered_chunked0<
-        'a,
-        Q: Query<T> + Clone + Send + 'a,
-        E: Send + 'a,
-        F: Fn(IndexRef<T>) -> E + Send + Sync + 'a,
-    >(
-        &'a self,
+    /// Convenience method to iterate filtered.
+    ///
+    /// Implemented in terms of stream_filtered_chunked
+    pub(crate) fn iter_filtered0<Q: Query<T> + Clone + 'static>(
+        &self,
         offset: u64,
         query: Q,
         index: Arc<Index<T>>,
-        mk_extra: &'a F,
-    ) -> BoxedIter<'a, Result<FilteredChunk<T, V, E>>> {
+    ) -> BoxedIter<'static, Result<(u64, T::Key, V)>> {
+        self.clone()
+            .iter_filtered_chunked0(offset, query, index, &|_| {})
+            .map(|res| match res {
+                Ok(chunk) => chunk.data.into_iter().map(Ok).left_iter(),
+                Err(cause) => iter::once(Err(cause)).right_iter(),
+            })
+            .flatten()
+            .boxed()
+    }
+
+    pub(crate) fn iter_filtered_chunked0<
+        Q: Query<T> + Clone + Send + 'static,
+        E: Send + 'static,
+        F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
+    >(
+        &self,
+        offset: u64,
+        query: Q,
+        index: Arc<Index<T>>,
+        mk_extra: &'static F,
+    ) -> BoxedIter<'static, Result<FilteredChunk<T, V, E>>> {
+        let this = self.clone();
         let inner = || {
             Ok(match self.load_node(&index)? {
                 NodeInfo::Leaf(index, node) => {
@@ -348,7 +367,7 @@ where
                     let iter = matching.into_iter().zip(offsets).map(
                         move |(is_matching, (child, offset))| {
                             if is_matching {
-                                self.iter_filtered_chunked0(
+                                this.iter_filtered_chunked0(
                                     offset,
                                     query.clone(),
                                     Arc::new(child),

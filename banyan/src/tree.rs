@@ -4,11 +4,11 @@ use crate::{
     forest::{FilteredChunk, Forest, Transaction, TreeTypes},
     store::BlockWriter,
 };
-use crate::{query::Query, store::ReadOnlyStore};
+use crate::{query::Query, store::ReadOnlyStore, util::IterExt};
 use anyhow::Result;
 use futures::prelude::*;
 use serde::{de::DeserializeOwned, Serialize};
-use std::{fmt, fmt::Debug, sync::Arc};
+use std::{fmt, fmt::Debug, iter, sync::Arc};
 use tracing::*;
 
 /// A tree. This is mostly an user friendly handle.
@@ -156,6 +156,30 @@ impl<
         }
     }
 
+    pub fn iter_filtered(
+        &self,
+        tree: &Tree<T>,
+        query: impl Query<T> + Clone + 'static,
+    ) -> impl Iterator<Item = Result<(u64, T::Key, V)>> + 'static {
+        match &tree.root {
+            Some(index) => self.iter_filtered0(0, query, index.clone()).left_iter(),
+            None => iter::empty().right_iter(),
+        }
+    }
+
+    pub fn iter_from(
+        &self,
+        tree: &Tree<T>,
+        offset: u64,
+    ) -> impl Iterator<Item = Result<(u64, T::Key, V)>> + 'static {
+        match &tree.root {
+            Some(index) => self
+                .iter_filtered0(offset, crate::query::AllQuery, index.clone())
+                .left_iter(),
+            None => iter::empty().right_iter(),
+        }
+    }
+
     pub fn stream_filtered_chunked<Q, E, F>(
         &self,
         tree: &Tree<T>,
@@ -245,7 +269,6 @@ impl<
     pub fn pack(&self, tree: &Tree<T>) -> Result<Tree<T>> {
         let roots = self.roots(tree)?;
         let filled = self.tree_from_roots(roots)?;
-        // let remainder: Vec<_> = self.collect_from(tree, filled.count()).await?;
         let remainder: Vec<_> = self
             .collect_from(tree, filled.count())?
             .into_iter()

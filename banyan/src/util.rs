@@ -1,3 +1,4 @@
+use futures::{channel::mpsc, executor::ThreadPool, SinkExt};
 use libipld::Ipld;
 use std::{
     collections::BTreeMap,
@@ -70,27 +71,72 @@ impl IpldNode {
     }
 }
 
-pub(crate) trait IterExt<'a>: Iterator + Sized {
-    fn boxed(self) -> BoxedIter<'a, Self::Item>;
-
-    fn left_iter<R>(self) -> itertools::Either<Self, R>;
-
-    fn right_iter<L>(self) -> itertools::Either<L, Self>;
-}
-
-pub(crate) type BoxedIter<'a, T> = Box<dyn Iterator<Item = T> + Send + 'a>;
-
-impl<'a, T: Iterator + Sized + Send + 'a> IterExt<'a> for T {
+/// Some convenience fns so we don't have to depend on IterTools
+pub(crate) trait IterExt<'a>
+where
+    Self: Iterator + Sized + Send + 'a,
+{
     fn boxed(self) -> BoxedIter<'a, Self::Item> {
         Box::new(self)
     }
 
-    fn left_iter<R>(self) -> itertools::Either<Self, R> {
-        itertools::Either::Left(self)
+    fn left_iter<R>(self) -> EitherIter<Self, R> {
+        EitherIter::Left(self)
     }
 
-    fn right_iter<L>(self) -> itertools::Either<L, Self> {
-        itertools::Either::Right(self)
+    fn right_iter<L>(self) -> EitherIter<L, Self> {
+        EitherIter::Right(self)
+    }
+}
+
+impl<'a, T: Iterator + Sized + Send + 'a> IterExt<'a> for T {}
+
+/// same approach as https://crates.io/crates/iterstream
+pub(crate) trait ToStreamExt: Iterator
+where
+    Self: 'static + Sized + Send,
+    Self::Item: Send,
+{
+    fn to_stream(self, buffer_size: usize, thread_pool: ThreadPool) -> mpsc::Receiver<Self::Item> {
+        let (mut sender, receiver) = mpsc::channel(buffer_size);
+
+        thread_pool.spawn_ok(async move {
+            for value in self {
+                if sender.send(value).await.is_err() {
+                    break;
+                }
+            }
+        });
+        receiver
+    }
+}
+
+impl<I> ToStreamExt for I
+where
+    I: Iterator + Send + 'static,
+    I::Item: Send,
+{
+}
+
+pub(crate) type BoxedIter<'a, T> = Box<dyn Iterator<Item = T> + Send + 'a>;
+
+/// Like the one from itertools, but more convenient
+pub(crate) enum EitherIter<L, R> {
+    Left(L),
+    Right(R),
+}
+
+impl<L, R, T> Iterator for EitherIter<L, R>
+where
+    L: Iterator<Item = T>,
+    R: Iterator<Item = T>,
+{
+    type Item = T;
+    fn next(&mut self) -> std::option::Option<<Self as Iterator>::Item> {
+        match self {
+            Self::Left(l) => l.next(),
+            Self::Right(r) => r.next(),
+        }
     }
 }
 
