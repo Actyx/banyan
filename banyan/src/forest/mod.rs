@@ -12,6 +12,7 @@ use std::{
     fmt::Display,
     sync::{Arc, Mutex},
 };
+mod iter;
 mod read;
 mod stream;
 mod write;

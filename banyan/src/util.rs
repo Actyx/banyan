@@ -70,6 +70,30 @@ impl IpldNode {
     }
 }
 
+pub(crate) trait IterExt<'a>: Iterator + Sized {
+    fn boxed(self) -> BoxedIter<'a, Self::Item>;
+
+    fn left_iter<R>(self) -> itertools::Either<Self, R>;
+
+    fn right_iter<L>(self) -> itertools::Either<L, Self>;
+}
+
+pub(crate) type BoxedIter<'a, T> = Box<dyn Iterator<Item = T> + Send + 'a>;
+
+impl<'a, T: Iterator + Sized + Send + 'a> IterExt<'a> for T {
+    fn boxed(self) -> BoxedIter<'a, Self::Item> {
+        Box::new(self)
+    }
+
+    fn left_iter<R>(self) -> itertools::Either<Self, R> {
+        itertools::Either::Left(self)
+    }
+
+    fn right_iter<L>(self) -> itertools::Either<L, Self> {
+        itertools::Either::Right(self)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
