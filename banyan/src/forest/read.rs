@@ -1,8 +1,19 @@
 use super::{BranchCache, Config, CryptoConfig, FilteredChunk, Forest, TreeTypes};
 use crate::{
-    index::deserialize_compressed, index::zip_with_offset, index::Branch, index::BranchIndex,
-    index::CompactSeq, index::Index, index::IndexRef, index::Leaf, index::LeafIndex,
-    index::NodeInfo, query::Query, store::ReadOnlyStore, util::IpldNode,
+    index::deserialize_compressed,
+    index::zip_with_offset,
+    index::Branch,
+    index::BranchIndex,
+    index::CompactSeq,
+    index::Index,
+    index::IndexRef,
+    index::Leaf,
+    index::LeafIndex,
+    index::NodeInfo,
+    query::Query,
+    store::ReadOnlyStore,
+    util::IpldNode,
+    util::{BoxedIter, IterExt},
 };
 use anyhow::{anyhow, Result};
 use core::fmt::Debug;
@@ -10,7 +21,7 @@ use futures::{prelude::*, stream::BoxStream};
 use libipld::{cbor::DagCborCodec, codec::Codec};
 use salsa20::{cipher::NewStreamCipher, cipher::SyncStreamCipher, XSalsa20};
 use serde::{de::DeserializeOwned, Serialize};
-use std::{sync::Arc, time::Instant};
+use std::{iter, sync::Arc, time::Instant};
 
 /// basic random access append only tree
 impl<T, V, R> Forest<T, V, R>
@@ -296,6 +307,92 @@ where
         }
         .try_flatten_stream()
         .boxed()
+    }
+
+    /// Convenience method to iterate filtered.
+    ///
+    /// Implemented in terms of stream_filtered_chunked
+    pub(crate) fn iter_filtered0<Q: Query<T> + Clone + 'static>(
+        &self,
+        offset: u64,
+        query: Q,
+        index: Arc<Index<T>>,
+    ) -> BoxedIter<'static, Result<(u64, T::Key, V)>> {
+        self.clone()
+            .iter_filtered_chunked0(offset, query, index, &|_| {})
+            .map(|res| match res {
+                Ok(chunk) => chunk.data.into_iter().map(Ok).left_iter(),
+                Err(cause) => iter::once(Err(cause)).right_iter(),
+            })
+            .flatten()
+            .boxed()
+    }
+
+    pub(crate) fn iter_filtered_chunked0<
+        Q: Query<T> + Clone + Send + 'static,
+        E: Send + 'static,
+        F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
+    >(
+        &self,
+        offset: u64,
+        query: Q,
+        index: Arc<Index<T>>,
+        mk_extra: &'static F,
+    ) -> BoxedIter<'static, Result<FilteredChunk<T, V, E>>> {
+        let this = self.clone();
+        let inner = || {
+            Ok(match self.load_node(&index)? {
+                NodeInfo::Leaf(index, node) => {
+                    // todo: don't get the node here, since we might not need it
+                    let mut matching = vec![true; index.keys.len()];
+                    query.containing(offset, index, &mut matching);
+                    let keys = index.select_keys(&matching);
+                    let elems: Vec<V> = node.as_ref().select(&matching)?;
+                    let pairs = keys
+                        .zip(elems)
+                        .map(|((o, k), v)| (o + offset, k, v))
+                        .collect::<Vec<_>>();
+                    let chunk = FilteredChunk {
+                        range: offset..offset + index.keys.count(),
+                        data: pairs,
+                        extra: mk_extra(IndexRef::Leaf(index)),
+                    };
+                    iter::once(Ok(chunk)).left_iter().left_iter()
+                }
+                NodeInfo::Branch(index, node) => {
+                    // todo: don't get the node here, since we might not need it
+                    let mut matching = vec![true; index.summaries.len()];
+                    query.intersecting(offset, index, &mut matching);
+                    let offsets = zip_with_offset(node.children.to_vec(), offset);
+                    let iter = matching.into_iter().zip(offsets).map(
+                        move |(is_matching, (child, offset))| {
+                            if is_matching {
+                                this.iter_filtered_chunked0(
+                                    offset,
+                                    query.clone(),
+                                    Arc::new(child),
+                                    mk_extra,
+                                )
+                                .left_iter()
+                            } else {
+                                let placeholder = FilteredChunk {
+                                    range: offset..offset + child.count(),
+                                    data: Vec::new(),
+                                    extra: mk_extra(child.as_index_ref()),
+                                };
+                                iter::once(Ok(placeholder)).right_iter()
+                            }
+                        },
+                    );
+                    iter.flatten().right_iter().left_iter()
+                }
+                NodeInfo::PurgedBranch(_) | NodeInfo::PurgedLeaf(_) => iter::empty().right_iter(),
+            })
+        };
+        match inner() {
+            Ok(iter) => iter.boxed(),
+            Err(cause) => iter::once(Err(cause)).boxed(),
+        }
     }
 
     pub(crate) fn stream_filtered_chunked_reverse0<

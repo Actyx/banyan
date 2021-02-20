@@ -21,13 +21,13 @@ pub trait Query<T: TreeTypes>: Debug + Send + Sync {
     fn intersecting(&self, offset: u64, _index: &BranchIndex<T>, res: &mut [bool]);
 }
 
-pub trait QueryExt<TT> {
+pub trait QueryExt<'a, TT> {
     /// box a query by wrapping it in an Arc. This can be used to make a large or non-cloneable query cheaply cloneable.
-    fn boxed(self) -> Arc<dyn Query<TT>>;
+    fn boxed(self) -> Arc<dyn Query<TT> + 'a>;
 }
 
-impl<TT: TreeTypes, Q: Query<TT> + 'static> QueryExt<TT> for Q {
-    fn boxed(self) -> Arc<dyn Query<TT>> {
+impl<'a, TT: TreeTypes, Q: Query<TT> + 'static> QueryExt<'a, TT> for Q {
+    fn boxed(self) -> Arc<dyn Query<TT> + 'a> {
         Arc::new(self)
     }
 }

@@ -13,7 +13,7 @@ repository = "https://github.com/actyx/banyan/"
 anyhow = "1.0.38"
 derive_more = "0.99.11"
 fnv = "1.0.7"
-futures = "0.3.12"
+futures = { version = "0.3.12", features = ["thread-pool"] }
 libipld = { version = "0.10.0", features = ["unleashed"] }
 lru = "0.6.4"
 maplit = "1.0.2"

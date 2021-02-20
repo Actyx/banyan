@@ -3,7 +3,7 @@ use std::cell::RefCell;
 use zstd::block::Decompressor;
 
 /// minimum size of the buffer
-const MIN_CAPACITY: usize = 1024 * 16;
+const MIN_CAPACITY: usize = 1024 * 1024 * 4;
 /// max capacity the buffer will grow to.
 const MAX_CAPACITY: usize = 1024 * 1024 * 16;
 
