@@ -1,5 +1,5 @@
 use futures::{channel::mpsc, executor::ThreadPool, SinkExt};
-use libipld::Ipld;
+use libipld::{DagCbor, Ipld};
 use std::{
     collections::BTreeMap,
     ops::{Bound, RangeBounds},
@@ -54,7 +54,7 @@ impl BoolSliceExt for &mut [bool] {
     }
 }
 
-#[derive(libipld::DagCbor)]
+#[derive(DagCbor)]
 pub(crate) struct IpldNode(BTreeMap<u64, Ipld>, Ipld);
 
 impl IpldNode {

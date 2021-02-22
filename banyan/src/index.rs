@@ -38,16 +38,23 @@
 //! [CompactSeq]: trait.CompactSeq.html
 //! [Semigroup]: trait.Semigroup.html
 //! [SimpleCompactSeq]: struct.SimpleCompactSeq.html
-use super::zstd_array::ZstdArray;
+use crate::{forest::TreeTypes, zstd_dag_cbor_seq::ZstdDagCborSeq};
 use anyhow::{anyhow, Result};
 use derive_more::From;
-use libipld::{cbor::DagCborCodec, codec::Codec, Ipld};
+use libipld::{cbor::DagCbor, cbor::DagCborCodec, codec::Codec, DagCbor, Ipld};
 use salsa20::{
     cipher::{NewStreamCipher, SyncStreamCipher},
     XSalsa20,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use std::{collections::BTreeMap, convert::From, sync::Arc};
+use std::{
+    collections::BTreeMap,
+    convert::From,
+    fmt::Debug,
+    io::{Cursor, Write},
+    iter::FromIterator,
+    sync::Arc,
+};
 
 /// An object that can compute a summary of type T of itself
 pub trait Summarizable<T> {
@@ -99,7 +106,7 @@ pub trait CompactSeq: Serialize + DeserializeOwned {
 }
 
 /// index for a leaf node, containing keys and some statistics data for its children
-#[derive(Debug)]
+#[derive(Debug, DagCbor)]
 pub struct LeafIndex<T: TreeTypes> {
     // block is sealed
     pub sealed: bool,
@@ -132,7 +139,7 @@ impl<T: TreeTypes> LeafIndex<T> {
 }
 
 /// index for a branch node, containing summary data for its children
-#[derive(Debug)]
+#[derive(Debug, DagCbor)]
 pub struct BranchIndex<T: TreeTypes> {
     // number of events
     pub count: u64,
@@ -171,7 +178,7 @@ impl<T: TreeTypes> BranchIndex<T> {
 }
 
 /// enum for a leaf or branch index
-#[derive(Debug, From)]
+#[derive(Debug, From, DagCbor)]
 pub enum Index<T: TreeTypes> {
     Leaf(LeafIndex<T>),
     Branch(BranchIndex<T>),
@@ -291,26 +298,22 @@ impl<T: TreeTypes> Branch<T> {
 ///
 /// This is a wrapper around a cbor encoded and zstd compressed sequence of values
 #[derive(Debug)]
-pub struct Leaf(ZstdArray);
+pub struct Leaf(ZstdDagCborSeq);
 
 impl Leaf {
-    /// Create a leaf from data in readonly mode. Conversion to writeable will only happen on demand.
-    ///
-    /// Note that this does not provide any validation that the passed data is in fact zstd compressed cbor.
-    /// If you pass random data, you will only notice that something is wrong once you try to use it.
-    pub fn new(data: Arc<[u8]>) -> Self {
-        Self(ZstdArray::new(data))
+    pub fn new(value: ZstdDagCborSeq) -> Self {
+        Self(value)
     }
 
-    pub fn child_at<T: DeserializeOwned>(&self, offset: u64) -> Result<T> {
+    pub fn child_at<T: DagCbor>(&self, offset: u64) -> Result<T> {
         self.as_ref()
             .get(offset)?
             .ok_or_else(|| anyhow!("index out of bounds {}", offset))
     }
 }
 
-impl AsRef<ZstdArray> for Leaf {
-    fn as_ref(&self) -> &ZstdArray {
+impl AsRef<ZstdDagCborSeq> for Leaf {
+    fn as_ref(&self) -> &ZstdDagCborSeq {
         &self.0
     }
 }
@@ -443,13 +446,6 @@ impl<
     }
 }
 
-use crate::forest::TreeTypes;
-use std::{
-    fmt::Debug,
-    io::{Cursor, Write},
-    iter::FromIterator,
-};
-
 const CBOR_ARRAY_START: u8 = (4 << 5) | 31;
 const CBOR_BREAK: u8 = 255;
 
@@ -459,6 +455,7 @@ pub(crate) fn serialize_compressed<T: TreeTypes>(
     items: &[Index<T>],
     level: i32,
 ) -> Result<Vec<u8>> {
+    // let encrypted = ZstdDagCborSeq::from_iter(items, level)?;
     let mut links: Vec<(u64, Ipld)> = Vec::new();
     let mut compressed: Vec<u8> = Vec::new();
     compressed.extend_from_slice(&nonce);
@@ -529,7 +526,7 @@ pub(crate) fn zip_with_offset_ref<
     })
 }
 
-#[derive(libipld::DagCbor)]
+#[derive(DagCbor)]
 struct IpldNode(BTreeMap<u64, Ipld>, Box<[u8]>);
 
 type LinksAndData = (Vec<(u64, libipld::Ipld)>, Vec<u8>);

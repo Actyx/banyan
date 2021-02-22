@@ -5,6 +5,7 @@ use libipld::{
     cbor::{decode::TryReadCbor, DagCborCodec},
     codec::{Decode, Encode},
     Cid,
+    DagCbor,
 };
 use multihash::MultihashDigest;
 use serde::{Deserialize, Serialize};
@@ -280,7 +281,7 @@ impl Query<TT> for DnfQuery {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, DagCbor)]
 pub struct KeySeq {
     min_lamport: Vec<u64>,
     min_time: Vec<u64>,

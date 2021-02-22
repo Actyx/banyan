@@ -1,14 +1,13 @@
 use banyan::{
     forest::{BranchCache, CryptoConfig, Forest},
-    index::{CompactSeq, Summarizable},
-};
-use banyan::{
     forest::{Config, Transaction, TreeTypes},
+    index::{CompactSeq, Summarizable},
     memstore::MemStore,
     query::{AllQuery, OffsetRangeQuery},
     tree::Tree,
 };
 use futures::prelude::*;
+use libipld::DagCbor;
 use quickcheck::{Arbitrary, Gen, TestResult};
 use serde::{Deserialize, Serialize};
 use std::{iter, iter::FromIterator, ops::Range};
@@ -20,12 +19,12 @@ type Txn = Transaction<TT, u64, MemStore<Sha256Digest>, MemStore<Sha256Digest>>;
 #[derive(Debug, Clone)]
 struct TT;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, DagCbor)]
 struct Key(u64);
 /// A trivial implementation of a CompactSeq as just a Seq.
 ///
 /// This is useful mostly as a reference impl and for testing.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, DagCbor)]
 struct KeySeq(Vec<Key>);
 
 impl CompactSeq for KeySeq {

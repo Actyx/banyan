@@ -5,13 +5,13 @@ use super::{FilteredChunk, Forest, TreeTypes};
 use crate::query::*;
 use futures::executor::ThreadPool;
 use futures::prelude::*;
-use serde::{de::DeserializeOwned, Serialize};
+use libipld::cbor::DagCbor;
 use std::sync::atomic::Ordering;
 use std::{fmt::Debug, ops::RangeInclusive, sync::atomic::AtomicU64, sync::Arc};
 
 impl<
         T: TreeTypes + 'static,
-        V: Clone + Send + Sync + Debug + Serialize + DeserializeOwned + 'static,
+        V: Clone + Send + Sync + Debug + DagCbor + 'static,
         R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static,
     > Forest<T, V, R>
 {
