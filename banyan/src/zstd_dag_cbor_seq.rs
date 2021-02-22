@@ -13,7 +13,7 @@ use fnv::FnvHashSet;
 use libipld::{
     cbor::DagCborCodec,
     codec::{Codec, Decode, Encode, References},
-    Cid, Ipld,
+    Cid, DagCbor, Ipld,
 };
 use salsa20::{
     cipher::{NewStreamCipher, SyncStreamCipher},
@@ -32,16 +32,27 @@ impl ZstdDagCborSeq {
     }
 
     /// create ZStdArray from a single serializable item
-    pub fn single<T: Encode<DagCborCodec>>(value: &T, level: i32) -> anyhow::Result<Self> {
+    pub fn from_iter<'a, I, T>(iter: I, level: i32) -> anyhow::Result<Self>
+    where
+        I: IntoIterator<Item = &'a T> + 'a,
+        T: Encode<DagCborCodec> + 'a,
+    {
         let mut encoder = zstd::Encoder::new(Vec::new(), level)?;
-        let encoded = DagCborCodec.encode(value)?;
         let mut links = FnvHashSet::default();
-        scrape_links(encoded.as_ref(), &mut links)?;
-        encoder.write_all(encoded.as_ref())?;
+        for item in iter.into_iter() {
+            let encoded = DagCborCodec.encode(item)?;
+            scrape_links(encoded.as_ref(), &mut links)?;
+            encoder.write_all(encoded.as_ref())?;
+        }
         // call finish to write the zstd frame
         let data = encoder.finish()?;
         // box into an arc
         Ok(Self::new(data.into(), links.into_iter().collect()))
+    }
+
+    /// create ZStdArray from a single serializable item
+    pub fn single<T: Encode<DagCborCodec>>(value: &T, level: i32) -> anyhow::Result<Self> {
+        Self::from_iter(std::iter::once(value), level)
     }
 
     /// create a ZStdArray by filling from an iterator
@@ -215,7 +226,7 @@ impl ZstdDagCborSeq {
     }
 }
 
-#[derive(libipld::DagCbor)]
+#[derive(DagCbor)]
 struct IpldNode(Vec<Cid>, Ipld);
 
 impl IpldNode {
