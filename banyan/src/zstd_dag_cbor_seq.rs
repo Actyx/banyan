@@ -6,7 +6,6 @@ use std::{
 };
 
 use crate::thread_local_zstd::decompress_and_transform;
-use fmt::Result;
 use fnv::FnvHashSet;
 use libipld::{
     cbor::DagCborCodec,
@@ -282,7 +281,6 @@ mod tests {
     use std::collections::HashSet;
 
     use super::*;
-    use libipld::cid::multibase::Result;
     use quickcheck::quickcheck;
     use rand::{Rng, SeedableRng};
     use rand_chacha::ChaCha8Rng;

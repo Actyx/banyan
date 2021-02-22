@@ -1,7 +1,6 @@
 use libipld::{
     cbor::{decode::TryReadCbor, DagCborCodec},
     codec::{Decode, Encode},
-    DagCbor,
 };
 use maplit::btreeset;
 use reduce::Reduce;

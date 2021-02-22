@@ -12,15 +12,13 @@ use crate::{
     index::NodeInfo,
     query::Query,
     store::ReadOnlyStore,
-    util::IpldNode,
     util::{BoxedIter, IterExt},
     zstd_dag_cbor_seq::ZstdDagCborSeq,
 };
 use anyhow::{anyhow, Result};
 use core::fmt::Debug;
 use futures::{prelude::*, stream::BoxStream};
-use libipld::{cbor::DagCbor, cbor::DagCborCodec, codec::Codec, DagCbor};
-use salsa20::{cipher::NewStreamCipher, cipher::SyncStreamCipher, XSalsa20};
+use libipld::cbor::DagCbor;
 use std::{iter, sync::Arc, time::Instant};
 
 /// basic random access append only tree

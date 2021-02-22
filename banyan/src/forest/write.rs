@@ -2,14 +2,12 @@ use crate::{
     forest::{BranchResult, Config, CreateMode, Forest, Transaction, TreeTypes},
     index::zip_with_offset_ref,
     store::{BlockWriter, ReadOnlyStore},
-    util::IpldNode,
 };
 use crate::{
     index::serialize_compressed,
     index::BranchIndex,
     index::CompactSeq,
     index::Index,
-    index::Leaf,
     index::LeafIndex,
     index::NodeInfo,
     query::Query,
@@ -18,13 +16,9 @@ use crate::{
 };
 use anyhow::{ensure, Result};
 use core::fmt::Debug;
-use libipld::{
-    cbor::{DagCbor, DagCborCodec},
-    codec::Codec,
-};
+use libipld::cbor::DagCbor;
 use rand::RngCore;
-use salsa20::{cipher::NewStreamCipher, cipher::SyncStreamCipher, XSalsa20};
-use std::{collections::BTreeMap, iter, time::Instant};
+use std::{iter, time::Instant};
 use tracing::info;
 
 /// basic random access append only tree

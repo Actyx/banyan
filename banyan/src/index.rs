@@ -44,10 +44,10 @@ use derive_more::From;
 use libipld::{
     cbor::DagCbor,
     cbor::{decode::TryReadCbor, DagCborCodec},
-    codec::{Codec, Decode, Encode},
-    DagCbor, Ipld,
+    codec::{Decode, Encode},
+    DagCbor,
 };
-use std::{collections::BTreeMap, convert::From, fmt::Debug, io, iter::FromIterator, sync::Arc};
+use std::{fmt::Debug, io, sync::Arc};
 
 /// An object that can compute a summary of type T of itself
 pub trait Summarizable<T> {
