@@ -42,16 +42,11 @@ use crate::{forest::TreeTypes, zstd_dag_cbor_seq::ZstdDagCborSeq};
 use anyhow::{anyhow, Result};
 use derive_more::From;
 use libipld::{cbor::DagCbor, cbor::DagCborCodec, codec::Codec, DagCbor, Ipld};
-use salsa20::{
-    cipher::{NewStreamCipher, SyncStreamCipher},
-    XSalsa20,
-};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
     convert::From,
     fmt::Debug,
-    io::{Cursor, Write},
     iter::FromIterator,
     sync::Arc,
 };
@@ -446,56 +441,22 @@ impl<
     }
 }
 
-const CBOR_ARRAY_START: u8 = (4 << 5) | 31;
-const CBOR_BREAK: u8 = 255;
-
 pub(crate) fn serialize_compressed<T: TreeTypes>(
     key: &salsa20::Key,
     nonce: &salsa20::XNonce,
     items: &[Index<T>],
     level: i32,
 ) -> Result<Vec<u8>> {
-    // let encrypted = ZstdDagCborSeq::from_iter(items, level)?;
-    let mut links: Vec<(u64, Ipld)> = Vec::new();
-    let mut compressed: Vec<u8> = Vec::new();
-    compressed.extend_from_slice(&nonce);
-    let mut writer = zstd::stream::write::Encoder::new(compressed.by_ref(), level)?;
-    writer.write_all(&[CBOR_ARRAY_START])?;
-    for (index, item) in items.iter().enumerate() {
-        if let Some(link) = item.link() {
-            // transcode to an IPLD AST
-            let bytes = DagCborCodec.encode(link)?;
-            let ipld = DagCborCodec.decode(&bytes)?;
-            links.push((index as _, ipld));
-        }
-        serde_cbor::to_writer(writer.by_ref(), &IndexWC::from(item))?;
-    }
-    writer.write_all(&[CBOR_BREAK])?;
-    writer.finish()?;
-    salsa20::XSalsa20::new(key, nonce).apply_keystream(&mut compressed[24..]);
-    Ok(serialize_branch(links, compressed)?)
+    let zs = ZstdDagCborSeq::from_iter(items, level)?;
+    Ok(zs.into_encrypted(nonce, key)?)
 }
 
 pub(crate) fn deserialize_compressed<T: TreeTypes>(
     key: &salsa20::Key,
     ipld: &[u8],
 ) -> Result<Vec<Index<T>>> {
-    let (links, mut compressed) = deserialize_branch(ipld)?;
-    let links: BTreeMap<u64, Ipld> = links.into_iter().collect();
-    if compressed.len() < 24 {
-        return Err(anyhow!("nonce missing"));
-    }
-    let (nonce, compressed) = compressed.split_at_mut(24);
-    XSalsa20::new(key, (&*nonce).into()).apply_keystream(compressed);
-    let reader = zstd::stream::read::Decoder::new(Cursor::new(compressed))?;
-
-    let data: Vec<IndexRC<T::KeySeq, T::SummarySeq>> = serde_cbor::from_reader(reader)?;
-    let result = data
-        .into_iter()
-        .enumerate()
-        .map(|(index, data)| data.into_index(links.get(&(index as _))))
-        .collect::<Vec<_>>();
-    Ok(result)
+    let seq = ZstdDagCborSeq::decrypt(ipld, key)?;
+    seq.items::<Index<T>>()
 }
 
 /// Utility method to zip a number of indices with an offset that is increased by each index value
