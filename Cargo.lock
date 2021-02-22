@@ -99,6 +99,7 @@ dependencies = [
  "quickcheck_async",
  "quickcheck_macros",
  "rand",
+ "rand_chacha",
  "salsa20",
  "serde",
  "serde_cbor",

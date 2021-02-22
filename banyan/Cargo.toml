@@ -36,3 +36,4 @@ quickcheck_macros = "1.0.0"
 sha2 = "0.9.3"
 tokio = { version = "1.2.0", features = ["full"] }
 tracing-subscriber = "0.2.15"
+rand_chacha = "0.3.0"

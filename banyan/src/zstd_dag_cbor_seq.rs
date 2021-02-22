@@ -1,35 +1,47 @@
 use std::{
     fmt,
-    io::{Cursor, Write},
+    io::{Cursor, Read, Write},
     iter,
     sync::Arc,
     time::Instant,
 };
 
 use crate::thread_local_zstd::decompress_and_transform;
+use anyhow::ensure;
+use fmt::Result;
+use fnv::FnvHashSet;
 use libipld::{
-    cbor::{DagCbor, DagCborCodec},
-    codec::{Codec, Decode, Encode},
+    cbor::DagCborCodec,
+    codec::{Codec, Decode, Encode, References},
+    Cid, Ipld,
+};
+use salsa20::{
+    cipher::{NewStreamCipher, SyncStreamCipher},
+    XSalsa20,
 };
 
+#[derive(Clone)]
 struct ZstdDagCborSeq {
-    data: Arc<[u8]>,
+    data: Vec<u8>,
+    links: Vec<Cid>,
 }
 
 impl ZstdDagCborSeq {
-    pub fn new(data: Arc<[u8]>) -> Self {
-        Self { data }
+    fn new(data: Vec<u8>, links: Vec<Cid>) -> Self {
+        Self { data, links }
     }
 
     /// create ZStdArray from a single serializable item
     pub fn single<T: Encode<DagCborCodec>>(value: &T, level: i32) -> anyhow::Result<Self> {
         let mut encoder = zstd::Encoder::new(Vec::new(), level)?;
-        // write the value directly to the encoder
-        value.encode(DagCborCodec, &mut encoder)?;
+        let encoded = DagCborCodec.encode(value)?;
+        let mut links = FnvHashSet::default();
+        scrape_links(encoded.as_ref(), &mut links)?;
+        encoder.write_all(encoded.as_ref())?;
         // call finish to write the zstd frame
         let data = encoder.finish()?;
         // box into an arc
-        Ok(Self::new(data.into()))
+        Ok(Self::new(data.into(), links.into_iter().collect()))
     }
 
     /// create a ZStdArray by filling from an iterator
@@ -42,6 +54,7 @@ impl ZstdDagCborSeq {
         keys: &mut Vec<K>,
         max_keys: usize,
     ) -> anyhow::Result<(Self, bool)> {
+        let mut links = FnvHashSet::default();
         let t0 = Instant::now();
         let compressed_size = compressed_size as usize;
         let uncompressed_size = uncompressed_size as usize;
@@ -51,9 +64,12 @@ impl ZstdDagCborSeq {
         // also init decompressed size
         let mut size = if !compressed.is_empty() {
             // the first ? is to handle the io error from decompress_and_transform, the second to handle the inner io error from write_all
-            let (size, data) = decompress_and_transform(compressed, &mut |decompressed| {
-                encoder.write_all(decompressed)
-            })?;
+            let (size, data) =
+                decompress_and_transform(compressed, &mut |decompressed| -> anyhow::Result<()> {
+                    scrape_links(decompressed.as_ref(), &mut links)?;
+                    encoder.write_all(decompressed)?;
+                    Ok(())
+                })?;
             data?;
             size
         } else {
@@ -99,7 +115,7 @@ impl ZstdDagCborSeq {
         full |= keys.len() >= max_keys;
         full |= size >= uncompressed_size;
         // box into an arc
-        Ok((Self::new(data.into()), full))
+        Ok((Self::new(data.into(), links.into_iter().collect()), full))
     }
 
     /// Get the compressed data
@@ -167,18 +183,79 @@ impl ZstdDagCborSeq {
         })?;
         data
     }
+
+    pub fn encrypt(&self, nonce: salsa20::XNonce, key: salsa20::Key) -> anyhow::Result<Vec<u8>> {
+        self.clone().into_encrypted(nonce, key)
+    }
+
+    pub fn into_encrypted(
+        self,
+        nonce: salsa20::XNonce,
+        key: salsa20::Key,
+    ) -> anyhow::Result<Vec<u8>> {
+        let Self { mut data, links } = self;
+        // encrypt in place with the key and nonce
+        XSalsa20::new(&key, &nonce).apply_keystream(&mut data);
+        // add the nonce
+        data.extend(nonce.as_slice());
+        // encode via IpldNode
+        DagCborCodec.encode(&IpldNode::new(links, data))
+    }
+
+    pub fn decrypt(data: &[u8], key: salsa20::Key) -> anyhow::Result<Self> {
+        let (links, mut encrypted) = DagCborCodec.decode::<IpldNode>(data)?.into_data()?;
+        let len = encrypted.len();
+        anyhow::ensure!(len >= 24);
+        let (compressed, nonce) = encrypted.split_at_mut(len - 24);
+        XSalsa20::new(&key, (&*nonce).into()).apply_keystream(compressed);
+        // just remove the nonce, but don't use a new vec.
+        let mut decrypted = encrypted;
+        decrypted.drain(len - 24..);
+        Ok(Self::new(decrypted, links))
+    }
+}
+
+#[derive(libipld::DagCbor)]
+struct IpldNode(Vec<Cid>, Ipld);
+
+impl IpldNode {
+    fn new(links: Vec<Cid>, data: impl Into<Vec<u8>>) -> Self {
+        Self(links, Ipld::Bytes(data.into()))
+    }
+
+    fn into_data(self) -> anyhow::Result<(Vec<Cid>, Vec<u8>)> {
+        if let Ipld::Bytes(data) = self.1 {
+            Ok((self.0, data))
+        } else {
+            Err(anyhow::anyhow!("expected ipld bytes"))
+        }
+    }
 }
 
 impl fmt::Debug for ZstdDagCborSeq {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "ZstdArray")
+        write!(f, "ZstdDagCborSeq")
     }
+}
+
+fn scrape_links<C: Extend<Cid>>(data: &[u8], c: &mut C) -> anyhow::Result<()> {
+    let mut cursor = Cursor::new(data);
+    let size = data.len() as u64;
+    while cursor.position() < size {
+        <Ipld as References<DagCborCodec>>::references(DagCborCodec, &mut cursor, c)?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
     use super::*;
+    use libipld::cid::multibase::Result;
     use quickcheck::quickcheck;
+    use rand::{Rng, SeedableRng};
+    use rand_chacha::ChaCha8Rng;
 
     #[test]
     fn zstd_array_fill_oversized() -> anyhow::Result<()> {
@@ -245,9 +322,33 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn zstd_array_link_extract() -> anyhow::Result<()> {
+        use std::str::FromStr;
+        let cids = [
+            Cid::from_str("bafyreihtx752fmf3zafbys5dtr4jxohb53yi3qtzfzf6wd5274jwtn5agu")?,
+            Cid::from_str("bafyreiabupkdnos4dswptmc7ujczszggedg6pyijf2zrnhsx7sv73x2umq")?,
+            Cid::from_str("bafyreifs65kond7gvtknoqe2vehsy3rhdmhxwnuwc2xxkoti3hwpjaeadu")?,
+            Cid::from_str("bafyreidiz2cvkda77gzi6ljsow6sssypt2kgdvou5wbmyi534styi5hgku")?,
+        ];
+        let data = |i: usize| Ipld::List(vec![Ipld::Link(cids[i % cids.len()])]);
+        let items = (0..100).map(data).collect::<Vec<_>>();
+        let za = ZstdDagCborSeq::single(&items, 10)?;
+        assert_eq!(za.links.len(), 4);
+        assert_eq!(
+            za.links.iter().collect::<HashSet<_>>(),
+            cids.iter().collect::<HashSet<_>>()
+        );
+        Ok(())
+    }
+
     /// basic test to ensure that the decompress works and properly clears the thread local buffer
     #[quickcheck]
-    fn zstd_array_fill_roundtrip(first: Vec<u8>, data: Vec<Vec<u8>>) -> anyhow::Result<bool> {
+    fn zstd_array_fill_roundtrip(
+        first: Vec<u8>,
+        data: Vec<Vec<u8>>,
+        seed: u64,
+    ) -> anyhow::Result<bool> {
         let bytes = data.iter().map(|x| x.len()).sum::<usize>() as u64;
         let target_size = bytes / 2;
         let initial = ZstdDagCborSeq::single(&first, 0)?;
@@ -262,6 +363,11 @@ mod tests {
             &mut keys,
             usize::max_value(),
         )?;
+        let mut rng = ChaCha8Rng::seed_from_u64(seed);
+        let nonce: salsa20::XNonce = rand::thread_rng().gen::<[u8; 24]>().into();
+        let key: salsa20::Key = rand::thread_rng().gen::<[u8; 32]>().into();
+        let encrypted = za.encrypt(nonce, key)?;
+        let za2 = ZstdDagCborSeq::decrypt(&encrypted, key)?;
         // println!("compressed={} n={} bytes={}", za.compressed().len(), data.len(), bytes);
         let mut decompressed = za.items::<Vec<u8>>()?;
         let first1 = decompressed
