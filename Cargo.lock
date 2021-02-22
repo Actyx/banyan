@@ -101,8 +101,6 @@ dependencies = [
  "rand",
  "rand_chacha",
  "salsa20",
- "serde",
- "serde_cbor",
  "sha2",
  "tokio",
  "tracing",

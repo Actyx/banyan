@@ -64,7 +64,6 @@ pub mod store;
 mod thread_local_zstd;
 pub mod tree;
 mod util;
-mod zstd_array;
 mod zstd_dag_cbor_seq;
 
 #[cfg(test)]

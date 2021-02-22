@@ -42,14 +42,7 @@ use crate::{forest::TreeTypes, zstd_dag_cbor_seq::ZstdDagCborSeq};
 use anyhow::{anyhow, Result};
 use derive_more::From;
 use libipld::{cbor::DagCbor, cbor::DagCborCodec, codec::Codec, DagCbor, Ipld};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use std::{
-    collections::BTreeMap,
-    convert::From,
-    fmt::Debug,
-    iter::FromIterator,
-    sync::Arc,
-};
+use std::{collections::BTreeMap, convert::From, fmt::Debug, iter::FromIterator, sync::Arc};
 
 /// An object that can compute a summary of type T of itself
 pub trait Summarizable<T> {
@@ -60,7 +53,7 @@ pub trait Summarizable<T> {
 ///
 /// in general, this will have a different internal representation than just a bunch of values that is more compact and
 /// makes it easier to query an entire sequence for matching indices.
-pub trait CompactSeq: Serialize + DeserializeOwned {
+pub trait CompactSeq: DagCbor {
     /// item type
     type Item;
     /// number of elements
@@ -325,122 +318,6 @@ pub(crate) enum NodeInfo<'a, T: TreeTypes> {
     PurgedLeaf(&'a LeafIndex<T>),
 }
 
-#[derive(Debug, Clone, Serialize)]
-#[serde(untagged)]
-enum IndexWC<'a, KS, SS> {
-    Branch {
-        // block is sealed
-        sealed: bool,
-        // value bytes statistics
-        value_bytes: u64,
-        // number of events
-        count: u64,
-        // level of the tree node
-        level: u32,
-        // key bytes statistics
-        key_bytes: u64,
-        // summaries
-        summaries: &'a SS,
-    },
-    Leaf {
-        // block is sealed
-        sealed: bool,
-        // value bytes statistics
-        value_bytes: u64,
-        // keys
-        keys: &'a KS,
-    },
-}
-
-impl<'a, T: TreeTypes> From<&'a Index<T>> for IndexWC<'a, T::KeySeq, T::SummarySeq> {
-    fn from(value: &'a Index<T>) -> Self {
-        match value {
-            Index::Branch(i) => Self::Branch {
-                sealed: i.sealed,
-                summaries: &i.summaries,
-                value_bytes: i.value_bytes,
-                count: i.count,
-                level: i.level,
-                key_bytes: i.key_bytes,
-            },
-            Index::Leaf(i) => Self::Leaf {
-                sealed: i.sealed,
-                keys: &i.keys,
-                value_bytes: i.value_bytes,
-            },
-        }
-    }
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(untagged)]
-enum IndexRC<KS, SS> {
-    Branch {
-        sealed: bool,
-        value_bytes: u64,
-        summaries: SS,
-        count: u64,
-        level: u32,
-        key_bytes: u64,
-    },
-    Leaf {
-        sealed: bool,
-        value_bytes: u64,
-        keys: KS,
-    },
-}
-
-impl<
-        K: Eq + Debug + Send,
-        KS: CompactSeq<Item = K> + Clone + Debug + FromIterator<K> + Send + Sync,
-        S: Eq + Debug + Send,
-        SS: CompactSeq<Item = S> + Clone + Debug + FromIterator<S> + Send + Sync,
-    > IndexRC<KS, SS>
-{
-    fn into_index<T: TreeTypes<KeySeq = KS, Key = K, SummarySeq = SS, Summary = S>>(
-        self,
-        links: Option<&Ipld>,
-    ) -> Index<T> {
-        let link = if let Some(link) = links {
-            let bytes = DagCborCodec.encode(link).unwrap();
-            let link: T::Link = DagCborCodec.decode(&bytes).unwrap();
-            Some(link)
-        } else {
-            None
-        };
-        match self {
-            Self::Branch {
-                sealed,
-                value_bytes,
-                summaries,
-                count,
-                level,
-                key_bytes,
-            } => BranchIndex {
-                summaries,
-                sealed,
-                key_bytes,
-                value_bytes,
-                count,
-                level,
-                link,
-            }
-            .into(),
-            Self::Leaf {
-                sealed,
-                value_bytes,
-                keys,
-            } => LeafIndex {
-                keys,
-                sealed,
-                value_bytes,
-                link,
-            }
-            .into(),
-        }
-    }
-}
-
 pub(crate) fn serialize_compressed<T: TreeTypes>(
     key: &salsa20::Key,
     nonce: &salsa20::XNonce,
@@ -487,53 +364,37 @@ pub(crate) fn zip_with_offset_ref<
     })
 }
 
-#[derive(DagCbor)]
-struct IpldNode(BTreeMap<u64, Ipld>, Box<[u8]>);
-
-type LinksAndData = (Vec<(u64, libipld::Ipld)>, Vec<u8>);
-
-fn serialize_branch(links: Vec<(u64, libipld::Ipld)>, data: Vec<u8>) -> anyhow::Result<Vec<u8>> {
-    let node = IpldNode(links.into_iter().collect(), data.into());
-    let bytes = DagCborCodec.encode(&node)?;
-    Ok(bytes)
-}
-
-fn deserialize_branch(data: &[u8]) -> anyhow::Result<LinksAndData> {
-    let IpldNode(links, data) = DagCborCodec.decode(data)?;
-    Ok((links.into_iter().collect(), data.into()))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_disk_format() {
-        let bytes = serialize_branch(
-            vec![(42, Ipld::Integer(255)), (43, Ipld::Integer(-367))],
-            b"abcd".to_vec(),
-        )
-        .unwrap();
-        assert_eq!(
-            bytes,
-            vec![
-                0x82, // list 0x80 of length 2
-                0xa2, // map 0xa0 of length 2
-                0x18, // u8
-                42,   // value
-                0x18, // u8
-                255,  // value
-                0x18, // u8
-                43,   // value
-                0x39, // i16
-                1,    // -1 - (256 + 110) = -367
-                110,  // second byte of i16
-                0x44, // bytes 0x40 of length 4
-                97,   // a
-                98,   // b
-                99,   // c
-                100,  // d
-            ]
-        );
+        // let bytes = serialize_branch(
+        //     vec![(42, Ipld::Integer(255)), (43, Ipld::Integer(-367))],
+        //     b"abcd".to_vec(),
+        // )
+        // .unwrap();
+        // assert_eq!(
+        //     bytes,
+        //     vec![
+        //         0x82, // list 0x80 of length 2
+        //         0xa2, // map 0xa0 of length 2
+        //         0x18, // u8
+        //         42,   // value
+        //         0x18, // u8
+        //         255,  // value
+        //         0x18, // u8
+        //         43,   // value
+        //         0x39, // i16
+        //         1,    // -1 - (256 + 110) = -367
+        //         110,  // second byte of i16
+        //         0x44, // bytes 0x40 of length 4
+        //         97,   // a
+        //         98,   // b
+        //         99,   // c
+        //         100,  // d
+        //     ]
+        // );
     }
 }

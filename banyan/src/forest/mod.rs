@@ -7,7 +7,6 @@ use futures::future::BoxFuture;
 use libipld::cbor::DagCbor;
 use lru::LruCache;
 use rand::RngCore;
-use serde::{de::DeserializeOwned, Serialize};
 use std::{
     fmt::Display,
     sync::{Arc, Mutex},

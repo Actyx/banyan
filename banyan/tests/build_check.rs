@@ -9,7 +9,6 @@ use banyan::{
 use futures::prelude::*;
 use libipld::DagCbor;
 use quickcheck::{Arbitrary, Gen, TestResult};
-use serde::{Deserialize, Serialize};
 use std::{iter, iter::FromIterator, ops::Range};
 use store::Sha256Digest;
 mod store;
@@ -19,12 +18,12 @@ type Txn = Transaction<TT, u64, MemStore<Sha256Digest>, MemStore<Sha256Digest>>;
 #[derive(Debug, Clone)]
 struct TT;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, DagCbor)]
+#[derive(Debug, Clone, PartialEq, Eq, DagCbor)]
 struct Key(u64);
 /// A trivial implementation of a CompactSeq as just a Seq.
 ///
 /// This is useful mostly as a reference impl and for testing.
-#[derive(Debug, Clone, Serialize, Deserialize, DagCbor)]
+#[derive(Debug, Clone, DagCbor)]
 struct KeySeq(Vec<Key>);
 
 impl CompactSeq for KeySeq {

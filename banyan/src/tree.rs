@@ -8,7 +8,6 @@ use crate::{query::Query, store::ReadOnlyStore, util::IterExt};
 use anyhow::Result;
 use futures::prelude::*;
 use libipld::cbor::DagCbor;
-use serde::{de::DeserializeOwned, Serialize};
 use std::{fmt, fmt::Debug, iter, sync::Arc};
 use tracing::*;
 
