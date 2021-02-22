@@ -407,27 +407,26 @@ fn leaf_index_wire_format() -> anyhow::Result<()> {
     let serialized = DagCborCodec.encode(&index)?;
     let expected = from_cbor_me(
         r#"
-81                                       # array(1)
-    A4                                   # map(4)
-       64                                # text(4)
-          6B657973                       # "keys"
-       81                                # array(1)
-          82                             # array(2)
-             81                          # array(1)
-                01                       # unsigned(1)
-             81                          # array(1)
-                02                       # unsigned(2)
-       64                                # text(4)
-          6C696E6B                       # "link"
-       D8 2A                             # tag(42)
-          58 25                          # bytes(37)
-             0001711220F3BFFBA2B0BBC80A1C4BA39C789BB8E1EEF08DC2792E4BEB0FBAFF1369B7A035 # "\x00\x01q\x12 \xF3\xBF\xFB\xA2\xB0\xBB\xC8\n\x1CK\xA3\x9Cx\x9B\xB8\xE1\xEE\xF0\x8D\xC2y.K\xEB\x0F\xBA\xFF\x13i\xB7\xA05"
-       66                                # text(6)
-          7365616C6564                   # "sealed"
-       F5                                # primitive(21)
-       6B                                # text(11)
-          76616C75655F6279746573         # "value_bytes"
-       19 04D2                           # unsigned(1234)
+A4                                      # map(4)
+   64                                   # text(4)
+      6B657973                          # "keys"
+   81                                   # array(1)
+      82                                # array(2)
+         81                             # array(1)
+            01                          # unsigned(1)
+         81                             # array(1)
+            02                          # unsigned(2)
+   64                                   # text(4)
+      6C696E6B                          # "link"
+   D8 2A                                # tag(42)
+      58 25                             # bytes(37)
+         0001711220F3BFFBA2B0BBC80A1C4BA39C789BB8E1EEF08DC2792E4BEB0FBAFF1369B7A035 # "\x00\x01q\x12 \xF3\xBF\xFB\xA2\xB0\xBB\xC8\n\x1CK\xA3\x9Cx\x9B\xB8\xE1\xEE\xF0\x8D\xC2y.K\xEB\x0F\xBA\xFF\x13i\xB7\xA05"
+   66                                   # text(6)
+      7365616C6564                      # "sealed"
+   F5                                   # primitive(21)
+   6B                                   # text(11)
+      76616C75655F6279746573            # "value_bytes"
+   19 04D2                              # unsigned(1234)
 "#,
     )?;
     assert_eq!(serialized, expected);
@@ -451,36 +450,36 @@ fn branch_index_wire_format() -> anyhow::Result<()> {
     let serialized = DagCborCodec.encode(&index)?;
     let expected = from_cbor_me(
         r#"
-81                                       # array(1)
-    A7                                   # map(7)
-       65                                # text(5)
-          636F756E74                     # "count"
-       19 8FB0                           # unsigned(36784)
-       69                                # text(9)
-          6B65795F6279746573             # "key_bytes"
-       1A 000108FA                       # unsigned(67834)
-       65                                # text(5)
-          6C6576656C                     # "level"
-       03                                # unsigned(3)
-       64                                # text(4)
-          6C696E6B                       # "link"
-       D8 2A                             # tag(42)
-          58 25                          # bytes(37)
-             0001711220F3BFFBA2B0BBC80A1C4BA39C789BB8E1EEF08DC2792E4BEB0FBAFF1369B7A035 # "\x00\x01q\x12 \xF3\xBF\xFB\xA2\xB0\xBB\xC8\n\x1CK\xA3\x9Cx\x9B\xB8\xE1\xEE\xF0\x8D\xC2y.K\xEB\x0F\xBA\xFF\x13i\xB7\xA05"
-       66                                # text(6)
-          7365616C6564                   # "sealed"
-       F5                                # primitive(21)
-       69                                # text(9)
-          73756D6D6172696573             # "summaries"
-       81                                # array(1)
-          82                             # array(2)
-             81                          # array(1)
-                01                       # unsigned(1)
-             81                          # array(1)
-                02                       # unsigned(2)
-       6B                                # text(11)
-          76616C75655F6279746573         # "value_bytes"
-       1A 075C2380                       # unsigned(123478912)
+A7                                      # map(7)
+   65                                   # text(5)
+      636F756E74                        # "count"
+   19 8FB0                              # unsigned(36784)
+   69                                   # text(9)
+      6B65795F6279746573                # "key_bytes"
+   1A 000108FA                          # unsigned(67834)
+   65                                   # text(5)
+      6C6576656C                        # "level"
+   03                                   # unsigned(3)
+   64                                   # text(4)
+      6C696E6B                          # "link"
+   D8 2A                                # tag(42)
+      58 25                             # bytes(37)
+         0001711220F3BFFBA2B0BBC80A1C4BA39C789BB8E1EEF08DC2792E4BEB0FBAFF1369B7A035 # "\x00\x01q\x12 \xF3\xBF\xFB\xA2\xB0\xBB\xC8\n\x1CK\xA3\x9Cx\x9B\xB8\xE1\xEE\xF0\x8D\xC2y.K\xEB\x0F\xBA\xFF\x13i\xB7\xA05"
+   66                                   # text(6)
+      7365616C6564                      # "sealed"
+   F5                                   # primitive(21)
+   69                                   # text(9)
+      73756D6D6172696573                # "summaries"
+   81                                   # array(1)
+      82                                # array(2)
+         81                             # array(1)
+            01                          # unsigned(1)
+         81                             # array(1)
+            02                          # unsigned(2)
+   6B                                   # text(11)
+      76616C75655F6279746573            # "value_bytes"
+   1A 075C2380                          # unsigned(123478912)
+
 "#,
     )?;
     assert_eq!(serialized, expected);

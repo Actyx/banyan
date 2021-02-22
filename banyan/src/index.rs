@@ -41,8 +41,13 @@
 use crate::{forest::TreeTypes, zstd_dag_cbor_seq::ZstdDagCborSeq};
 use anyhow::{anyhow, Result};
 use derive_more::From;
-use libipld::{cbor::DagCbor, cbor::DagCborCodec, codec::Codec, DagCbor, Ipld};
-use std::{collections::BTreeMap, convert::From, fmt::Debug, iter::FromIterator, sync::Arc};
+use libipld::{
+    cbor::DagCbor,
+    cbor::{decode::TryReadCbor, DagCborCodec},
+    codec::{Codec, Decode, Encode},
+    DagCbor, Ipld,
+};
+use std::{collections::BTreeMap, convert::From, fmt::Debug, io, iter::FromIterator, sync::Arc};
 
 /// An object that can compute a summary of type T of itself
 pub trait Summarizable<T> {
@@ -166,11 +171,43 @@ impl<T: TreeTypes> BranchIndex<T> {
 }
 
 /// enum for a leaf or branch index
-#[derive(Debug, From, DagCbor)]
-#[ipld(repr = "kinded")]
+#[derive(Debug, From)]
 pub enum Index<T: TreeTypes> {
     Leaf(LeafIndex<T>),
     Branch(BranchIndex<T>),
+}
+
+impl<T: TreeTypes> Encode<DagCborCodec> for Index<T> {
+    fn encode<W: std::io::Write>(&self, c: DagCborCodec, w: &mut W) -> Result<()> {
+        match self {
+            Index::Leaf(leaf) => leaf.encode(c, w),
+            Index::Branch(branch) => branch.encode(c, w),
+        }
+    }
+}
+
+impl<T: TreeTypes> Decode<DagCborCodec> for Index<T> {
+    fn decode<R: std::io::Read + std::io::Seek>(c: DagCborCodec, r: &mut R) -> Result<Self> {
+        let pos = r.seek(io::SeekFrom::Current(0))?;
+        if let Ok(res) = Decode::decode(c, r) {
+            return Ok(Index::Leaf(res));
+        }
+        r.seek(io::SeekFrom::Start(pos))?;
+        if let Ok(res) = Decode::decode(c, r) {
+            return Ok(Index::Branch(res));
+        }
+        Err(anyhow!("unable to decode!"))
+    }
+}
+
+impl<T: TreeTypes> TryReadCbor for Index<T> {
+    fn try_read_cbor<R: std::io::Read + std::io::Seek>(
+        r: &mut R,
+        _major: u8,
+    ) -> Result<Option<Self>> {
+        r.seek(io::SeekFrom::Current(-1))?;
+        Decode::decode(DagCborCodec, r).map(Some)
+    }
 }
 
 /// enum for a leaf or branch index
