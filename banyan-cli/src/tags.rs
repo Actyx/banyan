@@ -4,8 +4,7 @@ use banyan::{forest::*, query::Query};
 use libipld::{
     cbor::{decode::TryReadCbor, DagCborCodec},
     codec::{Decode, Encode},
-    Cid,
-    DagCbor,
+    Cid, DagCbor,
 };
 use multihash::MultihashDigest;
 use serde::{Deserialize, Serialize};

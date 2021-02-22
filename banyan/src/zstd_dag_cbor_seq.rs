@@ -424,9 +424,9 @@ mod tests {
 
     #[test]
     fn test_disk_format() -> anyhow::Result<()> {
-        let data = vec![1u32,2,3,4];
-        let nonce: salsa20::XNonce = [0u8;24].into();
-        let key: salsa20::Key = [0u8;32].into();
+        let data = vec![1u32, 2, 3, 4];
+        let nonce: salsa20::XNonce = [0u8; 24].into();
+        let key: salsa20::Key = [0u8; 32].into();
 
         let res = ZstdDagCborSeq::single(&data, 10)?;
         let bytes = res.encrypt(&nonce, &key)?;

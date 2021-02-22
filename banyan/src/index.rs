@@ -167,6 +167,7 @@ impl<T: TreeTypes> BranchIndex<T> {
 
 /// enum for a leaf or branch index
 #[derive(Debug, From, DagCbor)]
+#[ipld(repr = "kinded")]
 pub enum Index<T: TreeTypes> {
     Leaf(LeafIndex<T>),
     Branch(BranchIndex<T>),
