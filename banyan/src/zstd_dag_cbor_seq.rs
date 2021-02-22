@@ -364,6 +364,7 @@ mod tests {
         let data = |i: usize| Ipld::List(vec![Ipld::Link(cids[i % cids.len()])]);
         let items = (0..100).map(data).collect::<Vec<_>>();
         let za = ZstdDagCborSeq::single(&items, 10)?;
+        // test that links are deduped
         assert_eq!(za.links.len(), 4);
         assert_eq!(
             za.links.iter().collect::<HashSet<_>>(),
@@ -419,5 +420,46 @@ mod tests {
             return Ok(false);
         }
         Ok(true)
+    }
+
+    #[test]
+    fn test_disk_format() -> anyhow::Result<()> {
+        let data = vec![1u32,2,3,4];
+        let nonce: salsa20::XNonce = [0u8;24].into();
+        let key: salsa20::Key = [0u8;32].into();
+
+        let res = ZstdDagCborSeq::single(&data, 10)?;
+        let bytes = res.encrypt(&nonce, &key)?;
+
+        // do not exactly check the compressed and encrypted part, since the exact
+        // bytes depend on zstd details and might be fragile.
+        assert_eq!(
+            bytes[0..2],
+            vec![
+                0x82, // list 0x80 of length 2
+                0x80, // array of links, size 0 (no links)
+            ]
+        );
+        let items: Vec<Ipld> = DagCborCodec.decode(&bytes)?;
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0], Ipld::List(vec![]));
+        if let Ipld::Bytes(bytes) = &items[1] {
+            use std::ops::Deref;
+            let len = bytes.len();
+            assert!(len >= 24);
+            // nonce should be stored last
+            let (encrypted, nonce1) = bytes.split_at(len - 24);
+            assert_eq!(nonce1, nonce.deref());
+            // once decrypted, must be valid zstd
+            let mut decrypted = encrypted.to_vec();
+            XSalsa20::new(&key, (&*nonce).into()).apply_keystream(&mut decrypted);
+            let decompressed = zstd::decode_all(Cursor::new(decrypted))?;
+            // finally, compare with the original data
+            let data1: Vec<u32> = DagCborCodec.decode(&decompressed)?;
+            assert_eq!(data1, data);
+        } else {
+            assert!(false);
+        }
+        Ok(())
     }
 }

@@ -7,6 +7,7 @@ use std::{
     collections::BTreeSet,
     ops::{BitAnd, BitOr},
 };
+use libipld::{DagCbor, cbor::{DagCborCodec, decode::TryReadCbor}, codec::{Decode, Encode}};
 use vec_collections::{vecset, VecSet};
 /// An index set is a set of u32 indices into the string table that will not allocate for up to 4 indices.
 /// The size of a non-spilled IndexSet is 32 bytes on 64 bit architectures, so just 8 bytes more than a Vec.
@@ -21,6 +22,23 @@ pub struct TagIndex {
     pub(crate) tags: TagSet,
     /// indices in these sets are guaranteed to correspond to strings in the strings table
     pub(crate) elements: Vec<IndexSet>,
+}
+
+impl Encode<DagCborCodec> for TagIndex {
+    fn encode<W: std::io::Write>(&self, c: DagCborCodec, w: &mut W) -> anyhow::Result<()> {
+        todo!()
+    }
+}
+
+impl Decode<DagCborCodec> for TagIndex {
+    fn decode<R: std::io::Read + std::io::Seek>(c: DagCborCodec, r: &mut R) -> anyhow::Result<Self> {
+        todo!()
+    }
+}
+impl TryReadCbor for TagIndex {
+    fn try_read_cbor<R: std::io::Read + std::io::Seek>(r: &mut R, major: u8) -> anyhow::Result<Option<Self>> {
+        todo!()
+    }
 }
 
 impl Serialize for TagIndex {

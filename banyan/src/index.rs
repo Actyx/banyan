@@ -363,38 +363,3 @@ pub(crate) fn zip_with_offset_ref<
         Some((x, o0))
     })
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_disk_format() {
-        // let bytes = serialize_branch(
-        //     vec![(42, Ipld::Integer(255)), (43, Ipld::Integer(-367))],
-        //     b"abcd".to_vec(),
-        // )
-        // .unwrap();
-        // assert_eq!(
-        //     bytes,
-        //     vec![
-        //         0x82, // list 0x80 of length 2
-        //         0xa2, // map 0xa0 of length 2
-        //         0x18, // u8
-        //         42,   // value
-        //         0x18, // u8
-        //         255,  // value
-        //         0x18, // u8
-        //         43,   // value
-        //         0x39, // i16
-        //         1,    // -1 - (256 + 110) = -367
-        //         110,  // second byte of i16
-        //         0x44, // bytes 0x40 of length 4
-        //         97,   // a
-        //         98,   // b
-        //         99,   // c
-        //         100,  // d
-        //     ]
-        // );
-    }
-}
