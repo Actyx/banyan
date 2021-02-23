@@ -1,4 +1,5 @@
 use std::{
+    convert::TryFrom,
     fmt,
     io::{Cursor, Write},
     iter,
@@ -176,21 +177,23 @@ impl ZstdDagCborSeq {
     ///
     /// Other items will be skipped when deserializing, saving some unnecessary work.
     pub fn select<T: Decode<DagCborCodec>>(&self, take: &[bool]) -> anyhow::Result<Vec<T>> {
+        let take = shrink_to_fit(take);
+        if take.is_empty() {
+            return Ok(Vec::new());
+        }
         let (_, data) = decompress_and_transform(self.compressed(), &mut |uncompressed| {
             let mut result: Vec<T> = Vec::new();
             let mut r = Cursor::new(uncompressed);
-            let mut i: usize = 0;
-            while r.position() < uncompressed.len() as u64 {
-                if i < take.len() {
-                    if take[i] {
-                        result.push(T::decode(DagCborCodec, &mut r)?);
-                    } else {
-                        // decode, but ignore the result.
-                        IgnoredAny::decode(DagCborCodec, &mut r)?;
-                    }
-                    i += 1;
-                } else {
+            let len = u64::try_from(uncompressed.len())?;
+            for take in take.iter().cloned() {
+                if r.position() > len {
                     break;
+                }
+                if take {
+                    result.push(T::decode(DagCborCodec, &mut r)?);
+                } else {
+                    // decode, but ignore the result.
+                    IgnoredAny::decode(DagCborCodec, &mut r)?;
                 }
             }
             Ok(result)
@@ -245,6 +248,15 @@ impl IpldNode {
             Err(anyhow::anyhow!("expected ipld bytes"))
         }
     }
+}
+
+fn shrink_to_fit(slice: &[bool]) -> &[bool] {
+    for i in (0..slice.len()).rev() {
+        if slice[i] {
+            return &slice[0..=i];
+        }
+    }
+    return &[];
 }
 
 impl fmt::Debug for ZstdDagCborSeq {
