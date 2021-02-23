@@ -68,9 +68,7 @@ impl Decode<DagCborCodec> for TagIndex {
             .collect();
         for s in &elements {
             for x in s {
-                if *x as usize >= tags.len() {
-                    return Err(anyhow::anyhow!("invalid string index"));
-                }
+                anyhow::ensure!((*x as usize) < tags.len(), "invalid string index");
             }
         }
         Ok(Self { tags, elements })
