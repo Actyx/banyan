@@ -42,8 +42,7 @@ use crate::{forest::TreeTypes, zstd_dag_cbor_seq::ZstdDagCborSeq};
 use anyhow::{anyhow, Result};
 use derive_more::From;
 use libipld::{
-    cbor::DagCbor,
-    cbor::{decode::TryReadCbor, DagCborCodec},
+    cbor::{DagCbor, DagCborCodec},
     codec::{Decode, Encode},
     DagCbor,
 };
@@ -197,16 +196,6 @@ impl<T: TreeTypes> Decode<DagCborCodec> for Index<T> {
             return Ok(Index::Branch(res));
         }
         Err(anyhow!("unable to decode!"))
-    }
-}
-
-impl<T: TreeTypes> TryReadCbor for Index<T> {
-    fn try_read_cbor<R: std::io::Read + std::io::Seek>(
-        r: &mut R,
-        _major: u8,
-    ) -> Result<Option<Self>> {
-        r.seek(io::SeekFrom::Current(-1))?;
-        Decode::decode(DagCborCodec, r).map(Some)
     }
 }
 

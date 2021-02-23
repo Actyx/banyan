@@ -1,6 +1,6 @@
 //! helper methods for the tests
 use libipld::{
-    cbor::{decode::TryReadCbor, DagCborCodec},
+    cbor::DagCborCodec,
     codec::{Decode, Encode},
     Cid,
 };
@@ -23,16 +23,6 @@ impl Decode<DagCborCodec> for Sha256Digest {
 impl Encode<DagCborCodec> for Sha256Digest {
     fn encode<W: Write>(&self, c: DagCborCodec, w: &mut W) -> anyhow::Result<()> {
         libipld::Cid::encode(&Cid::from(*self), c, w)
-    }
-}
-
-impl TryReadCbor for Sha256Digest {
-    fn try_read_cbor<R: Read + Seek>(r: &mut R, major: u8) -> anyhow::Result<Option<Self>> {
-        if let Some(cid) = libipld::Cid::try_read_cbor(r, major)? {
-            Ok(Some(Self::try_from(cid)?))
-        } else {
-            Ok(None)
-        }
     }
 }
 

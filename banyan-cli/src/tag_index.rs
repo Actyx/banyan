@@ -1,7 +1,7 @@
 use anyhow::ensure;
 use libipld::{
     cbor::{
-        decode::{read_len, read_list, read_list_il, read_u8, TryReadCbor},
+        decode::{read_len, read_list, read_list_il, read_u8},
         encode::write_u64,
         error::UnexpectedCode,
         DagCborCodec,
@@ -72,15 +72,6 @@ impl Decode<DagCborCodec> for TagIndex {
             }
         }
         Ok(Self { tags, elements })
-    }
-}
-
-impl TryReadCbor for TagIndex {
-    fn try_read_cbor<R: std::io::Read + std::io::Seek>(
-        r: &mut R,
-        major: u8,
-    ) -> anyhow::Result<Option<Self>> {
-        todo!()
     }
 }
 
