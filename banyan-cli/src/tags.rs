@@ -2,9 +2,9 @@ use crate::{tag_index::map_to_index_set, tag_index::TagIndex, tag_index::TagSet}
 use banyan::index::*;
 use banyan::{forest::*, query::Query};
 use libipld::{
-    cbor::{decode::TryReadCbor, DagCborCodec},
+    cbor::DagCborCodec,
     codec::{Decode, Encode},
-    Cid,
+    Cid, DagCbor,
 };
 use multihash::MultihashDigest;
 use serde::{Deserialize, Serialize};
@@ -31,16 +31,6 @@ impl Decode<DagCborCodec> for Sha256Digest {
 impl Encode<DagCborCodec> for Sha256Digest {
     fn encode<W: Write>(&self, c: DagCborCodec, w: &mut W) -> anyhow::Result<()> {
         Cid::encode(&Cid::from(*self), c, w)
-    }
-}
-
-impl TryReadCbor for Sha256Digest {
-    fn try_read_cbor<R: Read + Seek>(r: &mut R, major: u8) -> anyhow::Result<Option<Self>> {
-        if let Some(cid) = Cid::try_read_cbor(r, major)? {
-            Ok(Some(Self::try_from(cid)?))
-        } else {
-            Ok(None)
-        }
     }
 }
 
@@ -280,7 +270,7 @@ impl Query<TT> for DnfQuery {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, DagCbor)]
 pub struct KeySeq {
     min_lamport: Vec<u64>,
     min_time: Vec<u64>,

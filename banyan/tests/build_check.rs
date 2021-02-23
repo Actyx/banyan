@@ -1,17 +1,15 @@
 use banyan::{
     forest::{BranchCache, CryptoConfig, Forest},
-    index::{CompactSeq, Summarizable},
-};
-use banyan::{
     forest::{Config, Transaction, TreeTypes},
+    index::{BranchIndex, CompactSeq, Index, LeafIndex, Summarizable},
     memstore::MemStore,
     query::{AllQuery, OffsetRangeQuery},
     tree::Tree,
 };
 use futures::prelude::*;
+use libipld::{cbor::DagCborCodec, codec::Codec, Cid, DagCbor};
 use quickcheck::{Arbitrary, Gen, TestResult};
-use serde::{Deserialize, Serialize};
-use std::{iter, iter::FromIterator, ops::Range};
+use std::{convert::TryInto, iter, iter::FromIterator, ops::Range, str::FromStr};
 use store::Sha256Digest;
 mod store;
 
@@ -20,12 +18,12 @@ type Txn = Transaction<TT, u64, MemStore<Sha256Digest>, MemStore<Sha256Digest>>;
 #[derive(Debug, Clone)]
 struct TT;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, DagCbor)]
 struct Key(u64);
 /// A trivial implementation of a CompactSeq as just a Seq.
 ///
 /// This is useful mostly as a reference impl and for testing.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, DagCbor)]
 struct KeySeq(Vec<Key>);
 
 impl CompactSeq for KeySeq {
@@ -383,4 +381,108 @@ async fn build_converges(data: Vec<u32>) -> bool {
         build(&mut v);
     }
     true
+}
+
+// parses hex from cbor.me format
+fn from_cbor_me(text: &str) -> anyhow::Result<Vec<u8>> {
+    let parts = text
+        .split("\n")
+        .filter_map(|x| x.split('#').next())
+        .flat_map(|x| x.split_whitespace())
+        .collect::<String>();
+    Ok(hex::decode(parts)?)
+}
+
+#[test]
+fn leaf_index_wire_format() -> anyhow::Result<()> {
+    let index: Index<TT> = Index::Leaf(LeafIndex {
+        sealed: true,
+        value_bytes: 1234,
+        keys: KeySeq(vec![Key(1), Key(2)]),
+        link: Some(
+            Cid::from_str("bafyreihtx752fmf3zafbys5dtr4jxohb53yi3qtzfzf6wd5274jwtn5agu")?
+                .try_into()?,
+        ),
+    });
+    let serialized = DagCborCodec.encode(&index)?;
+    let expected = from_cbor_me(
+        r#"
+A4                                      # map(4)
+   64                                   # text(4)
+      6B657973                          # "keys"
+   81                                   # array(1)
+      82                                # array(2)
+         81                             # array(1)
+            01                          # unsigned(1)
+         81                             # array(1)
+            02                          # unsigned(2)
+   64                                   # text(4)
+      6C696E6B                          # "link"
+   D8 2A                                # tag(42)
+      58 25                             # bytes(37)
+         0001711220F3BFFBA2B0BBC80A1C4BA39C789BB8E1EEF08DC2792E4BEB0FBAFF1369B7A035 # "\x00\x01q\x12 \xF3\xBF\xFB\xA2\xB0\xBB\xC8\n\x1CK\xA3\x9Cx\x9B\xB8\xE1\xEE\xF0\x8D\xC2y.K\xEB\x0F\xBA\xFF\x13i\xB7\xA05"
+   66                                   # text(6)
+      7365616C6564                      # "sealed"
+   F5                                   # primitive(21)
+   6B                                   # text(11)
+      76616C75655F6279746573            # "value_bytes"
+   19 04D2                              # unsigned(1234)
+"#,
+    )?;
+    // println!("{}", hex::encode(&serialized));
+    assert_eq!(serialized, expected);
+    Ok(())
+}
+
+#[test]
+fn branch_index_wire_format() -> anyhow::Result<()> {
+    let index: Index<TT> = Index::Branch(BranchIndex {
+        count: 36784,
+        level: 3,
+        sealed: true,
+        key_bytes: 67834,
+        value_bytes: 123478912,
+        summaries: KeySeq(vec![Key(1), Key(2)]),
+        link: Some(
+            Cid::from_str("bafyreihtx752fmf3zafbys5dtr4jxohb53yi3qtzfzf6wd5274jwtn5agu")?
+                .try_into()?,
+        ),
+    });
+    let serialized = DagCborCodec.encode(&index)?;
+    let expected = from_cbor_me(
+        r#"
+A7                                      # map(7)
+   65                                   # text(5)
+      636F756E74                        # "count"
+   19 8FB0                              # unsigned(36784)
+   69                                   # text(9)
+      6B65795F6279746573                # "key_bytes"
+   1A 000108FA                          # unsigned(67834)
+   65                                   # text(5)
+      6C6576656C                        # "level"
+   03                                   # unsigned(3)
+   64                                   # text(4)
+      6C696E6B                          # "link"
+   D8 2A                                # tag(42)
+      58 25                             # bytes(37)
+         0001711220F3BFFBA2B0BBC80A1C4BA39C789BB8E1EEF08DC2792E4BEB0FBAFF1369B7A035 # "\x00\x01q\x12 \xF3\xBF\xFB\xA2\xB0\xBB\xC8\n\x1CK\xA3\x9Cx\x9B\xB8\xE1\xEE\xF0\x8D\xC2y.K\xEB\x0F\xBA\xFF\x13i\xB7\xA05"
+   66                                   # text(6)
+      7365616C6564                      # "sealed"
+   F5                                   # primitive(21)
+   69                                   # text(9)
+      73756D6D6172696573                # "summaries"
+   81                                   # array(1)
+      82                                # array(2)
+         81                             # array(1)
+            01                          # unsigned(1)
+         81                             # array(1)
+            02                          # unsigned(2)
+   6B                                   # text(11)
+      76616C75655F6279746573            # "value_bytes"
+   1A 075C2380                          # unsigned(123478912)
+
+"#,
+    )?;
+    assert_eq!(serialized, expected);
+    Ok(())
 }

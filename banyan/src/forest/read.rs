@@ -12,22 +12,20 @@ use crate::{
     index::NodeInfo,
     query::Query,
     store::ReadOnlyStore,
-    util::IpldNode,
     util::{BoxedIter, IterExt},
+    zstd_dag_cbor_seq::ZstdDagCborSeq,
 };
 use anyhow::{anyhow, Result};
 use core::fmt::Debug;
 use futures::{prelude::*, stream::BoxStream};
-use libipld::{cbor::DagCborCodec, codec::Codec};
-use salsa20::{cipher::NewStreamCipher, cipher::SyncStreamCipher, XSalsa20};
-use serde::{de::DeserializeOwned, Serialize};
+use libipld::cbor::DagCbor;
 use std::{iter, sync::Arc, time::Instant};
 
 /// basic random access append only tree
 impl<T, V, R> Forest<T, V, R>
 where
     T: TreeTypes + 'static,
-    V: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static,
+    V: DagCbor + Clone + Send + Sync + Debug + 'static,
     R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static,
 {
     pub(crate) fn crypto_config(&self) -> &CryptoConfig {
@@ -54,33 +52,12 @@ where
         &self.0.branch_cache
     }
 
-    // pub fn with_value_type<
-    //     W: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static,
-    // >(
-    //     &self,
-    // ) -> Forest<T, W> {
-    //     Forest {
-    //         store: self.store.clone(),
-    //         branch_cache: self.branch_cache.clone(),
-    //         crypto_config: self.crypto_config,
-    //         config: self.config,
-    //         _tt: PhantomData,
-    //     }
-    // }
-
     /// load a leaf given a leaf index
     pub(crate) fn load_leaf(&self, index: &LeafIndex<T>) -> Result<Option<Leaf>> {
         Ok(if let Some(link) = &index.link {
             let data = &self.store().get(link)?;
-            let data: Vec<u8> = DagCborCodec.decode::<IpldNode>(&data)?.into_data()?;
-            if data.len() < 24 {
-                anyhow::bail!("leaf data without nonce");
-            }
-            let (nonce, data) = data.split_at(24);
-            let mut data = data.to_vec();
-            XSalsa20::new(&self.value_key(), nonce.into()).apply_keystream(&mut data);
-            // cipher.apply_keystream(data)
-            Some(Leaf::new(data.into()))
+            let items = ZstdDagCborSeq::decrypt(data, &self.value_key())?;
+            Some(Leaf::new(items))
         } else {
             None
         })
@@ -550,7 +527,8 @@ where
         match self.load_node(index)? {
             NodeInfo::Leaf(index, leaf) => {
                 let value_count = leaf.as_ref().count()?;
-                check!(value_count == index.keys.count());
+                let key_count = index.keys.count();
+                check!(value_count == key_count);
             }
             NodeInfo::Branch(index, branch) => {
                 check!(branch.count() == index.summaries.count());

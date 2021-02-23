@@ -1,3 +1,13 @@
+use anyhow::ensure;
+use libipld::{
+    cbor::{
+        decode::{read_len, read_list, read_list_il, read_u8},
+        encode::write_u64,
+        error::UnexpectedCode,
+        DagCborCodec,
+    },
+    codec::{Decode, Encode},
+};
 use maplit::btreeset;
 use reduce::Reduce;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -5,9 +15,10 @@ use smol_str::SmolStr;
 use std::{
     cmp::Ord,
     collections::BTreeSet,
+    io::{Read, Seek, Write},
     ops::{BitAnd, BitOr},
 };
-use vec_collections::{vecset, VecSet};
+use vec_collections::{vecset, Array, VecSet};
 /// An index set is a set of u32 indices into the string table that will not allocate for up to 4 indices.
 /// The size of a non-spilled IndexSet is 32 bytes on 64 bit architectures, so just 8 bytes more than a Vec.
 pub type Tag = smol_str::SmolStr;
@@ -21,6 +32,47 @@ pub struct TagIndex {
     pub(crate) tags: TagSet,
     /// indices in these sets are guaranteed to correspond to strings in the strings table
     pub(crate) elements: Vec<IndexSet>,
+}
+
+impl Encode<DagCborCodec> for TagIndex {
+    fn encode<W: std::io::Write>(&self, c: DagCborCodec, w: &mut W) -> anyhow::Result<()> {
+        // allocates like crazy
+        let tags: Vec<String> = self.tags.iter().map(|x| x.to_string()).collect();
+        let elements: Vec<Vec<u32>> = self
+            .elements
+            .iter()
+            .map(|e| e.iter().cloned().collect())
+            .collect();
+        // a bit low level since libipld does not have tuple support yet
+        w.write_all(&[0x82])?;
+        tags.encode(c, w)?;
+        elements.encode(c, w)?;
+        Ok(())
+    }
+}
+
+impl Decode<DagCborCodec> for TagIndex {
+    fn decode<R: std::io::Read + std::io::Seek>(
+        c: DagCborCodec,
+        r: &mut R,
+    ) -> anyhow::Result<Self> {
+        // a bit low level since libipld does not have tuple support yet
+        anyhow::ensure!(read_u8(r)? == 0x82);
+        let tags: Vec<String> = Decode::decode(c, r)?;
+        let elements: Vec<Vec<u32>> = Decode::decode(c, r)?;
+        // allocates like crazy
+        let tags: VecSet<[SmolStr; 4]> = tags.into_iter().map(SmolStr::new).collect();
+        let elements: Vec<VecSet<[u32; 4]>> = elements
+            .into_iter()
+            .map(|i| i.into_iter().collect())
+            .collect();
+        for s in &elements {
+            for x in s {
+                anyhow::ensure!((*x as usize) < tags.len(), "invalid string index");
+            }
+        }
+        Ok(Self { tags, elements })
+    }
 }
 
 impl Serialize for TagIndex {

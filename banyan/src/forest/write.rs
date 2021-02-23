@@ -2,34 +2,30 @@ use crate::{
     forest::{BranchResult, Config, CreateMode, Forest, Transaction, TreeTypes},
     index::zip_with_offset_ref,
     store::{BlockWriter, ReadOnlyStore},
-    util::IpldNode,
-    zstd_array::ZstdArray,
 };
 use crate::{
     index::serialize_compressed,
     index::BranchIndex,
     index::CompactSeq,
     index::Index,
-    index::Leaf,
     index::LeafIndex,
     index::NodeInfo,
     query::Query,
     util::{is_sorted, BoolSliceExt},
+    zstd_dag_cbor_seq::ZstdDagCborSeq,
 };
 use anyhow::{ensure, Result};
 use core::fmt::Debug;
-use libipld::{cbor::DagCborCodec, codec::Codec};
+use libipld::cbor::DagCbor;
 use rand::RngCore;
-use salsa20::{cipher::NewStreamCipher, cipher::SyncStreamCipher, XSalsa20};
-use serde::{de::DeserializeOwned, Serialize};
-use std::{collections::BTreeMap, iter, time::Instant};
+use std::{iter, time::Instant};
 use tracing::info;
 
 /// basic random access append only tree
 impl<T, V, R, W> Transaction<T, V, R, W>
 where
     T: TreeTypes + 'static,
-    V: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static,
+    V: DagCbor + Clone + Send + Sync + Debug + 'static,
     R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static,
     W: BlockWriter<T::Link> + 'static,
 {
@@ -58,7 +54,7 @@ where
         let t0 = Instant::now();
         assert!(from.peek().is_some());
         let mut keys = keys.map(|keys| keys.to_vec()).unwrap_or_default();
-        let (data, sealed) = ZstdArray::fill(
+        let (data, sealed) = ZstdDagCborSeq::fill(
             compressed,
             from,
             self.config().zstd_level,
@@ -67,21 +63,16 @@ where
             &mut keys,
             self.config().max_leaf_count as usize,
         )?;
-        let leaf = Leaf::new(data.into());
-        let keys = keys.into_iter().collect::<T::KeySeq>();
-        // encrypt leaf
-        let mut tmp: Vec<u8> = Vec::with_capacity(leaf.as_ref().compressed().len() + 24);
+        let value_bytes = data.compressed().len() as u64;
         let nonce = self.random_nonce();
-        tmp.extend(nonce.as_slice());
-        tmp.extend(leaf.as_ref().compressed());
-        XSalsa20::new(&self.value_key(), &nonce).apply_keystream(&mut tmp[24..]);
-        let tmp = DagCborCodec.encode(&IpldNode::new(BTreeMap::new(), tmp))?;
-        let len = tmp.len();
+        let encrypted = data.into_encrypted(&nonce, &self.value_key())?;
+        let keys = keys.into_iter().collect::<T::KeySeq>();
+        let encrypted_len = encrypted.len();
         // store leaf
-        let link = self.writer.put(tmp)?;
+        let link = self.writer.put(encrypted)?;
         let index: LeafIndex<T> = LeafIndex {
             link: Some(link),
-            value_bytes: leaf.as_ref().compressed().len() as u64,
+            value_bytes,
             sealed,
             keys,
         };
@@ -91,7 +82,11 @@ where
             index.value_bytes,
             index.sealed
         );
-        tracing::debug!("extend_leaf {} {}", t0.elapsed().as_secs_f64(), len);
+        tracing::debug!(
+            "extend_leaf {} {}",
+            t0.elapsed().as_secs_f64(),
+            encrypted_len
+        );
         Ok(index)
     }
 

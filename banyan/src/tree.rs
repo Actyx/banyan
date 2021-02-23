@@ -7,7 +7,7 @@ use crate::{
 use crate::{query::Query, store::ReadOnlyStore, util::IterExt};
 use anyhow::Result;
 use futures::prelude::*;
-use serde::{de::DeserializeOwned, Serialize};
+use libipld::cbor::DagCbor;
 use std::{fmt, fmt::Debug, iter, sync::Arc};
 use tracing::*;
 
@@ -61,7 +61,7 @@ impl<T: TreeTypes> Clone for Tree<T> {
 
 impl<
         T: TreeTypes,
-        V: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static,
+        V: DagCbor + Clone + Send + Sync + Debug + 'static,
         R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static,
     > Forest<T, V, R>
 {
@@ -137,10 +137,11 @@ impl<
     pub fn assert_invariants(&self, tree: &Tree<T>) -> Result<()> {
         let msgs = self.check_invariants(tree)?;
         if !msgs.is_empty() {
+            let invariants = msgs.join(",");
             for msg in msgs {
                 error!("Invariant failed: {}", msg);
             }
-            panic!("assert_invariants failed");
+            panic!("assert_invariants failed {}", invariants);
         }
         Ok(())
     }
@@ -245,7 +246,7 @@ impl<
 
 impl<
         T: TreeTypes,
-        V: Serialize + DeserializeOwned + Clone + Send + Sync + Debug + 'static,
+        V: DagCbor + Clone + Send + Sync + Debug + 'static,
         R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static,
         W: BlockWriter<T::Link> + 'static,
     > Transaction<T, V, R, W>

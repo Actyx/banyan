@@ -7,7 +7,6 @@ use futures::future::BoxFuture;
 use libipld::cbor::DagCbor;
 use lru::LruCache;
 use rand::RngCore;
-use serde::{de::DeserializeOwned, Serialize};
 use std::{
     fmt::Display,
     sync::{Arc, Mutex},
@@ -47,8 +46,7 @@ pub trait TreeTypes: Debug + Send + Sync + Clone + 'static {
     type Summary: Debug + Eq + Send;
     /// compact sequence type to be used for indices
     type KeySeq: CompactSeq<Item = Self::Key>
-        + Serialize
-        + DeserializeOwned
+        + DagCbor
         + Clone
         + Debug
         + FromIterator<Self::Key>
@@ -57,8 +55,7 @@ pub trait TreeTypes: Debug + Send + Sync + Clone + 'static {
         + Summarizable<Self::Summary>;
     /// compact sequence type to be used for indices
     type SummarySeq: CompactSeq<Item = Self::Summary>
-        + Serialize
-        + DeserializeOwned
+        + DagCbor
         + Clone
         + Debug
         + FromIterator<Self::Summary>
