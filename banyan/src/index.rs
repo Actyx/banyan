@@ -41,12 +41,8 @@
 use crate::{forest::TreeTypes, zstd_dag_cbor_seq::ZstdDagCborSeq};
 use anyhow::{anyhow, Result};
 use derive_more::From;
-use libipld::{
-    cbor::{DagCbor, DagCborCodec},
-    codec::{Decode, Encode},
-    DagCbor,
-};
-use std::{fmt::Debug, io, sync::Arc};
+use libipld::{cbor::DagCbor, DagCbor};
+use std::{fmt::Debug, sync::Arc};
 
 /// An object that can compute a summary of type T of itself
 pub trait Summarizable<T> {
