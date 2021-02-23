@@ -429,6 +429,7 @@ A4                                      # map(4)
    19 04D2                              # unsigned(1234)
 "#,
     )?;
+    // println!("{}", hex::encode(&serialized));
     assert_eq!(serialized, expected);
     Ok(())
 }
