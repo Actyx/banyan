@@ -170,33 +170,13 @@ impl<T: TreeTypes> BranchIndex<T> {
 }
 
 /// enum for a leaf or branch index
-#[derive(Debug, From)]
+#[derive(Debug, From, DagCbor)]
+#[ipld(repr = "kinded")]
 pub enum Index<T: TreeTypes> {
+    #[ipld(repr = "value")]
     Leaf(LeafIndex<T>),
+    #[ipld(repr = "value")]
     Branch(BranchIndex<T>),
-}
-
-impl<T: TreeTypes> Encode<DagCborCodec> for Index<T> {
-    fn encode<W: std::io::Write>(&self, c: DagCborCodec, w: &mut W) -> Result<()> {
-        match self {
-            Index::Leaf(leaf) => leaf.encode(c, w),
-            Index::Branch(branch) => branch.encode(c, w),
-        }
-    }
-}
-
-impl<T: TreeTypes> Decode<DagCborCodec> for Index<T> {
-    fn decode<R: std::io::Read + std::io::Seek>(c: DagCborCodec, r: &mut R) -> Result<Self> {
-        let pos = r.seek(io::SeekFrom::Current(0))?;
-        if let Ok(res) = Decode::decode(c, r) {
-            return Ok(Index::Leaf(res));
-        }
-        r.seek(io::SeekFrom::Start(pos))?;
-        if let Ok(res) = Decode::decode(c, r) {
-            return Ok(Index::Branch(res));
-        }
-        Err(anyhow!("unable to decode!"))
-    }
 }
 
 /// enum for a leaf or branch index
