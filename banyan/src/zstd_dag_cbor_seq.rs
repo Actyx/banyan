@@ -7,11 +7,7 @@ use std::{
 
 use crate::thread_local_zstd::decompress_and_transform;
 use fnv::FnvHashSet;
-use libipld::{
-    cbor::DagCborCodec,
-    codec::{Codec, Decode, Encode, References},
-    Cid, DagCbor, Ipld,
-};
+use libipld::{Cid, DagCbor, Ipld, cbor::DagCborCodec, codec::{Codec, Decode, Encode, References}, raw_value::IgnoredAny};
 use salsa20::{
     cipher::{NewStreamCipher, SyncStreamCipher},
     XSalsa20,
@@ -160,8 +156,7 @@ impl ZstdDagCborSeq {
             while r.position() < uncompressed.len() as u64 {
                 if remaining > 0 {
                     // decode, but ignore the result.
-                    // TODO: replace with something similar to serde IgnoredAny
-                    T::decode(DagCborCodec, &mut r)?;
+                    IgnoredAny::decode(DagCborCodec, &mut r)?;
                     remaining -= 1;
                 } else {
                     return Ok(Some(T::decode(DagCborCodec, &mut r)?));
@@ -186,8 +181,7 @@ impl ZstdDagCborSeq {
                         result.push(T::decode(DagCborCodec, &mut r)?);
                     } else {
                         // decode, but ignore the result.
-                        // TODO: replace with something similar to serde IgnoredAny
-                        T::decode(DagCborCodec, &mut r)?;
+                        IgnoredAny::decode(DagCborCodec, &mut r)?;
                     }
                     i += 1;
                 } else {
