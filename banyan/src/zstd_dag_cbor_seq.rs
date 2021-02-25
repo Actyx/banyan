@@ -102,6 +102,8 @@ impl ZstdDagCborSeq {
                 full = true;
                 break;
             }
+            // scrape links from the new item
+            scrape_links(bytes.as_ref(), &mut links)?;
             // this is guaranteed to work because of the peek above.
             // Now we are committed to add the item.
             let (key, _) = from.next().unwrap();
