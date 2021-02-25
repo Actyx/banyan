@@ -371,6 +371,11 @@ pub(crate) fn zip_with_offset_ref<
     })
 }
 
+/// Every CompactSeq can be summarized to unit
+impl<T: CompactSeq> Summarizable<()> for T {
+    fn summarize(&self) {}
+}
+
 /// A sequence of unit values, in case you want to create a tree without a summary
 #[derive(Debug, Clone)]
 pub struct UnitSeq(usize);
@@ -402,10 +407,6 @@ impl CompactSeq for UnitSeq {
     }
 }
 
-impl Summarizable<()> for UnitSeq {
-    fn summarize(&self) {}
-}
-
 impl FromIterator<()> for UnitSeq {
     fn from_iter<T: IntoIterator<Item = ()>>(iter: T) -> Self {
         Self(iter.into_iter().count())
@@ -426,10 +427,6 @@ impl<T: DagCbor + Clone> CompactSeq for VecSeq<T> {
     fn len(&self) -> usize {
         self.0.len()
     }
-}
-
-impl<T: DagCbor> Summarizable<()> for VecSeq<T> {
-    fn summarize(&self) {}
 }
 
 impl<T: DagCbor> FromIterator<T> for VecSeq<T> {

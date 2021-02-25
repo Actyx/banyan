@@ -1,7 +1,7 @@
 use banyan::{
     forest::{BranchCache, CryptoConfig, Forest},
     forest::{Config, Transaction, TreeTypes},
-    index::{BranchIndex, CompactSeq, Index, LeafIndex, Summarizable, VecSeq},
+    index::{BranchIndex, CompactSeq, Index, LeafIndex, Summarizable, UnitSeq, VecSeq},
     memstore::MemStore,
     query::{AllQuery, OffsetRangeQuery},
     tree::Tree,
@@ -60,48 +60,6 @@ struct Key(Ipld);
 
 #[derive(Debug, Clone, PartialEq, DagCbor)]
 struct Payload(Ipld);
-#[derive(Debug, Clone)]
-pub struct UnitSeq(usize);
-
-impl Encode<DagCborCodec> for UnitSeq {
-    fn encode<W: std::io::Write>(&self, c: DagCborCodec, w: &mut W) -> anyhow::Result<()> {
-        (self.0 as u64).encode(c, w)
-    }
-}
-
-impl Decode<DagCborCodec> for UnitSeq {
-    fn decode<R: std::io::Read + std::io::Seek>(
-        c: DagCborCodec,
-        r: &mut R,
-    ) -> anyhow::Result<Self> {
-        let t = u64::decode(c, r)?;
-        Ok(Self(usize::try_from(t)?))
-    }
-}
-
-impl CompactSeq for UnitSeq {
-    type Item = ();
-    fn get(&self, index: usize) -> Option<()> {
-        if index < self.0 {
-            Some(())
-        } else {
-            None
-        }
-    }
-    fn len(&self) -> usize {
-        self.0 as usize
-    }
-}
-
-impl Summarizable<()> for UnitSeq {
-    fn summarize(&self) {}
-}
-
-impl FromIterator<()> for UnitSeq {
-    fn from_iter<T: IntoIterator<Item = ()>>(iter: T) -> Self {
-        Self(iter.into_iter().count())
-    }
-}
 
 impl TreeTypes for TT {
     type Key = Key;
