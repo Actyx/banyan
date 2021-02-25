@@ -1,23 +1,15 @@
 use banyan::{
     forest::{BranchCache, CryptoConfig, Forest},
     forest::{Config, Transaction, TreeTypes},
-    index::{BranchIndex, CompactSeq, Index, LeafIndex, Summarizable, UnitSeq, VecSeq},
+    index::{UnitSeq, VecSeq},
     memstore::MemStore,
-    query::{AllQuery, OffsetRangeQuery},
     tree::Tree,
 };
 use fnv::FnvHashSet;
-use futures::prelude::*;
-use libipld::{
-    cbor::DagCborCodec,
-    codec::{Codec, Decode, Encode},
-    ipld, Cid, DagCbor, Ipld,
-};
-use quickcheck::{quickcheck, Arbitrary, Gen, TestResult};
-use std::convert::TryFrom;
-use std::{convert::TryInto, iter, iter::FromIterator, ops::Range, str::FromStr};
+use libipld::{cbor::DagCborCodec, codec::Codec, ipld, Cid, DagCbor, Ipld};
+use quickcheck::{quickcheck, Arbitrary, Gen};
+use std::str::FromStr;
 use store::Sha256Digest;
-use tracing::Value;
 mod store;
 
 type Txn = Transaction<TT, Payload, MemStore<Sha256Digest>, MemStore<Sha256Digest>>;
@@ -93,13 +85,6 @@ where
     tree = forest.extend(&tree, xs)?;
     forest.assert_invariants(&tree)?;
     Ok((tree, forest))
-}
-
-async fn test<F: Future<Output = anyhow::Result<bool>>>(f: impl Fn() -> F) -> TestResult {
-    match f().await {
-        Ok(success) => TestResult::from_bool(success),
-        Err(cause) => TestResult::error(cause.to_string()),
-    }
 }
 
 fn links_get_properly_scraped(xs: Vec<(Key, Payload)>) -> anyhow::Result<bool> {

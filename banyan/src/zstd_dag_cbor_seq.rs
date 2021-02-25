@@ -1,4 +1,11 @@
-use std::{collections::BTreeSet, convert::TryFrom, fmt, io::{Cursor, Write}, iter, time::Instant};
+use std::{
+    collections::BTreeSet,
+    convert::TryFrom,
+    fmt,
+    io::{Cursor, Write},
+    iter,
+    time::Instant,
+};
 
 use crate::thread_local_zstd::decompress_and_transform;
 use libipld::{

@@ -1,9 +1,6 @@
-use anyhow::ensure;
 use libipld::{
     cbor::{
-        decode::{read_len, read_list, read_list_il, read_u8},
-        encode::write_u64,
-        error::UnexpectedCode,
+        decode::read_u8,
         DagCborCodec,
     },
     codec::{Decode, Encode},
@@ -15,10 +12,9 @@ use smol_str::SmolStr;
 use std::{
     cmp::Ord,
     collections::BTreeSet,
-    io::{Read, Seek, Write},
     ops::{BitAnd, BitOr},
 };
-use vec_collections::{vecset, Array, VecSet};
+use vec_collections::{vecset, VecSet};
 /// An index set is a set of u32 indices into the string table that will not allocate for up to 4 indices.
 /// The size of a non-spilled IndexSet is 32 bytes on 64 bit architectures, so just 8 bytes more than a Vec.
 pub type Tag = smol_str::SmolStr;
