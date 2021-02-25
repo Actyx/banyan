@@ -1,13 +1,6 @@
-use std::{
-    convert::TryFrom,
-    fmt,
-    io::{Cursor, Write},
-    iter,
-    time::Instant,
-};
+use std::{collections::BTreeSet, convert::TryFrom, fmt, io::{Cursor, Write}, iter, time::Instant};
 
 use crate::thread_local_zstd::decompress_and_transform;
-use fnv::FnvHashSet;
 use libipld::{
     cbor::DagCborCodec,
     codec::{Codec, Decode, Encode, References},
@@ -37,7 +30,7 @@ impl ZstdDagCborSeq {
         T: Encode<DagCborCodec> + 'a,
     {
         let mut encoder = zstd::Encoder::new(Vec::new(), level)?;
-        let mut links = FnvHashSet::default();
+        let mut links = BTreeSet::new();
         for item in iter.into_iter() {
             let encoded = DagCborCodec.encode(item)?;
             scrape_links(encoded.as_ref(), &mut links)?;
@@ -64,7 +57,7 @@ impl ZstdDagCborSeq {
         keys: &mut Vec<K>,
         max_keys: usize,
     ) -> anyhow::Result<(Self, bool)> {
-        let mut links = FnvHashSet::default();
+        let mut links = BTreeSet::new();
         let t0 = Instant::now();
         let compressed_size = compressed_size as usize;
         let uncompressed_size = uncompressed_size as usize;
@@ -102,6 +95,8 @@ impl ZstdDagCborSeq {
                 full = true;
                 break;
             }
+            // scrape links from the new item
+            scrape_links(bytes.as_ref(), &mut links)?;
             // this is guaranteed to work because of the peek above.
             // Now we are committed to add the item.
             let (key, _) = from.next().unwrap();

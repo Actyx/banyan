@@ -41,9 +41,9 @@ impl<T: TreeTypes> BranchCache<T> {
 /// code base.
 pub trait TreeTypes: Debug + Send + Sync + Clone + 'static {
     /// key type
-    type Key: Debug + Eq + Send;
+    type Key: Debug + PartialEq + Send;
     /// Type for a summary of keys. In some cases this can be the same type as the key type.
-    type Summary: Debug + Eq + Send;
+    type Summary: Debug + PartialEq + Send;
     /// compact sequence type to be used for indices
     type KeySeq: CompactSeq<Item = Self::Key>
         + DagCbor

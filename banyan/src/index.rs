@@ -41,8 +41,12 @@
 use crate::{forest::TreeTypes, zstd_dag_cbor_seq::ZstdDagCborSeq};
 use anyhow::{anyhow, Result};
 use derive_more::From;
-use libipld::{cbor::DagCbor, DagCbor};
-use std::{fmt::Debug, sync::Arc};
+use libipld::{
+    cbor::{DagCbor, DagCborCodec},
+    codec::{Decode, Encode},
+    DagCbor,
+};
+use std::{convert::TryFrom, fmt::Debug, io, iter::FromIterator, sync::Arc};
 
 /// An object that can compute a summary of type T of itself
 pub trait Summarizable<T> {
@@ -365,4 +369,68 @@ pub(crate) fn zip_with_offset_ref<
         *offset += x.count();
         Some((x, o0))
     })
+}
+
+/// Every CompactSeq can be summarized to unit
+impl<T: CompactSeq> Summarizable<()> for T {
+    fn summarize(&self) {}
+}
+
+/// A sequence of unit values, in case you want to create a tree without a summary
+#[derive(Debug, Clone)]
+pub struct UnitSeq(usize);
+
+impl Encode<DagCborCodec> for UnitSeq {
+    fn encode<W: io::Write>(&self, c: DagCborCodec, w: &mut W) -> anyhow::Result<()> {
+        (self.0 as u64).encode(c, w)
+    }
+}
+
+impl Decode<DagCborCodec> for UnitSeq {
+    fn decode<R: io::Read + io::Seek>(c: DagCborCodec, r: &mut R) -> anyhow::Result<Self> {
+        let t = u64::decode(c, r)?;
+        Ok(Self(usize::try_from(t)?))
+    }
+}
+
+impl CompactSeq for UnitSeq {
+    type Item = ();
+    fn get(&self, index: usize) -> Option<()> {
+        if index < self.0 {
+            Some(())
+        } else {
+            None
+        }
+    }
+    fn len(&self) -> usize {
+        self.0 as usize
+    }
+}
+
+impl FromIterator<()> for UnitSeq {
+    fn from_iter<T: IntoIterator<Item = ()>>(iter: T) -> Self {
+        Self(iter.into_iter().count())
+    }
+}
+
+/// A trivial implementation of a CompactSeq as just a Seq.
+///
+/// This is useful mostly as a reference impl and for testing.
+#[derive(Debug, Clone, DagCbor)]
+pub struct VecSeq<T: DagCbor>(Vec<T>);
+
+impl<T: DagCbor + Clone> CompactSeq for VecSeq<T> {
+    type Item = T;
+    fn get(&self, index: usize) -> Option<T> {
+        self.0.get(index).cloned()
+    }
+    fn len(&self) -> usize {
+        self.0.len()
+    }
+}
+
+impl<T: DagCbor> FromIterator<T> for VecSeq<T> {
+    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
+        Self(iter.into_iter().collect())
+    }
 }
