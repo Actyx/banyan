@@ -13,8 +13,9 @@ mod tags;
 
 use banyan::{
     forest::*,
+    memstore::MemStore,
     query::{AllQuery, OffsetRangeQuery, QueryExt},
-    store::{ArcBlockWriter, ArcReadOnlyStore},
+    store::{ArcBlockWriter, ArcReadOnlyStore, BlockWriter, ReadOnlyStore},
     tree::*,
 };
 use ipfs::{pubsub_pub, pubsub_sub, IpfsStore};
@@ -29,6 +30,41 @@ pub type Result<T> = anyhow::Result<T>;
 
 type Txn = Transaction<TT, String, ArcReadOnlyStore<Sha256Digest>, ArcBlockWriter<Sha256Digest>>;
 
+enum Storage {
+    Memory(MemStore<Sha256Digest>),
+    Ipfs(IpfsStore),
+    Sqlite(SqliteStore),
+}
+impl ReadOnlyStore<Sha256Digest> for Storage {
+    fn get(&self, link: &Sha256Digest) -> Result<Box<[u8]>> {
+        match self {
+            Self::Memory(m) => m.get(link),
+            Storage::Ipfs(i) => i.get(link),
+            Storage::Sqlite(s) => s.get(link),
+        }
+    }
+}
+
+impl BlockWriter<Sha256Digest> for Storage {
+    fn put(&self, data: Vec<u8>) -> Result<Sha256Digest> {
+        match self {
+            Self::Memory(m) => m.put(data),
+            Storage::Ipfs(i) => i.put(data),
+            Storage::Sqlite(s) => s.put(data),
+        }
+    }
+}
+impl FromStr for Storage {
+    type Err = anyhow::Error;
+    fn from_str(s: &str) -> Result<Self> {
+        let s = match s {
+            "memory" => Self::Memory(MemStore::new(usize::max_value(), Sha256Digest::new)),
+            "ipfs" => Self::Ipfs(IpfsStore::new()?),
+            x => Self::Sqlite(SqliteStore::new(x)?),
+        };
+        Ok(s)
+    }
+}
 #[derive(StructOpt)]
 #[structopt(about = "CLI to work with large banyan trees on ipfs")]
 struct Opts {
@@ -42,6 +78,10 @@ struct Opts {
     #[allow(dead_code)] // log level will bet set in [`set_log_level`]
     /// Increase verbosity
     verbosity: u64,
+    #[structopt(long, default_value = "memory", global = true)]
+    /// Storage, possible options "memory", "ipfs" (uses local ipfs gw via HTTP),
+    /// or a path to a sqlite database (will create it if it doesn't exist)
+    storage: Storage,
     #[structopt(subcommand)]
     cmd: Command,
 }
@@ -78,7 +118,7 @@ enum Command {
         unbalanced: bool,
         #[structopt(long)]
         /// Base on which to build
-        base: Sha256Digest,
+        base: Option<Sha256Digest>,
     },
     /// Dump a tree
     Dump {
@@ -287,7 +327,7 @@ async fn main() -> Result<()> {
         }
     };
 
-    let store = Arc::new(IpfsStore::new()?);
+    let store = Arc::new(opts.storage);
     let index_key: salsa20::Key = opts.index_pass.map(create_salsa_key).unwrap_or_default();
     let value_key: salsa20::Key = opts.value_pass.map(create_salsa_key).unwrap_or_default();
     let config = Config::debug_fast();
@@ -327,7 +367,7 @@ async fn main() -> Result<()> {
                 "building a tree with {} batches of {} values, unbalanced: {}",
                 batches, count, unbalanced
             );
-            let tree = build_tree(&forest, Some(base), batches, count, unbalanced, 1000).await?;
+            let tree = build_tree(&forest, base, batches, count, unbalanced, 1000).await?;
             forest.dump(&tree)?;
             let roots = forest.roots(&tree)?;
             let levels = roots.iter().map(|x| x.level()).collect::<Vec<_>>();
@@ -338,7 +378,6 @@ async fn main() -> Result<()> {
             forest.dump(&tree)?;
         }
         Command::Bench { count } => {
-            let store = Arc::new(SqliteStore::memory()?);
             let config = Config::debug_fast();
             let crypto_config = CryptoConfig {
                 index_key,
