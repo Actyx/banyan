@@ -1,8 +1,5 @@
 use libipld::{
-    cbor::{
-        decode::read_u8,
-        DagCborCodec,
-    },
+    cbor::{decode::read_u8, DagCborCodec},
     codec::{Decode, Encode},
 };
 use maplit::btreeset;
