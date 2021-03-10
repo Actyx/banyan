@@ -80,8 +80,6 @@ enum Command {
         /// Base on which to build
         base: Sha256Digest,
     },
-    /// Do some stuff
-    Demo {},
     /// Dump a tree
     Dump {
         #[structopt(long)]
@@ -401,7 +399,6 @@ async fn main() -> Result<()> {
                 (tfilter_rare.as_micros() as f64) / 1000000.0
             );
         }
-        Command::Demo {} => {}
         Command::Filter { tag, root } => {
             let tags = tag
                 .into_iter()
