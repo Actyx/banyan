@@ -8,7 +8,7 @@ use crate::{query::Query, store::ReadOnlyStore, util::IterExt};
 use anyhow::Result;
 use futures::prelude::*;
 use libipld::cbor::DagCbor;
-use std::{fmt, fmt::Debug, iter, sync::Arc};
+use std::{collections::BTreeMap, fmt, fmt::Debug, iter, sync::Arc};
 use tracing::*;
 
 /// A tree. This is mostly an user friendly handle.
@@ -77,6 +77,46 @@ impl<
             Some(index) => self.dump0(index, ""),
             None => Ok(()),
         }
+    }
+
+    /// dumps the tree structure
+    pub fn dump_graph<S>(
+        &self,
+        tree: &Tree<T>,
+        f: impl Fn((usize, &NodeInfo<T>)) -> S + Clone,
+    ) -> Result<(Vec<(usize, usize)>, BTreeMap<usize, S>)> {
+        match &tree.root {
+            Some(index) => self.dump_graph0(None, 0, index, f),
+            None => anyhow::bail!("Tree must not be empty"),
+        }
+    }
+
+    pub(crate) fn dump_graph0<S>(
+        &self,
+        parent_id: Option<usize>,
+        next_id: usize,
+        index: &Index<T>,
+        f: impl Fn((usize, &NodeInfo<T>)) -> S + Clone,
+    ) -> Result<(Vec<(usize, usize)>, BTreeMap<usize, S>)> {
+        let mut edges = vec![];
+        let mut nodes: BTreeMap<usize, S> = Default::default();
+
+        let node = self.load_node(index)?;
+        if let Some(p) = parent_id {
+            edges.push((p, next_id));
+        }
+        nodes.insert(next_id, f((next_id, &node)));
+        if let NodeInfo::Branch(_, branch) = node {
+            let mut cur = next_id;
+            for x in branch.children.iter() {
+                let (mut e, mut n) = self.dump_graph0(Some(next_id), cur + 1, &x, f.clone())?;
+                cur += n.len();
+                edges.append(&mut e);
+                nodes.append(&mut n);
+            }
+        }
+
+        Ok((edges, nodes))
     }
 
     /// sealed roots of the tree

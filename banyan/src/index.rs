@@ -105,7 +105,7 @@ pub struct LeafIndex<T: TreeTypes> {
     // link to the block containing the values
     pub link: Option<T::Link>,
     /// A sequence of keys with the same number of values as the data block the link points to.
-    pub keys: T::KeySeq,
+    pub keys: T::KeySeq, // query??? --> keys[3]
     // serialized size of the data
     pub value_bytes: u64,
 }
@@ -133,16 +133,16 @@ impl<T: TreeTypes> LeafIndex<T> {
 /// index for a branch node, containing summary data for its children
 #[derive(Debug, DagCbor)]
 pub struct BranchIndex<T: TreeTypes> {
-    // number of events
+    // number of items
     pub count: u64,
     // level of the tree node
     pub level: u32,
     // block is sealed
     pub sealed: bool,
     // link to the branch node
-    pub link: Option<T::Link>,
+    pub link: Option<T::Link>, // resolves to Vec<Index<T>>
     // extra data
-    pub summaries: T::SummarySeq,
+    pub summaries: T::SummarySeq, // Query???? --> link[2] --> Index<T>
     // accumulated serialized size of all values in this tree
     pub value_bytes: u64,
     // accumulated serialized size of all keys and summaries in this tree
@@ -313,8 +313,8 @@ impl AsRef<ZstdDagCborSeq> for Leaf {
     }
 }
 
-/// enum that combines index and corrsponding data
-pub(crate) enum NodeInfo<'a, T: TreeTypes> {
+/// enum that combines index and corresponding data
+pub enum NodeInfo<'a, T: TreeTypes> {
     // Branch with index and data
     Branch(&'a BranchIndex<T>, Branch<T>),
     /// Leaf with index and data

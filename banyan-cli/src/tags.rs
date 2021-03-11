@@ -129,6 +129,7 @@ impl TimeData {
     }
 }
 
+#[allow(dead_code)]
 impl Key {
     pub fn single(lamport: u64, time: u64, tags: TagSet) -> Self {
         Self {
@@ -172,6 +173,7 @@ impl Key {
     }
 }
 
+#[allow(dead_code)]
 impl Key {
     fn combine(&mut self, b: &Self) {
         self.time.combine(&b.time);
@@ -182,6 +184,7 @@ impl Key {
 #[derive(Debug)]
 pub struct DnfQuery(pub Vec<Key>);
 
+#[allow(dead_code)]
 impl DnfQuery {
     fn intersects(&self, v: &Key) -> bool {
         self.0.iter().any(|x| x.intersects(v))

@@ -101,6 +101,7 @@ pub fn map_to_index_set(table: &TagSet, tags: &TagSet) -> Option<IndexSet> {
         .collect::<Option<_>>()
 }
 
+#[allow(dead_code)]
 impl TagIndex {
     /// given a query expression in Dnf form, returns all matching indices
     pub fn matching(&self, query: Dnf) -> Vec<usize> {
@@ -215,6 +216,7 @@ impl From<Dnf> for Expression {
     }
 }
 
+#[allow(dead_code)]
 impl Expression {
     pub fn literal(text: SmolStr) -> Self {
         Self::Literal(text)
