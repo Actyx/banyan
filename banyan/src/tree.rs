@@ -220,6 +220,10 @@ impl<
     }
 
     /// element at index
+    ///
+    /// returns Ok(None) when offset is larger than count, or when hitting a purged
+    /// part of the tree. Returns an error when part of the tree should be there, but could
+    /// not be read.
     pub fn get(&self, tree: &Tree<T>, offset: u64) -> Result<Option<(T::Key, V)>> {
         Ok(match &tree.root {
             Some(index) => self.get0(index, offset)?,
