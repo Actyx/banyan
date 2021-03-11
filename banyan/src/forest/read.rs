@@ -66,7 +66,6 @@ where
     pub(crate) fn load_branch_from_link(&self, link: T::Link) -> Result<Index<T>> {
         let store = self.store.clone();
         let index_key = self.index_key();
-        let config = self.config;
         let bytes = store.get(&link)?;
         let children: Vec<Index<T>> = deserialize_compressed(&index_key, &bytes)?;
         let level = children.iter().map(|x| x.level()).max().unwrap() + 1;
@@ -79,7 +78,7 @@ where
             level,
             count,
             summaries,
-            sealed: config.branch_sealed(&children, level),
+            sealed: self.config.branch_sealed(&children, level),
             value_bytes,
             key_bytes,
         }

@@ -2,9 +2,22 @@
 use std::cell::RefCell;
 use zstd::block::Decompressor;
 
-/// minimum size of the buffer
+/// minimum size of the buffer.
+///
+/// The buffer will shrink back to this capacity after each use, so this should be
+/// large enough for the vast majority of cases, otherwise it defeats the purpose of
+/// having a thread local buffer.
+///
+/// The maximum memory size is MIN_CAPACITY times the maximum number of threads doing
+/// decompression.
+///
+/// Note that this whole contraption will be worth it mostly when decompressing very
+/// small things. When decompressing larger things the overhead of allocating a buffer
+/// will be negligible.
 const MIN_CAPACITY: usize = 1024 * 1024 * 4;
 /// max capacity the buffer will grow to.
+///
+/// The maximum decompressed size the buffer can grow to before giving up.
 const MAX_CAPACITY: usize = 1024 * 1024 * 16;
 
 /// thread-local decompression state
@@ -17,7 +30,7 @@ pub(crate) struct DecompressionState {
 
 impl DecompressionState {
     fn new() -> Self {
-        let buffer: Vec<u8> = Vec::with_capacity(1024);
+        let buffer: Vec<u8> = Vec::with_capacity(MIN_CAPACITY);
         Self {
             decompressor: Decompressor::new(),
             buffer,
@@ -26,6 +39,7 @@ impl DecompressionState {
 
     fn decompress(&mut self, data: &[u8]) -> std::io::Result<usize> {
         let mut cap = MIN_CAPACITY;
+        // todo: do not resize but use a temp buffer as soon as we are above min_capacity
         loop {
             self.buffer.resize(cap, 0);
             let res = self
@@ -61,6 +75,8 @@ impl DecompressionState {
 thread_local!(static DECOMPRESSOR: RefCell<DecompressionState> = RefCell::new(DecompressionState::new()));
 
 /// decompress some data into an internal thread-local buffer, and, on success, applies a transform to the buffer
+///
+/// returns the result of the function call and the size of the
 pub fn decompress_and_transform<F, R>(compressed: &[u8], f: &mut F) -> std::io::Result<(usize, R)>
 where
     F: FnMut(&[u8]) -> R,

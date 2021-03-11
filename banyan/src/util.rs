@@ -26,10 +26,14 @@ pub(crate) fn is_sorted<T: Ord>(iter: impl Iterator<Item = T>) -> bool {
 
 /// Some extensions to make bool slices nicer to work with
 pub trait BoolSliceExt {
+    /// Set all bools to false
     fn clear(self);
 
+    /// true if any of the fields is true
     fn any(self) -> bool;
 
+    /// or combination with another bool slice, with false as default for where
+    /// the sizes don't match.
     fn or_with(self, rhs: &[bool]);
 }
 

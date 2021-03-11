@@ -57,10 +57,10 @@ where
         let (data, sealed) = ZstdDagCborSeq::fill(
             compressed,
             from,
+            &mut keys,
             self.config().zstd_level,
             self.config().target_leaf_size,
             self.config().max_uncompressed_leaf_size,
-            &mut keys,
             self.config().max_leaf_count as usize,
         )?;
         let value_bytes = data.compressed().len() as u64;
