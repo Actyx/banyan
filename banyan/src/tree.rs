@@ -59,6 +59,9 @@ impl<T: TreeTypes> Clone for Tree<T> {
     }
 }
 
+pub type GraphEdges = Vec<(usize, usize)>;
+pub type GraphNodes<S> = BTreeMap<usize, S>;
+
 impl<
         T: TreeTypes,
         V: DagCbor + Clone + Send + Sync + Debug + 'static,
@@ -84,7 +87,7 @@ impl<
         &self,
         tree: &Tree<T>,
         f: impl Fn((usize, &NodeInfo<T>)) -> S + Clone,
-    ) -> Result<(Vec<(usize, usize)>, BTreeMap<usize, S>)> {
+    ) -> Result<(GraphEdges, GraphNodes<S>)> {
         match &tree.root {
             Some(index) => self.dump_graph0(None, 0, index, f),
             None => anyhow::bail!("Tree must not be empty"),
@@ -97,7 +100,7 @@ impl<
         next_id: usize,
         index: &Index<T>,
         f: impl Fn((usize, &NodeInfo<T>)) -> S + Clone,
-    ) -> Result<(Vec<(usize, usize)>, BTreeMap<usize, S>)> {
+    ) -> Result<(GraphEdges, GraphNodes<S>)> {
         let mut edges = vec![];
         let mut nodes: BTreeMap<usize, S> = Default::default();
 

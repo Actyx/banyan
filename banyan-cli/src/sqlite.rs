@@ -13,6 +13,7 @@ use crate::tags::Sha256Digest;
 pub struct SqliteStore(Arc<Mutex<BlockStore>>);
 
 impl SqliteStore {
+    #[allow(dead_code)]
     pub fn memory() -> anyhow::Result<Self> {
         let store = BlockStore::memory(Config::default())?;
         Ok(SqliteStore(Arc::new(Mutex::new(store))))
