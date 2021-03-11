@@ -105,7 +105,7 @@ pub struct LeafIndex<T: TreeTypes> {
     // link to the block containing the values
     pub link: Option<T::Link>,
     /// A sequence of keys with the same number of values as the data block the link points to.
-    pub keys: T::KeySeq, // query??? --> keys[3]
+    pub keys: T::KeySeq,
     // serialized size of the data
     pub value_bytes: u64,
 }
@@ -140,9 +140,9 @@ pub struct BranchIndex<T: TreeTypes> {
     // block is sealed
     pub sealed: bool,
     // link to the branch node
-    pub link: Option<T::Link>, // resolves to Vec<Index<T>>
+    pub link: Option<T::Link>,
     // extra data
-    pub summaries: T::SummarySeq, // Query???? --> link[2] --> Index<T>
+    pub summaries: T::SummarySeq,
     // accumulated serialized size of all values in this tree
     pub value_bytes: u64,
     // accumulated serialized size of all keys and summaries in this tree
