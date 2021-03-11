@@ -144,7 +144,9 @@ where
     }
 
     pub(crate) fn get0(&self, index: &Index<T>, mut offset: u64) -> Result<Option<(T::Key, V)>> {
-        assert!(offset < index.count());
+        if offset >= index.count() {
+            return Ok(None);
+        }
         match self.load_node(index)? {
             NodeInfo::Branch(_, node) => {
                 for child in node.children.iter() {
@@ -277,7 +279,16 @@ where
                     stream::iter(iter).flatten().right_stream().left_stream()
                 }
                 NodeInfo::PurgedBranch(_) | NodeInfo::PurgedLeaf(_) => {
-                    stream::empty().right_stream()
+                    // even for purged leafs and branches, produce a placeholder.
+                    //
+                    // the caller can find out if we skipped purged parts of the tree by
+                    // using an appropriate mk_extra fn.
+                    let placeholder = FilteredChunk {
+                        range: offset..offset + index.count(),
+                        data: Vec::new(),
+                        extra: mk_extra(index.as_index_ref()),
+                    };
+                    stream::once(future::ok(placeholder)).right_stream()
                 }
             })
         }
@@ -362,7 +373,18 @@ where
                     );
                     iter.flatten().right_iter().left_iter()
                 }
-                NodeInfo::PurgedBranch(_) | NodeInfo::PurgedLeaf(_) => iter::empty().right_iter(),
+                NodeInfo::PurgedBranch(_) | NodeInfo::PurgedLeaf(_) => {
+                    // even for purged leafs and branches, produce a placeholder.
+                    //
+                    // the caller can find out if we skipped purged parts of the tree by
+                    // using an appropriate mk_extra fn.
+                    let placeholder = FilteredChunk {
+                        range: offset..offset + index.count(),
+                        data: Vec::new(),
+                        extra: mk_extra(index.as_index_ref()),
+                    };
+                    iter::once(Ok(placeholder)).right_iter()
+                }
             })
         };
         match inner() {
@@ -434,7 +456,16 @@ where
                         stream::iter(iter).flatten().right_stream().left_stream()
                     }
                     NodeInfo::PurgedBranch(_) | NodeInfo::PurgedLeaf(_) => {
-                        stream::empty().right_stream()
+                        // even for purged leafs and branches, produce a placeholder.
+                        //
+                        // the caller can find out if we skipped purged parts of the tree by
+                        // using an appropriate mk_extra fn.
+                        let placeholder = FilteredChunk {
+                            range: offset..offset + index.count(),
+                            data: Vec::new(),
+                            extra: mk_extra(index.as_index_ref()),
+                        };
+                        stream::once(future::ok(placeholder)).right_stream()
                     }
                 })
             }
