@@ -1,25 +1,16 @@
 //! helper methods to work with ipfs/ipld
 use anyhow::{anyhow, Result};
 use banyan::store::{BlockWriter, ReadOnlyStore};
-use ipfs_sqlite_block_store::{BlockStore, Config, OwnedBlock};
+use ipfs_sqlite_block_store::{BlockStore, OwnedBlock};
 use libipld::Cid;
-use std::{
-    path::Path,
-    sync::{Arc, Mutex},
-};
+use std::sync::{Arc, Mutex};
 
 use crate::tags::Sha256Digest;
 
 pub struct SqliteStore(Arc<Mutex<BlockStore>>);
 
 impl SqliteStore {
-    #[allow(dead_code)]
-    pub fn memory() -> anyhow::Result<Self> {
-        let store = BlockStore::memory(Config::default())?;
-        Ok(SqliteStore(Arc::new(Mutex::new(store))))
-    }
-    pub fn new(path: impl AsRef<Path>) -> anyhow::Result<Self> {
-        let store = BlockStore::open(path, Config::default())?;
+    pub fn new(store: BlockStore) -> anyhow::Result<Self> {
         Ok(SqliteStore(Arc::new(Mutex::new(store))))
     }
 }

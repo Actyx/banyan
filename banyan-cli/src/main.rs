@@ -1,5 +1,6 @@
 use futures::future::poll_fn;
 use futures::prelude::*;
+use ipfs_sqlite_block_store::BlockStore;
 use sqlite::SqliteStore;
 use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Duration};
 use structopt::StructOpt;
@@ -60,7 +61,10 @@ impl FromStr for Storage {
         let s = match s {
             "memory" => Self::Memory(MemStore::new(usize::max_value(), Sha256Digest::new)),
             "ipfs" => Self::Ipfs(IpfsStore::new()?),
-            x => Self::Sqlite(SqliteStore::new(x)?),
+            x => Self::Sqlite(SqliteStore::new(BlockStore::open(
+                x,
+                ipfs_sqlite_block_store::Config::default(),
+            )?)?),
         };
         Ok(s)
     }
