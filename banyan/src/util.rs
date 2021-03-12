@@ -80,8 +80,11 @@ where
     Self: 'static + Sized + Send,
     Self::Item: Send,
 {
-    #[allow(clippy::clippy::wrong_self_convention)]
-    fn to_stream(self, buffer_size: usize, thread_pool: ThreadPool) -> mpsc::Receiver<Self::Item> {
+    fn into_stream(
+        self,
+        buffer_size: usize,
+        thread_pool: ThreadPool,
+    ) -> mpsc::Receiver<Self::Item> {
         let (mut sender, receiver) = mpsc::channel(buffer_size);
 
         thread_pool.spawn_ok(async move {
