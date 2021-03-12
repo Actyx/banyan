@@ -133,7 +133,7 @@ impl<T: TreeTypes> LeafIndex<T> {
 /// index for a branch node, containing summary data for its children
 #[derive(Debug, DagCbor)]
 pub struct BranchIndex<T: TreeTypes> {
-    // number of events
+    // number of items
     pub count: u64,
     // level of the tree node
     pub level: u32,
@@ -313,8 +313,8 @@ impl AsRef<ZstdDagCborSeq> for Leaf {
     }
 }
 
-/// enum that combines index and corrsponding data
-pub(crate) enum NodeInfo<'a, T: TreeTypes> {
+/// enum that combines index and corresponding data
+pub enum NodeInfo<'a, T: TreeTypes> {
     // Branch with index and data
     Branch(&'a BranchIndex<T>, Branch<T>),
     /// Leaf with index and data

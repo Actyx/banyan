@@ -109,7 +109,7 @@ fn links_get_properly_scraped(xs: Vec<(Key, Payload)>) -> anyhow::Result<bool> {
 
 quickcheck! {
     fn tree_link_scraping(xs: Vec<(Key, Payload)>) -> anyhow::Result<bool> {
-        links_get_properly_scraped(xs.clone())
+        links_get_properly_scraped(xs)
     }
 }
 

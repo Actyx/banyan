@@ -1,12 +1,13 @@
-use anyhow::anyhow;
-use clap::{App, Arg, SubCommand};
 use futures::future::poll_fn;
 use futures::prelude::*;
+use ipfs_sqlite_block_store::BlockStore;
 use sqlite::SqliteStore;
 use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Duration};
+use structopt::StructOpt;
 use tag_index::{Tag, TagSet};
 use tracing::Level;
 
+mod dump;
 mod ipfs;
 mod sqlite;
 mod tag_index;
@@ -14,8 +15,9 @@ mod tags;
 
 use banyan::{
     forest::*,
+    memstore::MemStore,
     query::{AllQuery, OffsetRangeQuery, QueryExt},
-    store::{ArcBlockWriter, ArcReadOnlyStore},
+    store::{ArcBlockWriter, ArcReadOnlyStore, BlockWriter, ReadOnlyStore},
     tree::*,
 };
 use ipfs::{pubsub_pub, pubsub_sub, IpfsStore};
@@ -30,142 +32,162 @@ pub type Result<T> = anyhow::Result<T>;
 
 type Txn = Transaction<TT, String, ArcReadOnlyStore<Sha256Digest>, ArcBlockWriter<Sha256Digest>>;
 
-fn app() -> clap::App<'static, 'static> {
-    let root_arg = || {
-        Arg::with_name("root")
-            .required(true)
-            .takes_value(true)
-            .help("The root hash to use")
+enum Storage {
+    Memory(MemStore<Sha256Digest>),
+    Ipfs(IpfsStore),
+    Sqlite(SqliteStore),
+}
+impl ReadOnlyStore<Sha256Digest> for Storage {
+    fn get(&self, link: &Sha256Digest) -> Result<Box<[u8]>> {
+        match self {
+            Self::Memory(m) => m.get(link),
+            Storage::Ipfs(i) => i.get(link),
+            Storage::Sqlite(s) => s.get(link),
+        }
+    }
+}
+
+impl BlockWriter<Sha256Digest> for Storage {
+    fn put(&self, data: Vec<u8>) -> Result<Sha256Digest> {
+        match self {
+            Self::Memory(m) => m.put(data),
+            Storage::Ipfs(i) => i.put(data),
+            Storage::Sqlite(s) => s.put(data),
+        }
+    }
+}
+impl FromStr for Storage {
+    type Err = anyhow::Error;
+    fn from_str(s: &str) -> Result<Self> {
+        let s = match s {
+            "memory" => Self::Memory(MemStore::new(usize::max_value(), Sha256Digest::new)),
+            "ipfs" => Self::Ipfs(IpfsStore::new()?),
+            x => Self::Sqlite(SqliteStore::new(BlockStore::open(
+                x,
+                ipfs_sqlite_block_store::Config::default(),
+            )?)?),
+        };
+        Ok(s)
+    }
+}
+#[derive(StructOpt)]
+#[structopt(about = "CLI to work with large banyan trees on ipfs")]
+struct Opts {
+    #[structopt(long, global = true)]
+    /// An index password to use
+    index_pass: Option<String>,
+    #[structopt(long, global = true)]
+    /// A value password to use
+    value_pass: Option<String>,
+    #[structopt(short, parse(from_occurrences = set_log_level), global = true)]
+    #[allow(dead_code)] // log level will bet set in [`set_log_level`]
+    /// Increase verbosity
+    verbosity: u64,
+    #[structopt(long, default_value = "memory", global = true)]
+    /// Storage, possible options "memory", "ipfs" (uses local ipfs gw via HTTP),
+    /// or a path to a sqlite database (will create it if it doesn't exist)
+    storage: Storage,
+    #[structopt(subcommand)]
+    cmd: Command,
+}
+
+fn set_log_level(verbosity: u64) -> u64 {
+    let level = match verbosity {
+        0 => Level::ERROR,
+        1 => Level::INFO,
+        2 => Level::DEBUG,
+        _ => Level::TRACE,
     };
-    let topic_arg = || {
-        Arg::with_name("topic")
-            .long("topic")
-            .required(true)
-            .takes_value(true)
-            .help("The topic to send/recv data over")
-    };
-    let index_pass_arg = || {
-        Arg::with_name("index_pass")
-            .long("index_pass")
-            .required(false)
-            .takes_value(true)
-            .help("An index password to use")
-    };
-    let value_pass_arg = || {
-        Arg::with_name("value_pass")
-            .long("value_pass")
-            .required(false)
-            .takes_value(true)
-            .help("A value password to use")
-    };
-    let verbose_arg = || {
-        Arg::with_name("verbose")
-            .short("v")
-            .multiple(true)
-            .help("Sets the level of verbosity")
-    };
-    App::new("banyan-cli")
-        .version("0.1")
-        .author("Rüdiger Klaehn")
-        .about("CLI to work with large banyan trees on ipfs")
-        .arg(index_pass_arg())
-        .arg(value_pass_arg())
-        .arg(verbose_arg())
-        .subcommand(
-            SubCommand::with_name("dump")
-                .about("Dump a tree")
-                .arg(root_arg()),
-        )
-        .subcommand(
-            SubCommand::with_name("stream")
-                .about("Stream a tree")
-                .arg(root_arg()),
-        )
-        .subcommand(
-            SubCommand::with_name("build")
-                .about("Build a tree")
-                .arg(
-                    Arg::with_name("count")
-                        .long("count")
-                        .required(true)
-                        .takes_value(true)
-                        .help("The number of values per batch"),
-                )
-                .arg(
-                    Arg::with_name("batches")
-                        .long("batches")
-                        .takes_value(true)
-                        .default_value("1")
-                        .help("The number of batches"),
-                )
-                .arg(
-                    Arg::with_name("unbalanced")
-                        .long("unbalanced")
-                        .takes_value(false)
-                        .help("Do not balance while building"),
-                )
-                .arg(
-                    Arg::with_name("base")
-                        .long("base")
-                        .takes_value(true)
-                        .help("Base on which to build"),
-                ),
-        )
-        .subcommand(
-            SubCommand::with_name("filter")
-                .about("Stream a tree, filtered")
-                .arg(root_arg())
-                .arg(
-                    Arg::with_name("tag")
-                        .long("tag")
-                        .required(true)
-                        .multiple(true)
-                        .takes_value(true)
-                        .help("Tags to filter"),
-                ),
-        )
-        .subcommand(
-            SubCommand::with_name("pack")
-                .about("Pack a tree")
-                .arg(root_arg()),
-        )
-        .subcommand(
-            SubCommand::with_name("repair")
-                .about("Repair a tree")
-                .arg(root_arg()),
-        )
-        .subcommand(
-            SubCommand::with_name("send_stream")
-                .about("Send a stream")
-                .arg(topic_arg()),
-        )
-        .subcommand(
-            SubCommand::with_name("recv_stream")
-                .about("Receive a stream")
-                .arg(topic_arg()),
-        )
-        .subcommand(
-            SubCommand::with_name("forget")
-                .about("Forget data from a tree")
-                .arg(root_arg())
-                .arg(
-                    Arg::with_name("before")
-                        .long("before")
-                        .required(true)
-                        .takes_value(true)
-                        .help("The offset before which to forget data"),
-                ),
-        )
-        .subcommand(SubCommand::with_name("demo").about("Do some stuff"))
-        .subcommand(
-            SubCommand::with_name("bench").about("Benchmark").arg(
-                Arg::with_name("count")
-                    .long("count")
-                    .required(true)
-                    .takes_value(true)
-                    .help("The number of values per batch"),
-            ),
-        )
+    tracing_subscriber::fmt().with_max_level(level).init();
+    verbosity
+}
+
+#[derive(StructOpt)]
+enum Command {
+    /// Benchmark
+    Bench {
+        #[structopt(long)]
+        /// The number of values per batch
+        count: u64,
+    },
+    /// Build a tree
+    Build {
+        #[structopt(long)]
+        /// The number of values per batch
+        count: u64,
+        #[structopt(long, default_value = "1")]
+        /// The number of batches
+        batches: u64,
+        #[structopt(long)]
+        /// Do not balance while building
+        unbalanced: bool,
+        #[structopt(long)]
+        /// Base on which to build
+        base: Option<Sha256Digest>,
+    },
+    /// Traverse a tree and dump its output as dot. Can be piped directly:
+    /// `banyan-cli graph --root <..> | dot -Tpng output.png`.
+    /// Branches are depicted as rectangles, leafs as circles. A sealed node is
+    /// greyed out.
+    Graph {
+        #[structopt(long)]
+        /// The root hash to use
+        root: Sha256Digest,
+    },
+    /// Dump a tree
+    Dump {
+        #[structopt(long)]
+        /// The root hash to use
+        root: Sha256Digest,
+    },
+    /// Stream a tree, filtered
+    Filter {
+        #[structopt(long)]
+        /// The root hash to use
+        root: Sha256Digest,
+        #[structopt(long)]
+        /// Tags to filter
+        tag: Vec<String>,
+    },
+    /// Forget data from a tree
+    Forget {
+        #[structopt(long)]
+        /// The root hash to use
+        root: Sha256Digest,
+        #[structopt(long)]
+        /// The offset before which to forget data
+        before: u64,
+    },
+    /// Pack a tree
+    Pack {
+        #[structopt(long)]
+        /// The root hash to use
+        root: Sha256Digest,
+    },
+    /// Receive a stream
+    RecvStream {
+        #[structopt(long)]
+        /// Topic to receive data over
+        topic: String,
+    },
+    /// Repair a tree
+    Repair {
+        #[structopt(long)]
+        /// The root hash to use
+        root: Sha256Digest,
+    },
+    /// Send a stream
+    SendStream {
+        #[structopt(long)]
+        /// Topic to send data over
+        topic: String,
+    },
+    /// Stream a tree
+    Stream {
+        #[structopt(long)]
+        /// The root hash to use
+        root: Sha256Digest,
+    },
 }
 
 struct Tagger(BTreeMap<&'static str, Tag>);
@@ -184,7 +206,7 @@ impl Tagger {
     }
 }
 
-fn create_salsa_key(text: &str) -> salsa20::Key {
+fn create_salsa_key(text: String) -> salsa20::Key {
     let mut key = [0u8; 32];
     for (i, v) in text.as_bytes().iter().take(32).enumerate() {
         key[i] = *v;
@@ -302,6 +324,7 @@ async fn bench_build(
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let opts = Opts::from_args();
     let mut tagger = Tagger::new();
     // function to add some arbitrary tags to test out tag querying and compression
     let mut tags_from_offset = |i: u64| -> TagSet {
@@ -318,24 +341,9 @@ async fn main() -> Result<()> {
         }
     };
 
-    let store = Arc::new(IpfsStore::new()?);
-    let matches = app().get_matches();
-    let index_key: salsa20::Key = matches
-        .value_of("index_pass")
-        .map(create_salsa_key)
-        .unwrap_or_default();
-    let value_key: salsa20::Key = matches
-        .value_of("value_pass")
-        .map(create_salsa_key)
-        .unwrap_or_default();
-    let verbosity = matches.occurrences_of("verbose");
-    let level = match verbosity {
-        0 => Level::ERROR,
-        1 => Level::INFO,
-        2 => Level::DEBUG,
-        _ => Level::TRACE,
-    };
-    tracing_subscriber::fmt().with_max_level(level).init();
+    let store = Arc::new(opts.storage);
+    let index_key: salsa20::Key = opts.index_pass.map(create_salsa_key).unwrap_or_default();
+    let value_key: salsa20::Key = opts.value_pass.map(create_salsa_key).unwrap_or_default();
     let config = Config::debug_fast();
     let crypto_config = CryptoConfig {
         index_key,
@@ -349,220 +357,177 @@ async fn main() -> Result<()> {
         )
     };
     let forest = txn();
-    if let Some(matches) = matches.subcommand_matches("dump") {
-        let root = Sha256Digest::from_str(
-            matches
-                .value_of("root")
-                .ok_or_else(|| anyhow!("root must be provided"))?,
-        )?;
-        let tree = forest.load_tree(root)?;
-        forest.dump(&tree)?;
-        return Ok(());
-    } else if let Some(matches) = matches.subcommand_matches("stream") {
-        let root = Sha256Digest::from_str(
-            matches
-                .value_of("root")
-                .ok_or_else(|| anyhow!("root must be provided"))?,
-        )?;
-        let tree = forest.load_tree(root)?;
-        let mut stream = forest.stream_filtered(&tree, AllQuery).enumerate();
-        while let Some((i, Ok(v))) = stream.next().await {
-            if i % 1000 == 0 {
-                println!("{:?}", v);
+    match opts.cmd {
+        Command::Graph { root } => {
+            let tree = forest.load_tree(root)?;
+            let mut stdout = std::io::stdout();
+            dump::graph(&forest, &tree, &mut stdout)?;
+        }
+        Command::Dump { root } => {
+            let tree = forest.load_tree(root)?;
+            forest.dump(&tree)?;
+        }
+        Command::Stream { root } => {
+            let tree = forest.load_tree(root)?;
+            let mut stream = forest.stream_filtered(&tree, AllQuery).enumerate();
+            while let Some((i, Ok(v))) = stream.next().await {
+                if i % 1000 == 0 {
+                    println!("{:?}", v);
+                }
             }
         }
-        return Ok(());
-    } else if let Some(matches) = matches.subcommand_matches("build") {
-        let count: u64 = matches
-            .value_of("count")
-            .ok_or_else(|| anyhow!("required arg count not provided"))?
-            .parse()?;
-        let batches: u64 = matches
-            .value_of("batches")
-            .ok_or_else(|| anyhow!("required arg count not provided"))?
-            .parse()?;
-        let unbalanced = matches.is_present("unbalanced");
-        let base = matches
-            .value_of("base")
-            .map(Sha256Digest::from_str)
-            .transpose()?;
-        println!(
-            "building a tree with {} batches of {} values, unbalanced: {}",
-            batches, count, unbalanced
-        );
-        let tree = build_tree(&forest, base, batches, count, unbalanced, 1000).await?;
-        forest.dump(&tree)?;
-        let roots = forest.roots(&tree)?;
-        let levels = roots.iter().map(|x| x.level()).collect::<Vec<_>>();
-        let _tree2 = forest.tree_from_roots(roots)?;
-        println!("{:?}", tree);
-        println!("{}", tree);
-        println!("{:?}", levels);
-        forest.dump(&tree)?;
-    } else if let Some(matches) = matches.subcommand_matches("pack") {
-        let root = Sha256Digest::from_str(
-            matches
-                .value_of("root")
-                .ok_or_else(|| anyhow!("root must be provided"))?,
-        )?;
-        let mut tree = forest.load_tree(root)?;
-        forest.dump(&tree)?;
-        tree = forest.pack(&tree)?;
-        forest.assert_invariants(&tree)?;
-        assert!(forest.is_packed(&tree)?);
-        forest.dump(&tree)?;
-        println!("{:?}", tree);
-    } else if let Some(matches) = matches.subcommand_matches("filter") {
-        let root = Sha256Digest::from_str(
-            matches
-                .value_of("root")
-                .ok_or_else(|| anyhow!("root must be provided"))?,
-        )?;
-        let tags = matches
-            .values_of("tag")
-            .ok_or_else(|| anyhow!("at least one tag must be provided"))?
-            .map(|tag| Key::filter_tags(TagSet::single(Tag::from(tag))))
-            .collect::<Vec<_>>();
-        let query = DnfQuery(tags).boxed();
-        let tree = forest.load_tree(root)?;
-        forest.dump(&tree)?;
-        let mut stream = forest.stream_filtered(&tree, query).enumerate();
-        while let Some((i, Ok(v))) = stream.next().await {
-            if i % 1000 == 0 {
-                println!("{:?}", v);
+        Command::Build {
+            base,
+            batches,
+            count,
+            unbalanced,
+        } => {
+            println!(
+                "building a tree with {} batches of {} values, unbalanced: {}",
+                batches, count, unbalanced
+            );
+            let tree = build_tree(&forest, base, batches, count, unbalanced, 1000).await?;
+            forest.dump(&tree)?;
+            let roots = forest.roots(&tree)?;
+            let levels = roots.iter().map(|x| x.level()).collect::<Vec<_>>();
+            let _tree2 = forest.tree_from_roots(roots)?;
+            println!("{:?}", tree);
+            println!("{}", tree);
+            println!("{:?}", levels);
+            forest.dump(&tree)?;
+        }
+        Command::Bench { count } => {
+            let config = Config::debug_fast();
+            let crypto_config = CryptoConfig {
+                index_key,
+                value_key,
+            };
+            let branch_cache = BranchCache::new(1000);
+            let forest = Txn::new(
+                Forest::new(store.clone(), branch_cache, crypto_config, config),
+                store,
+            );
+            let _t0 = std::time::Instant::now();
+            let base = None;
+            let batches = 1;
+            let unbalanced = false;
+            let (tree, tcreate) = bench_build(&forest, base, batches, count, unbalanced).await?;
+            let t0 = std::time::Instant::now();
+            let _values: Vec<_> = forest.collect(&tree)?;
+            let t1 = std::time::Instant::now();
+            let tcollect = t1 - t0;
+            let t0 = std::time::Instant::now();
+            let tags = vec![Key::range(
+                0,
+                u64::max_value(),
+                TagSet::single(Tag::from("fizz")),
+            )];
+            let query = DnfQuery(tags).boxed();
+            let values: Vec<_> = forest
+                .stream_filtered(&tree, query)
+                .map_ok(|(_, k, v)| (k, v))
+                .collect::<Vec<_>>()
+                .await;
+            println!("{}", values.len());
+            let t1 = std::time::Instant::now();
+            let tfilter_common = t1 - t0;
+            let t0 = std::time::Instant::now();
+            let tags = vec![Key::range(
+                0,
+                count / 10,
+                TagSet::single(Tag::from("fizzbuzz")),
+            )];
+            let query = DnfQuery(tags).boxed();
+            let values: Vec<_> = forest
+                .stream_filtered(&tree, query)
+                .map_ok(|(_, k, v)| (k, v))
+                .collect::<Vec<_>>()
+                .await;
+            println!("{}", values.len());
+            let t1 = std::time::Instant::now();
+            let tfilter_rare = t1 - t0;
+            println!("create {}", (tcreate.as_micros() as f64) / 1000000.0);
+            println!("collect {}", (tcollect.as_micros() as f64) / 1000000.0);
+            println!(
+                "filter_common {}",
+                (tfilter_common.as_micros() as f64) / 1000000.0
+            );
+            println!(
+                "filter_rare {}",
+                (tfilter_rare.as_micros() as f64) / 1000000.0
+            );
+        }
+        Command::Filter { tag, root } => {
+            let tags = tag
+                .into_iter()
+                .map(|tag| Key::filter_tags(TagSet::single(Tag::from(tag))))
+                .collect::<Vec<_>>();
+            let query = DnfQuery(tags).boxed();
+            let tree = forest.load_tree(root)?;
+            forest.dump(&tree)?;
+            let mut stream = forest.stream_filtered(&tree, query).enumerate();
+            while let Some((i, Ok(v))) = stream.next().await {
+                if i % 1000 == 0 {
+                    println!("{:?}", v);
+                }
             }
         }
-    } else if let Some(matches) = matches.subcommand_matches("repair") {
-        let root = Sha256Digest::from_str(
-            matches
-                .value_of("root")
-                .ok_or_else(|| anyhow!("root must be provided"))?,
-        )?;
-        let tree = forest.load_tree(root)?;
-        let (tree, _) = forest.repair(&tree)?;
-        forest.dump(&tree)?;
-        println!("{:?}", tree);
-    } else if let Some(matches) = matches.subcommand_matches("forget") {
-        let root = Sha256Digest::from_str(
-            matches
-                .value_of("root")
-                .ok_or_else(|| anyhow!("root must be provided"))?,
-        )?;
-        let offset: u64 = matches
-            .value_of("before")
-            .ok_or_else(|| anyhow!("required arg before not provided"))?
-            .parse()?;
-        let mut tree = forest.load_tree(root)?;
-        tree = forest.retain(&tree, &OffsetRangeQuery::from(offset..))?;
-        forest.dump(&tree)?;
-        println!("{:?}", tree);
-    } else if let Some(matches) = matches.subcommand_matches("send_stream") {
-        let topic = matches
-            .value_of("topic")
-            .ok_or_else(|| anyhow!("topic must be provided"))?;
-        let mut ticks = tokio::time::interval(Duration::from_secs(1));
-        let mut tree = Tree::<TT>::empty();
-        let mut offset = 0;
-        loop {
-            poll_fn(|cx| ticks.poll_tick(cx)).await;
-            let key = Key::single(offset, offset, tags_from_offset(offset));
-            tree = forest.extend_unpacked(&tree, Some((key, "xxx".into())))?;
-            if tree.level() > 100 {
-                println!("packing the tree");
-                tree = forest.pack(&tree)?;
-            }
-            offset += 1;
-            if let Some(cid) = tree.link() {
-                println!("publishing {} to {}", cid, topic);
-                pubsub_pub(topic, cid.to_string().as_bytes()).await?;
+        Command::Forget { root, before } => {
+            let mut tree = forest.load_tree(root)?;
+            tree = forest.retain(&tree, &OffsetRangeQuery::from(before..))?;
+            forest.dump(&tree)?;
+            println!("{:?}", tree);
+        }
+        Command::Pack { root } => {
+            let mut tree = forest.load_tree(root)?;
+            forest.dump(&tree)?;
+            tree = forest.pack(&tree)?;
+            forest.assert_invariants(&tree)?;
+            assert!(forest.is_packed(&tree)?);
+            forest.dump(&tree)?;
+            println!("{:?}", tree);
+        }
+        Command::RecvStream { topic } => {
+            let stream = pubsub_sub(&*topic)?
+                .map_err(anyhow::Error::new)
+                .and_then(|data| future::ready(String::from_utf8(data).map_err(anyhow::Error::new)))
+                .and_then(|data| future::ready(Sha256Digest::from_str(&data)));
+            let forest2 = forest.clone();
+            let trees = stream.filter_map(move |x| {
+                let forest = forest2.clone();
+                future::ready(x.and_then(move |link| forest.load_tree(link)).ok())
+            });
+            let mut stream = forest.read().stream_trees(AllQuery, trees).boxed_local();
+            while let Some(ev) = stream.next().await {
+                println!("{:?}", ev);
             }
         }
-    } else if let Some(matches) = matches.subcommand_matches("recv_stream") {
-        let topic = matches
-            .value_of("topic")
-            .ok_or_else(|| anyhow!("topic must be provided"))?;
-        let stream = pubsub_sub(topic)?
-            .map_err(anyhow::Error::new)
-            .and_then(|data| future::ready(String::from_utf8(data).map_err(anyhow::Error::new)))
-            .and_then(|data| future::ready(Sha256Digest::from_str(&data)));
-        let forest2 = forest.clone();
-        let trees = stream.filter_map(move |x| {
-            let forest = forest2.clone();
-            future::ready(x.and_then(move |link| forest.load_tree(link)).ok())
-        });
-        let mut stream = forest.read().stream_trees(AllQuery, trees).boxed_local();
-        while let Some(ev) = stream.next().await {
-            println!("{:?}", ev);
+        Command::Repair { root } => {
+            let tree = forest.load_tree(root)?;
+            let (tree, _) = forest.repair(&tree)?;
+            forest.dump(&tree)?;
+            println!("{:?}", tree);
         }
-    } else if let Some(matches) = matches.subcommand_matches("bench") {
-        // let store = Arc::new(MemStore::new(usize::max_value(), Sha256Digest::new));
-        let store = Arc::new(SqliteStore::memory()?);
-        let config = Config::debug_fast();
-        let crypto_config = CryptoConfig {
-            index_key,
-            value_key,
-        };
-        let branch_cache = BranchCache::new(1000);
-        let forest = Txn::new(
-            Forest::new(store.clone(), branch_cache, crypto_config, config),
-            store,
-        );
-        let _t0 = std::time::Instant::now();
-        let base = None;
-        let batches = 1;
-        let count: u64 = matches
-            .value_of("count")
-            .ok_or_else(|| anyhow!("required arg count not provided"))?
-            .parse()?;
-        let unbalanced = false;
-        let (tree, tcreate) = bench_build(&forest, base, batches, count, unbalanced).await?;
-        let t0 = std::time::Instant::now();
-        let _values: Vec<_> = forest.collect(&tree)?;
-        let t1 = std::time::Instant::now();
-        let tcollect = t1 - t0;
-        let t0 = std::time::Instant::now();
-        let tags = vec![Key::range(
-            0,
-            u64::max_value(),
-            TagSet::single(Tag::from("fizz")),
-        )];
-        let query = DnfQuery(tags).boxed();
-        let values: Vec<_> = forest
-            .stream_filtered(&tree, query)
-            .map_ok(|(_, k, v)| (k, v))
-            .collect::<Vec<_>>()
-            .await;
-        println!("{}", values.len());
-        let t1 = std::time::Instant::now();
-        let tfilter_common = t1 - t0;
-        let t0 = std::time::Instant::now();
-        let tags = vec![Key::range(
-            0,
-            count / 10,
-            TagSet::single(Tag::from("fizzbuzz")),
-        )];
-        let query = DnfQuery(tags).boxed();
-        let values: Vec<_> = forest
-            .stream_filtered(&tree, query)
-            .map_ok(|(_, k, v)| (k, v))
-            .collect::<Vec<_>>()
-            .await;
-        println!("{}", values.len());
-        let t1 = std::time::Instant::now();
-        let tfilter_rare = t1 - t0;
-        println!("create {}", (tcreate.as_micros() as f64) / 1000000.0);
-        println!("collect {}", (tcollect.as_micros() as f64) / 1000000.0);
-        println!(
-            "filter_common {}",
-            (tfilter_common.as_micros() as f64) / 1000000.0
-        );
-        println!(
-            "filter_rare {}",
-            (tfilter_rare.as_micros() as f64) / 1000000.0
-        );
-    } else {
-        app().print_long_help()?;
-        println!();
+        Command::SendStream { topic } => {
+            let mut ticks = tokio::time::interval(Duration::from_secs(1));
+            let mut tree = Tree::<TT>::empty();
+            let mut offset = 0;
+            loop {
+                poll_fn(|cx| ticks.poll_tick(cx)).await;
+                let key = Key::single(offset, offset, tags_from_offset(offset));
+                tree = forest.extend_unpacked(&tree, Some((key, "xxx".into())))?;
+                if tree.level() > 100 {
+                    println!("packing the tree");
+                    tree = forest.pack(&tree)?;
+                }
+                offset += 1;
+                if let Some(cid) = tree.link() {
+                    println!("publishing {} to {}", cid, topic);
+                    pubsub_pub(&*topic, cid.to_string().as_bytes()).await?;
+                }
+            }
+        }
     }
+
     Ok(())
 }

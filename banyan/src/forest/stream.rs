@@ -121,7 +121,7 @@ impl<
                         // abort at the first non-ok offset
                         result.is_ok()
                     });
-                iter.to_stream(1, thread_pool.clone())
+                iter.into_stream(1, thread_pool.clone())
             })
     }
 

@@ -484,6 +484,7 @@ where
                     index.sealed,
                 );
             }
+
             NodeInfo::Branch(index, branch) => {
                 println!(
                     "{}Branch(count={}, key_bytes={}, value_bytes={}, sealed={})",

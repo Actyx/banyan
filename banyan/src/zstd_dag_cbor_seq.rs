@@ -71,7 +71,7 @@ impl ZstdDagCborSeq {
         // call finish to write the zstd frame
         let data = encoder.finish()?;
         // box into an arc
-        Ok(Self::new(data.into(), links.into_iter().collect()))
+        Ok(Self::new(data, links.into_iter().collect()))
     }
 
     /// create ZStdArray from a single serializable item
@@ -114,7 +114,7 @@ impl ZstdDagCborSeq {
             // the first ? is to handle the io error from decompress_and_transform, the second to handle the inner io error from write_all
             let (size, data) =
                 decompress_and_transform(compressed, &mut |decompressed| -> anyhow::Result<()> {
-                    scrape_links(decompressed.as_ref(), &mut links)?;
+                    scrape_links(decompressed, &mut links)?;
                     encoder.write_all(decompressed)?;
                     Ok(())
                 })?;
@@ -164,7 +164,7 @@ impl ZstdDagCborSeq {
         full |= data.len() >= compressed_size;
         full |= keys.len() >= max_keys;
         full |= size >= uncompressed_size;
-        Ok((Self::new(data.into(), links.into_iter().collect()), full))
+        Ok((Self::new(data, links.into_iter().collect()), full))
     }
 
     /// Get the compressed data
@@ -305,7 +305,7 @@ fn shrink_to_fit(slice: &[bool]) -> &[bool] {
             return &slice[0..=i];
         }
     }
-    return &[];
+    &[]
 }
 
 impl fmt::Debug for ZstdDagCborSeq {
@@ -519,7 +519,7 @@ mod tests {
             let data1: Vec<u32> = DagCborCodec.decode(&decompressed)?;
             assert_eq!(data1, data);
         } else {
-            assert!(false);
+            panic!();
         }
         Ok(())
     }
