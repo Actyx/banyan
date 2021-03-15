@@ -16,7 +16,7 @@ path = "src/bin/cli.rs"
 
 [dependencies]
 anyhow = "1.0.38"
-banyan = { path = "../banyan" }
+banyan = { version = "0.8.1", path = "../banyan" }
 base64 = "0.13.0"
 derive_more = "0.99.11"
 dot = "0.1.4"
