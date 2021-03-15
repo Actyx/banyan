@@ -7,6 +7,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::tags::Sha256Digest;
 
+#[derive(Clone)]
 pub struct SqliteStore(Arc<Mutex<BlockStore>>);
 
 impl SqliteStore {

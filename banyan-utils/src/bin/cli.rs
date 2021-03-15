@@ -14,7 +14,7 @@ use banyan::{
     tree::*,
 };
 use banyan_utils::{
-    dump,
+    create_salsa_key, dump,
     ipfs::{pubsub_pub, pubsub_sub, IpfsStore},
     sqlite::SqliteStore,
     tag_index::{Tag, TagSet},
@@ -214,14 +214,6 @@ impl Tagger {
     pub fn tags(&mut self, names: &[&'static str]) -> TagSet {
         names.iter().map(|name| self.tag(name)).collect::<TagSet>()
     }
-}
-
-fn create_salsa_key(text: String) -> salsa20::Key {
-    let mut key = [0u8; 32];
-    for (i, v) in text.as_bytes().iter().take(32).enumerate() {
-        key[i] = *v;
-    }
-    key.into()
 }
 
 async fn build_tree(

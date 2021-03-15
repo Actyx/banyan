@@ -65,6 +65,8 @@ mod thread_local_zstd;
 pub mod tree;
 mod util;
 mod zstd_dag_cbor_seq;
+
+pub use salsa20;
 pub use zstd_dag_cbor_seq::ZstdDagCborSeq;
 
 #[cfg(test)]
