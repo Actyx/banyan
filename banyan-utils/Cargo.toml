@@ -1,22 +1,30 @@
 [package]
-name = "banyan-cli"
+name = "banyan-utils"
 version = "0.1.0"
 authors = ["Rüdiger Klaehn <rklaehn@protonmail.com>", "Actyx AG"]
 edition = "2018"
 license = "MIT OR Apache-2.0"
 keywords = ["database", "immutable", "persistent", "tree"]
 categories = ["data-structures"]
+description = "Utilities to work with banyan trees"
+
+[lib]
+crate-type = ["lib"]
+
+[[bin]]
+name = "banyan-cli"
+path = "src/bin/cli.rs"
 
 [dependencies]
 anyhow = "1.0.38"
-banyan = { path = "../banyan" }
+banyan = { version = "0.8.2", path = "../banyan" }
 base64 = "0.13.0"
 derive_more = "0.99.11"
 dot = "0.1.4"
 env_logger = "0.8.2"
 futures = "0.3.12"
 hex = "0.4.2"
-ipfs-sqlite-block-store = "0.2.2"
+ipfs-sqlite-block-store = "0.3.0"
 libipld = { version = "0.11.0", features = ["unleashed"] }
 lru = "0.6.4"
 maplit = "1.0.2"

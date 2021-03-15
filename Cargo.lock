@@ -81,7 +81,7 @@ checksum = "cdb031dd78e28731d87d56cc8ffef4a8f36ca26c38fe2de700543e627f8a464a"
 
 [[package]]
 name = "banyan"
-version = "0.8.1"
+version = "0.8.2"
 dependencies = [
  "anyhow",
  "clap",
@@ -109,7 +109,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "banyan-cli"
+name = "banyan-utils"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -722,9 +722,9 @@ dependencies = [
 
 [[package]]
 name = "ipfs-sqlite-block-store"
-version = "0.2.2"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3a2c7e40f8ba6bbaaa8c6c5e1f131ed5275b7efa5f5ddaafdc667472f1142f25"
+checksum = "0899665fbf8bea55eaaddfc8ef3a591481f13f8b0f3ef1a11372ce31305aefbd"
 dependencies = [
  "anyhow",
  "derive_more",

@@ -3,10 +3,11 @@ use std::collections::BTreeMap;
 
 use banyan::{
     forest::{Transaction, TreeTypes},
-    store::ReadOnlyStore,
+    store::{ArcReadOnlyStore, ReadOnlyStore},
     tree::Tree,
+    ZstdDagCborSeq,
 };
-use libipld::cbor::DagCbor;
+use libipld::{cbor::DagCbor, codec::Codec, json::DagJsonCodec};
 
 type Node<'a> = &'a NodeDescriptor;
 type Edge<'a> = (usize, usize);
@@ -130,5 +131,23 @@ where
     })?;
     let forest_with_tree = ForestWithTree { nodes, edges };
     dot::render(&forest_with_tree, &mut out)?;
+    Ok(())
+}
+
+/// Takes a hash to a dagcbor encoded blob, and write it as dag-json to `writer`,
+/// each item separated by newlines.
+pub fn dump_json<Link>(
+    store: ArcReadOnlyStore<Link>,
+    hash: Link,
+    value_key: salsa20::Key,
+    mut writer: impl std::io::Write,
+) -> anyhow::Result<()> {
+    let bytes = store.get(&hash)?;
+    let dag_cbor = ZstdDagCborSeq::decrypt(&bytes, &value_key)?;
+    let ipld_ast = dag_cbor.items::<libipld::Ipld>()?;
+    for x in ipld_ast {
+        let json = DagJsonCodec.encode(&x)?;
+        writeln!(writer, "{}", std::str::from_utf8(&json)?)?;
+    }
     Ok(())
 }
