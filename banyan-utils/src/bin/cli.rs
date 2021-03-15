@@ -1,6 +1,7 @@
 use futures::future::poll_fn;
 use futures::prelude::*;
 use ipfs_sqlite_block_store::BlockStore;
+
 use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Duration};
 use structopt::StructOpt;
 use tracing::Level;
@@ -68,7 +69,7 @@ impl FromStr for Storage {
     }
 }
 #[derive(StructOpt)]
-#[structopt(about = "CLI to work with large banyan trees on ipfs")]
+#[structopt(about = "CLI to work with large banyan trees")]
 struct Opts {
     #[structopt(long, global = true)]
     /// An index password to use
@@ -133,6 +134,18 @@ enum Command {
     },
     /// Dump a tree
     Dump {
+        #[structopt(long)]
+        /// The root hash to use
+        root: Sha256Digest,
+    },
+    /// Dump a block as json to stdout
+    DumpBlock {
+        #[structopt(long)]
+        /// The root hash to use
+        hash: Sha256Digest,
+    },
+    /// Dumps all values of a tree as json to stdout, newline separated
+    DumpValues {
         #[structopt(long)]
         /// The root hash to use
         root: Sha256Digest,
@@ -363,6 +376,17 @@ async fn main() -> Result<()> {
         Command::Dump { root } => {
             let tree = forest.load_tree(root)?;
             forest.dump(&tree)?;
+        }
+        Command::DumpValues { root } => {
+            let tree = forest.load_tree(root)?;
+            let iter = forest.iter_from(&tree, 0);
+            for res in iter {
+                let (i, k, v) = res?;
+                println!("{:?} {:?} {:?}", i, k, v);
+            }
+        }
+        Command::DumpBlock { hash } => {
+            dump::dump_json(store, hash, value_key, &mut std::io::stdout())?;
         }
         Command::Stream { root } => {
             let tree = forest.load_tree(root)?;

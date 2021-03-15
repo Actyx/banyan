@@ -477,18 +477,30 @@ where
         match self.load_node(index)? {
             NodeInfo::Leaf(index, _) => {
                 println!(
-                    "{}Leaf(count={}, value_bytes={}, sealed={})",
+                    "{}Leaf(count={}, value_bytes={}, sealed={}, link={})",
                     prefix,
                     index.keys.count(),
                     index.value_bytes,
                     index.sealed,
+                    index
+                        .link
+                        .map(|x| format!("{}", x))
+                        .unwrap_or_else(|| "".to_string())
                 );
             }
 
             NodeInfo::Branch(index, branch) => {
                 println!(
-                    "{}Branch(count={}, key_bytes={}, value_bytes={}, sealed={})",
-                    prefix, index.count, index.key_bytes, index.value_bytes, index.sealed,
+                    "{}Branch(count={}, key_bytes={}, value_bytes={}, sealed={}, link={})",
+                    prefix,
+                    index.count,
+                    index.key_bytes,
+                    index.value_bytes,
+                    index.sealed,
+                    index
+                        .link
+                        .map(|x| format!("{}", x))
+                        .unwrap_or_else(|| "".to_string())
                 );
                 let prefix = prefix.to_string() + "  ";
                 for x in branch.children.iter() {
