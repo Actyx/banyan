@@ -6,6 +6,7 @@ edition = "2018"
 license = "MIT OR Apache-2.0"
 keywords = ["database", "immutable", "persistent", "tree"]
 categories = ["data-structures"]
+description = "Utilities to work with banyan trees"
 
 [lib]
 crate-type = ["lib"]
