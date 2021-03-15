@@ -3,7 +3,7 @@
 [workspace]
 members = [
   "banyan",
-  "banyan-cli",
+  "banyan-utils",
 ]
 
 [profile.release]

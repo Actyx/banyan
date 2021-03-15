@@ -8,7 +8,7 @@ use std::{convert::TryInto, fmt, str::FromStr};
 
 use crate::tags::Sha256Digest;
 
-pub(crate) fn block_get(key: &Cid) -> Result<Box<[u8]>> {
+pub fn block_get(key: &Cid) -> Result<Box<[u8]>> {
     let url = reqwest::Url::parse_with_params(
         "http://localhost:5001/api/v0/block/get",
         &[("arg", format!("{}", key))],
@@ -71,7 +71,7 @@ struct IpfsPubsubEventIo {
     _topic_ids: IgnoredAny,
 }
 
-pub(crate) fn pubsub_sub(topic: &str) -> Result<impl Stream<Item = reqwest::Result<Vec<u8>>>> {
+pub fn pubsub_sub(topic: &str) -> Result<impl Stream<Item = reqwest::Result<Vec<u8>>>> {
     let url = reqwest::Url::parse_with_params(
         "http://localhost:5001/api/v0/pubsub/sub",
         &[("arg", topic)],
@@ -94,7 +94,7 @@ pub(crate) fn pubsub_sub(topic: &str) -> Result<impl Stream<Item = reqwest::Resu
     Ok(data)
 }
 
-pub(crate) async fn pubsub_pub(topic: &str, data: &[u8]) -> Result<()> {
+pub async fn pubsub_pub(topic: &str, data: &[u8]) -> Result<()> {
     use percent_encoding::{percent_encode, NON_ALPHANUMERIC};
     let topic = percent_encode(&topic.as_bytes(), NON_ALPHANUMERIC).to_string();
     let data = percent_encode(&data, NON_ALPHANUMERIC).to_string();
@@ -116,7 +116,7 @@ fn format_codec(codec: u64) -> Result<&'static str> {
     }
 }
 
-pub(crate) fn block_put(data: &[u8], codec: u64, pin: bool) -> Result<Cid> {
+pub fn block_put(data: &[u8], codec: u64, pin: bool) -> Result<Cid> {
     let url = reqwest::Url::parse_with_params(
         "http://localhost:5001/api/v0/block/put",
         &[("format", format_codec(codec)?), ("pin", &pin.to_string())],

@@ -1,11 +1,18 @@
 [package]
-name = "banyan-cli"
+name = "banyan-utils"
 version = "0.1.0"
 authors = ["Rüdiger Klaehn <rklaehn@protonmail.com>", "Actyx AG"]
 edition = "2018"
 license = "MIT OR Apache-2.0"
 keywords = ["database", "immutable", "persistent", "tree"]
 categories = ["data-structures"]
+
+[lib]
+crate-type = ["lib"]
+
+[[bin]]
+name = "banyan-cli"
+path = "src/bin/cli.rs"
 
 [dependencies]
 anyhow = "1.0.38"

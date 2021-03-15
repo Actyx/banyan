@@ -1,17 +1,9 @@
 use futures::future::poll_fn;
 use futures::prelude::*;
 use ipfs_sqlite_block_store::BlockStore;
-use sqlite::SqliteStore;
 use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Duration};
 use structopt::StructOpt;
-use tag_index::{Tag, TagSet};
 use tracing::Level;
-
-mod dump;
-mod ipfs;
-mod sqlite;
-mod tag_index;
-mod tags;
 
 use banyan::{
     forest::*,
@@ -20,8 +12,13 @@ use banyan::{
     store::{ArcBlockWriter, ArcReadOnlyStore, BlockWriter, ReadOnlyStore},
     tree::*,
 };
-use ipfs::{pubsub_pub, pubsub_sub, IpfsStore};
-use tags::{DnfQuery, Key, Sha256Digest, TT};
+use banyan_utils::{
+    dump,
+    ipfs::{pubsub_pub, pubsub_sub, IpfsStore},
+    sqlite::SqliteStore,
+    tag_index::{Tag, TagSet},
+    tags::{DnfQuery, Key, Sha256Digest, TT},
+};
 
 #[cfg(target_env = "musl")]
 #[global_allocator]

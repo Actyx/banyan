@@ -109,7 +109,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "banyan-cli"
+name = "banyan-utils"
 version = "0.1.0"
 dependencies = [
  "anyhow",
