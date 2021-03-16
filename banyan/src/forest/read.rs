@@ -48,8 +48,6 @@ where
 
             // Branch is exhausted: Ascend.
             if *pos == matching.len() {
-                // tracing::trace!("branch exhausted");
-
                 // Ascend to parent's node
                 self.index_stack.pop().expect("not empty");
                 self.pos_stack.pop();
@@ -74,28 +72,27 @@ where
                         let _ = std::mem::replace(matching, q_matching);
                     }
 
-                    while !matching[*pos] {
-                        self.offset += branch.children[*pos].count();
+                    if matching[*pos] {
+                        // Descend into next child
+                        self.index_stack
+                            // TODO: clone :-( ?
+                            .push(Arc::new(branch.children[*pos].clone()));
+                        let new_vec: SmallVec<[_; 64]> = smallvec![matching[*pos]];
+                        self.pos_stack.push((0, new_vec));
+                        continue 'outer;
+                    } else {
+                        let index = &branch.children[*pos];
+
+                        let placeholder: FilteredChunk<T, V, E> = FilteredChunk {
+                            range: self.offset..self.offset + index.count(),
+                            data: Vec::new(),
+                            extra: (self.mk_extra)(index.as_index_ref()),
+                        };
+
+                        self.offset += index.count();
                         *pos += 1;
-
-                        // Branch exhausted, ascend and continue
-                        if *pos == branch.children.len() {
-                            // Ascend to parent's node
-                            self.index_stack.pop().expect("not empty");
-                            self.pos_stack.pop();
-                            let last = self.pos_stack.last_mut().expect("not empty");
-                            last.0 += 1;
-                            continue 'outer;
-                        }
+                        break placeholder;
                     }
-
-                    // Descend into next child
-                    self.index_stack
-                        // TODO: clone :-( ?
-                        .push(Arc::new(branch.children[*pos].clone()));
-                    let new_vec: SmallVec<[_; 64]> = smallvec![matching[*pos]];
-                    self.pos_stack.push((0, new_vec));
-                    continue;
                 }
 
                 Ok(NodeInfo::Leaf(index, leaf)) => {
@@ -365,82 +362,24 @@ where
         index: Arc<Index<T>>,
         mk_extra: &'static F,
     ) -> BoxStream<'static, Result<FilteredChunk<T, V, E>>> {
-        let this: Forest<T, V, R> = self.clone();
-        async move {
-            Ok(match this.load_node(&index)? {
-                NodeInfo::Leaf(index, node) => {
-                    // todo: don't get the node here, since we might not need it
-                    let mut matching = vec![true; index.keys.len()];
-                    query.containing(offset, index, &mut matching);
-                    let keys = index.select_keys(&matching);
-                    let elems: Vec<V> = node.as_ref().select(&matching)?;
-                    let pairs = keys
-                        .zip(elems)
-                        .map(|((o, k), v)| (o + offset, k, v))
-                        .collect::<Vec<_>>();
-                    let chunk = FilteredChunk {
-                        range: offset..offset + index.keys.count(),
-                        data: pairs,
-                        extra: mk_extra(IndexRef::Leaf(index)),
-                    };
-                    stream::once(future::ok(chunk)).left_stream().left_stream()
-                }
-                NodeInfo::Branch(index, node) => {
-                    // todo: don't get the node here, since we might not need it
-                    let mut matching = vec![true; index.summaries.len()];
-                    query.intersecting(offset, index, &mut matching);
-                    let offsets = zip_with_offset(node.children.to_vec(), offset);
-                    let iter = matching.into_iter().zip(offsets).map(
-                        move |(is_matching, (child, offset))| {
-                            if is_matching {
-                                this.clone()
-                                    .stream_filtered_chunked0(
-                                        offset,
-                                        query.clone(),
-                                        Arc::new(child),
-                                        mk_extra,
-                                    )
-                                    .right_stream()
-                            } else {
-                                let placeholder = FilteredChunk {
-                                    range: offset..offset + child.count(),
-                                    data: Vec::new(),
-                                    extra: mk_extra(child.as_index_ref()),
-                                };
-                                stream::once(future::ok(placeholder)).left_stream()
-                            }
-                        },
-                    );
-                    stream::iter(iter).flatten().right_stream().left_stream()
-                }
-                NodeInfo::PurgedBranch(_) | NodeInfo::PurgedLeaf(_) => {
-                    // even for purged leafs and branches, produce a placeholder.
-                    //
-                    // the caller can find out if we skipped purged parts of the tree by
-                    // using an appropriate mk_extra fn.
-                    let placeholder = FilteredChunk {
-                        range: offset..offset + index.count(),
-                        data: Vec::new(),
-                        extra: mk_extra(index.as_index_ref()),
-                    };
-                    stream::once(future::ok(placeholder)).right_stream()
-                }
-            })
-        }
-        .try_flatten_stream()
+        let iter = self.traverse0(offset, query, index, mk_extra);
+        stream::unfold(iter, |mut iter| async move {
+            iter.next().map(|res| (res, iter))
+        })
         .boxed()
     }
 
     /// Convenience method to iterate filtered.
     ///
     /// Implemented in terms of stream_filtered_chunked
-    pub(crate) fn iter_filtered0<Q: Query<T> + Clone + 'static>(
+    pub(crate) fn iter_filtered0<Q: Query<T> + Clone + Send + 'static>(
         &self,
         offset: u64,
         query: Q,
         index: Arc<Index<T>>,
     ) -> BoxedIter<'static, Result<(u64, T::Key, V)>> {
         self.traverse0(offset, query, index, &|_| {})
+            // .boxed()
             .map(|res| match res {
                 Ok(chunk) => chunk.data.into_iter().map(Ok).left_iter(),
                 Err(cause) => iter::once(Err(cause)).right_iter(),
