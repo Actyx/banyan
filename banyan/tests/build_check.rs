@@ -1,109 +1,16 @@
 use banyan::{
-    forest::{BranchCache, CryptoConfig, Forest},
-    forest::{Config, Transaction, TreeTypes},
-    index::{BranchIndex, CompactSeq, Index, LeafIndex, Summarizable},
+    index::{BranchIndex, Index, LeafIndex},
     memstore::MemStore,
     query::{AllQuery, OffsetRangeQuery},
     tree::Tree,
 };
 use futures::prelude::*;
-use libipld::{cbor::DagCborCodec, codec::Codec, Cid, DagCbor};
-use quickcheck::{Arbitrary, Gen, TestResult};
-use std::{convert::TryInto, iter, iter::FromIterator, ops::Range, str::FromStr};
-use store::Sha256Digest;
-mod store;
+use libipld::{cbor::DagCborCodec, codec::Codec, Cid};
+use std::{convert::TryInto, iter, ops::Range, str::FromStr};
 
-type Txn = Transaction<TT, u64, MemStore<Sha256Digest>, MemStore<Sha256Digest>>;
+use common::{create_test_tree, test, txn, Key, KeySeq, Sha256Digest, TT};
 
-#[derive(Debug, Clone)]
-struct TT;
-
-#[derive(Debug, Clone, PartialEq, Eq, DagCbor)]
-struct Key(u64);
-/// A trivial implementation of a CompactSeq as just a Seq.
-///
-/// This is useful mostly as a reference impl and for testing.
-#[derive(Debug, Clone, DagCbor)]
-struct KeySeq(Vec<Key>);
-
-impl CompactSeq for KeySeq {
-    type Item = Key;
-    fn get(&self, index: usize) -> Option<Key> {
-        self.0.get(index).cloned()
-    }
-    fn len(&self) -> usize {
-        self.0.len()
-    }
-}
-
-impl Summarizable<Key> for KeySeq {
-    fn summarize(&self) -> Key {
-        let mut res = self.0[0].clone();
-        for i in 1..self.0.len() {
-            res.combine(&self.0[i]);
-        }
-        res
-    }
-}
-
-impl FromIterator<Key> for KeySeq {
-    fn from_iter<T: IntoIterator<Item = Key>>(iter: T) -> Self {
-        KeySeq(iter.into_iter().collect())
-    }
-}
-
-impl TreeTypes for TT {
-    type Key = Key;
-    type KeySeq = KeySeq;
-    type Summary = Key;
-    type SummarySeq = KeySeq;
-    type Link = Sha256Digest;
-}
-
-impl Key {
-    fn combine(&mut self, rhs: &Key) {
-        self.0 |= rhs.0
-    }
-}
-
-impl Arbitrary for Key {
-    fn arbitrary(g: &mut Gen) -> Self {
-        Self(Arbitrary::arbitrary(g))
-    }
-}
-
-fn txn(store: MemStore<Sha256Digest>) -> Txn {
-    let branch_cache = BranchCache::new(1000);
-    Txn::new(
-        Forest::new(
-            store.clone(),
-            branch_cache,
-            CryptoConfig::default(),
-            Config::debug(),
-        ),
-        store,
-    )
-}
-
-async fn create_test_tree<I>(xs: I) -> anyhow::Result<(Tree<TT>, Txn)>
-where
-    I: IntoIterator<Item = (Key, u64)>,
-    I::IntoIter: Send,
-{
-    let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
-    let forest = txn(store);
-    let mut tree = Tree::<TT>::empty();
-    tree = forest.extend(&tree, xs)?;
-    forest.assert_invariants(&tree)?;
-    Ok((tree, forest))
-}
-
-async fn test<F: Future<Output = anyhow::Result<bool>>>(f: impl Fn() -> F) -> TestResult {
-    match f().await {
-        Ok(success) => TestResult::from_bool(success),
-        Err(cause) => TestResult::error(cause.to_string()),
-    }
-}
+mod common;
 
 #[quickcheck_async::tokio]
 async fn build_stream(xs: Vec<(Key, u64)>) -> quickcheck::TestResult {
@@ -258,7 +165,7 @@ async fn build_get(xs: Vec<(Key, u64)>) -> quickcheck::TestResult {
 async fn build_pack(xss: Vec<Vec<(Key, u64)>>) -> quickcheck::TestResult {
     test(|| async {
         let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
-        let forest = txn(store);
+        let forest = txn(store, 1000);
         let mut tree = Tree::<TT>::empty();
         // flattened xss for reference
         let xs = xss.iter().cloned().flatten().collect::<Vec<_>>();
@@ -292,7 +199,7 @@ async fn build_pack(xss: Vec<Vec<(Key, u64)>>) -> quickcheck::TestResult {
 async fn retain(xss: Vec<Vec<(Key, u64)>>) -> quickcheck::TestResult {
     test(|| async {
         let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
-        let forest = txn(store);
+        let forest = txn(store, 1000);
         let mut tree = Tree::<TT>::empty();
         // flattened xss for reference
         let xs = xss.iter().cloned().flatten().collect::<Vec<_>>();
@@ -321,7 +228,7 @@ async fn filter_test_simple() -> anyhow::Result<()> {
 #[tokio::test]
 async fn stream_test_simple() -> anyhow::Result<()> {
     let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
-    let forest = txn(store);
+    let forest = txn(store, 1000);
     let mut trees = Vec::new();
     for n in 1..=10u64 {
         let mut tree = Tree::<TT>::empty();
