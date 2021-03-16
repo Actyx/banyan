@@ -16,15 +16,66 @@ use libipld::cbor::DagCbor;
 use smallvec::{smallvec, SmallVec};
 
 use std::{iter, sync::Arc, time::Instant};
-pub struct ForestIter<T: TreeTypes, V, R, Q: Query<T>, F> {
-    pub forest: Forest<T, V, R>,
-    pub offset: u64,
-    pub query: Q,
-    pub mk_extra: F,
-    pub index_stack: SmallVec<[Arc<Index<T>>; 64]>,
-    pub pos_stack: SmallVec<[(usize, SmallVec<[bool; 64]>); 32]>,
+pub(crate) struct ForestIter<T: TreeTypes, V, R, Q: Query<T>, F> {
+    forest: Forest<T, V, R>,
+    offset: u64,
+    query: Q,
+    mk_extra: F,
+    index_stack: SmallVec<[Arc<Index<T>>; 64]>,
+    pos_stack: SmallVec<[(usize, SmallVec<[bool; 64]>); 32]>,
 }
 
+impl<T: TreeTypes, V, R, Q, E, F> ForestIter<T, V, R, Q, F>
+where
+    T: TreeTypes + 'static,
+    V: DagCbor + Clone + Send + Sync + Debug + 'static,
+    R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static,
+    Q: Query<T> + Clone + Send + 'static,
+    E: Send + 'static,
+    F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
+{
+    pub(crate) fn new(
+        forest: Forest<T, V, R>,
+        offset: u64,
+        query: Q,
+        index: Arc<Index<T>>,
+        mk_extra: F,
+    ) -> Self {
+        let index_stack: SmallVec<[_; 64]> = smallvec![index];
+        let pos_stack: SmallVec<[_; 32]> = smallvec![(0usize, smallvec![true])];
+
+        ForestIter {
+            forest,
+            offset,
+            query,
+            mk_extra,
+            index_stack,
+            pos_stack,
+        }
+    }
+    pub(crate) fn new_rev(
+        forest: Forest<T, V, R>,
+        offset: u64,
+        query: Q,
+        index: Arc<Index<T>>,
+        mk_extra: F,
+    ) -> Self {
+        let index_stack: SmallVec<[_; 64]> = smallvec![index];
+        let pos_stack: SmallVec<[_; 32]> = smallvec![(usize::MAX, smallvec![true])];
+
+        ForestIter {
+            forest,
+            offset,
+            query,
+            mk_extra,
+            index_stack,
+            pos_stack,
+        }
+    }
+}
+
+// This is not exposed, as `ForestIter` has to be constructed with the proper
+// initial values for reverse iteration
 impl<T: TreeTypes, V, R, Q, E, F> DoubleEndedIterator for ForestIter<T, V, R, Q, F>
 where
     T: TreeTypes + 'static,
@@ -89,7 +140,7 @@ where
 
                         self.offset -= index.count();
                         let placeholder: FilteredChunk<T, V, E> = FilteredChunk {
-                            range: self.offset..self.offset + index.count(),
+                            range: self.offset + index.count()..self.offset,
                             data: Vec::new(),
                             extra: (self.mk_extra)(index.as_index_ref()),
                         };
@@ -116,7 +167,7 @@ where
                         pairs.reverse();
 
                         FilteredChunk {
-                            range: self.offset..self.offset + index.keys.count(),
+                            range: self.offset + index.keys.count()..self.offset,
                             data: pairs,
                             extra: (self.mk_extra)(IndexRef::Leaf(index)),
                         }
@@ -146,7 +197,7 @@ where
                     self.offset -= index.count();
 
                     let placeholder: FilteredChunk<T, V, E> = FilteredChunk {
-                        range: self.offset..self.offset + index.count(),
+                        range: self.offset + index.count()..self.offset,
                         data: Vec::new(),
                         extra: (self.mk_extra)(index.as_index_ref()),
                     };
@@ -504,8 +555,6 @@ where
     }
 
     /// Convenience method to iterate filtered.
-    ///
-    /// Implemented in terms of stream_filtered_chunked
     pub(crate) fn iter_filtered0<Q: Query<T> + Clone + Send + 'static>(
         &self,
         offset: u64,
@@ -513,7 +562,20 @@ where
         index: Arc<Index<T>>,
     ) -> BoxedIter<'static, Result<(u64, T::Key, V)>> {
         self.traverse0(offset, query, index, &|_| {})
-            // .boxed()
+            .map(|res| match res {
+                Ok(chunk) => chunk.data.into_iter().map(Ok).left_iter(),
+                Err(cause) => iter::once(Err(cause)).right_iter(),
+            })
+            .flatten()
+            .boxed()
+    }
+    pub(crate) fn iter_filtered_reverse0<Q: Query<T> + Clone + Send + 'static>(
+        &self,
+        offset: u64,
+        query: Q,
+        index: Arc<Index<T>>,
+    ) -> BoxedIter<'static, Result<(u64, T::Key, V)>> {
+        self.traverse_rev0(offset, query, index, &|_| {})
             .map(|res| match res {
                 Ok(chunk) => chunk.data.into_iter().map(Ok).left_iter(),
                 Err(cause) => iter::once(Err(cause)).right_iter(),

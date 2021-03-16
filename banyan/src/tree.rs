@@ -3,13 +3,12 @@ use super::index::*;
 use crate::{
     forest::{FilteredChunk, Forest, ForestIter, Transaction, TreeTypes},
     store::BlockWriter,
-    util::{BoxedDoubleEndedIter, BoxedIter},
+    util::BoxedIter,
 };
 use crate::{query::Query, store::ReadOnlyStore, util::IterExt};
 use anyhow::Result;
 use futures::prelude::*;
 use libipld::cbor::DagCbor;
-use smallvec::{smallvec, SmallVec};
 use std::{collections::BTreeMap, fmt, fmt::Debug, iter, sync::Arc};
 use tracing::*;
 
@@ -95,38 +94,6 @@ impl<
             None => anyhow::bail!("Tree must not be empty"),
         }
     }
-    pub fn traverse<
-        Q: Query<T> + Clone + Send + 'static,
-        E: Send + 'static,
-        F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
-    >(
-        &self,
-        offset: u64,
-        query: Q,
-        tree: &Tree<T>,
-        mk_extra: &'static F,
-    ) -> Result<BoxedIter<'static, Result<FilteredChunk<T, V, E>>>> {
-        match tree.root {
-            Some(ref index) => Ok(self.traverse0(offset, query, index.clone(), mk_extra)),
-            _ => anyhow::bail!("Empty tree"),
-        }
-    }
-    pub fn traverse_rev<
-        Q: Query<T> + Clone + Send + 'static,
-        E: Send + 'static,
-        F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
-    >(
-        &self,
-        offset: u64,
-        query: Q,
-        tree: &Tree<T>,
-        mk_extra: &'static F,
-    ) -> Result<BoxedDoubleEndedIter<'static, Result<FilteredChunk<T, V, E>>>> {
-        match tree.root {
-            Some(ref index) => Ok(self.traverse_rev0(offset, query, index.clone(), mk_extra)),
-            _ => anyhow::bail!("Empty tree"),
-        }
-    }
 
     pub(crate) fn traverse0<
         Q: Query<T> + Clone + Send + 'static,
@@ -139,17 +106,7 @@ impl<
         index: Arc<Index<T>>,
         mk_extra: &'static F,
     ) -> BoxedIter<'static, Result<FilteredChunk<T, V, E>>> {
-        let index_stack: SmallVec<[_; 64]> = smallvec![index];
-        let pos_stack: SmallVec<[_; 32]> = smallvec![(0usize, smallvec![true])];
-
-        Box::new(ForestIter {
-            forest: self.clone(),
-            offset,
-            query,
-            mk_extra,
-            index_stack,
-            pos_stack,
-        })
+        ForestIter::new(self.clone(), offset, query, index, mk_extra).boxed()
     }
 
     pub(crate) fn traverse_rev0<
@@ -162,22 +119,10 @@ impl<
         query: Q,
         index: Arc<Index<T>>,
         mk_extra: &'static F,
-        // ) -> BoxedIter<'static, Result<FilteredChunk<T, V, E>>> {
-    ) -> Box<dyn DoubleEndedIterator<Item = Result<FilteredChunk<T, V, E>>> + Send + 'static> {
-        let index_stack: SmallVec<[_; 64]> = smallvec![index];
-        let pos_stack: SmallVec<[_; 32]> = smallvec![(usize::MAX, smallvec![true])];
-
-        Box::new(
-            ForestIter {
-                forest: self.clone(),
-                offset,
-                query,
-                mk_extra,
-                index_stack,
-                pos_stack,
-            }
-            .rev(),
-        )
+    ) -> BoxedIter<'static, Result<FilteredChunk<T, V, E>>> {
+        ForestIter::new_rev(self.clone(), offset, query, index, mk_extra)
+            .rev()
+            .boxed()
     }
     pub(crate) fn dump_graph0<S>(
         &self,
@@ -299,6 +244,20 @@ impl<
         }
     }
 
+    pub fn iter_filtered_reverse(
+        &self,
+        tree: &Tree<T>,
+        query: impl Query<T> + Clone + 'static,
+    ) -> impl Iterator<Item = Result<(u64, T::Key, V)>> + 'static {
+        match &tree.root {
+            Some(index) => self
+                .iter_filtered_reverse0(0, query, index.clone())
+                .boxed()
+                .left_iter(),
+            None => iter::empty().right_iter(),
+        }
+    }
+
     pub fn iter_from(
         &self,
         tree: &Tree<T>,
@@ -326,6 +285,25 @@ impl<
         match &tree.root {
             Some(index) => self
                 .traverse0(0, query, index.clone(), mk_extra)
+                .left_iter(),
+            None => iter::empty().right_iter(),
+        }
+    }
+
+    pub fn iter_filtered_chunked_reverse<Q, E, F>(
+        &self,
+        tree: &Tree<T>,
+        query: Q,
+        mk_extra: &'static F,
+    ) -> impl Iterator<Item = Result<FilteredChunk<T, V, E>>> + 'static
+    where
+        Q: Query<T> + Send + Clone + 'static,
+        E: Send + 'static,
+        F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
+    {
+        match &tree.root {
+            Some(index) => self
+                .traverse_rev0(0, query, index.clone(), mk_extra)
                 .left_iter(),
             None => iter::empty().right_iter(),
         }
