@@ -106,6 +106,7 @@ where
 }
 
 pub(crate) type BoxedIter<'a, T> = Box<dyn Iterator<Item = T> + Send + 'a>;
+pub(crate) type BoxedDoubleEndedIter<'a, T> = Box<dyn DoubleEndedIterator<Item = T> + Send + 'a>;
 
 /// Like the one from itertools, but more convenient
 pub(crate) enum EitherIter<L, R> {

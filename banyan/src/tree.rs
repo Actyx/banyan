@@ -3,7 +3,7 @@ use super::index::*;
 use crate::{
     forest::{FilteredChunk, Forest, ForestIter, Transaction, TreeTypes},
     store::BlockWriter,
-    util::BoxedIter,
+    util::{BoxedDoubleEndedIter, BoxedIter},
 };
 use crate::{query::Query, store::ReadOnlyStore, util::IterExt};
 use anyhow::Result;
@@ -111,6 +111,22 @@ impl<
             _ => anyhow::bail!("Empty tree"),
         }
     }
+    pub fn traverse_rev<
+        Q: Query<T> + Clone + Send + 'static,
+        E: Send + 'static,
+        F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
+    >(
+        &self,
+        offset: u64,
+        query: Q,
+        tree: &Tree<T>,
+        mk_extra: &'static F,
+    ) -> Result<BoxedDoubleEndedIter<'static, Result<FilteredChunk<T, V, E>>>> {
+        match tree.root {
+            Some(ref index) => Ok(self.traverse_rev0(offset, query, index.clone(), mk_extra)),
+            _ => anyhow::bail!("Empty tree"),
+        }
+    }
 
     pub(crate) fn traverse0<
         Q: Query<T> + Clone + Send + 'static,
@@ -136,6 +152,33 @@ impl<
         })
     }
 
+    pub(crate) fn traverse_rev0<
+        Q: Query<T> + Clone + Send + 'static,
+        E: Send + 'static,
+        F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
+    >(
+        &self,
+        offset: u64,
+        query: Q,
+        index: Arc<Index<T>>,
+        mk_extra: &'static F,
+        // ) -> BoxedIter<'static, Result<FilteredChunk<T, V, E>>> {
+    ) -> Box<dyn DoubleEndedIterator<Item = Result<FilteredChunk<T, V, E>>> + Send + 'static> {
+        let index_stack: SmallVec<[_; 64]> = smallvec![index];
+        let pos_stack: SmallVec<[_; 32]> = smallvec![(usize::MAX, smallvec![true])];
+
+        Box::new(
+            ForestIter {
+                forest: self.clone(),
+                offset,
+                query,
+                mk_extra,
+                index_stack,
+                pos_stack,
+            }
+            .rev(),
+        )
+    }
     pub(crate) fn dump_graph0<S>(
         &self,
         parent_id: Option<usize>,

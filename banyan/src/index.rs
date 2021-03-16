@@ -403,18 +403,6 @@ pub(crate) fn deserialize_compressed<T: TreeTypes>(
 }
 
 /// Utility method to zip a number of indices with an offset that is increased by each index value
-pub(crate) fn zip_with_offset<'a, I: IntoIterator<Item = Index<T>> + 'a, T: TreeTypes + 'a>(
-    value: I,
-    offset: u64,
-) -> impl Iterator<Item = (Index<T>, u64)> + 'a {
-    value.into_iter().scan(offset, |offset, x| {
-        let o0 = *offset;
-        *offset += x.count();
-        Some((x, o0))
-    })
-}
-
-/// Utility method to zip a number of indices with an offset that is increased by each index value
 pub(crate) fn zip_with_offset_ref<
     'a,
     I: IntoIterator<Item = &'a Index<T>> + 'a,
