@@ -251,7 +251,7 @@ impl<
     ) -> impl Iterator<Item = Result<(u64, T::Key, V)>> + 'static {
         match &tree.root {
             Some(index) => self
-                .iter_filtered_reverse0(0, query, index.clone())
+                .iter_filtered_reverse0(index.count(), query, index.clone())
                 .boxed()
                 .left_iter(),
             None => iter::empty().right_iter(),
@@ -303,7 +303,7 @@ impl<
     {
         match &tree.root {
             Some(index) => self
-                .traverse_rev0(0, query, index.clone(), mk_extra)
+                .traverse_rev0(index.count(), query, index.clone(), mk_extra)
                 .left_iter(),
             None => iter::empty().right_iter(),
         }
@@ -341,7 +341,7 @@ impl<
     {
         match &tree.root {
             Some(index) => self
-                .stream_filtered_chunked_reverse0(0, query, index.clone(), mk_extra)
+                .stream_filtered_chunked_reverse0(index.count(), query, index.clone(), mk_extra)
                 .left_stream(),
             None => stream::empty().right_stream(),
         }

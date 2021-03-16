@@ -115,10 +115,6 @@ where
                     // we hit this branch node for the first time. Apply the
                     // query on its children and store it
                     if *pos == usize::MAX {
-                        // If this is the root node, set to max offset
-                        if self.index_stack.len() == 1 {
-                            self.offset += index.count;
-                        }
                         let mut q_matching = smallvec![true; index.summaries.len()];
                         self.query
                             .intersecting(self.offset - index.count, index, &mut q_matching);
