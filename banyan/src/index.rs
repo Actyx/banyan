@@ -46,7 +46,13 @@ use libipld::{
     codec::{Decode, Encode},
     DagCbor,
 };
-use std::{convert::TryFrom, fmt::Debug, io, iter::FromIterator, sync::Arc};
+use std::{
+    convert::TryFrom,
+    fmt::{self, Debug, Display},
+    io,
+    iter::FromIterator,
+    sync::Arc,
+};
 
 /// An object that can compute a summary of type T of itself
 pub trait Summarizable<T> {
@@ -313,6 +319,7 @@ impl AsRef<ZstdDagCborSeq> for Leaf {
     }
 }
 
+#[derive(Debug)]
 /// enum that combines index and corresponding data
 pub enum NodeInfo<'a, T: TreeTypes> {
     // Branch with index and data
@@ -323,6 +330,58 @@ pub enum NodeInfo<'a, T: TreeTypes> {
     PurgedBranch(&'a BranchIndex<T>),
     /// Purged leaf, with just the index
     PurgedLeaf(&'a LeafIndex<T>),
+}
+
+impl<T: TreeTypes> Display for NodeInfo<'_, T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            NodeInfo::Leaf(index, _) => {
+                write!(
+                    f,
+                    "Leaf(count={}, value_bytes={}, sealed={}, link={})",
+                    index.keys.count(),
+                    index.value_bytes,
+                    index.sealed,
+                    index
+                        .link
+                        .map(|x| format!("{}", x))
+                        .unwrap_or_else(|| "".to_string())
+                )
+            }
+
+            NodeInfo::Branch(index, branch) => {
+                write!(
+                    f,
+                    "Branch(count={}, key_bytes={}, value_bytes={}, sealed={}, link={}, children={})",
+                    index.count,
+                    index.key_bytes,
+                    index.value_bytes,
+                    index.sealed,
+                    index
+                        .link
+                        .map(|x| format!("{}", x))
+                        .unwrap_or_else(|| "".to_string()),
+                    branch.children.len()
+                )
+            }
+            NodeInfo::PurgedBranch(index) => {
+                write!(
+                    f,
+                    "PurgedBranch(count={}, key_bytes={}, value_bytes={}, sealed={})",
+                    index.count, index.key_bytes, index.value_bytes, index.sealed,
+                )
+            }
+            NodeInfo::PurgedLeaf(index) => {
+                write!(
+                    f,
+                    "PurgedLeaf(count={}, key_bytes={}, sealed={})",
+                    index.keys.count(),
+                    index.value_bytes,
+                    index.sealed,
+                )
+            }
+        }
+    }
 }
 
 pub(crate) fn serialize_compressed<T: TreeTypes>(

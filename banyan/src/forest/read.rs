@@ -1,15 +1,9 @@
 use super::{BranchCache, Config, CryptoConfig, FilteredChunk, Forest, TreeTypes};
 use crate::{
-    index::deserialize_compressed,
-    index::zip_with_offset,
-    index::Branch,
-    index::BranchIndex,
-    index::CompactSeq,
-    index::Index,
-    index::IndexRef,
-    index::Leaf,
-    index::LeafIndex,
-    index::NodeInfo,
+    index::{
+        deserialize_compressed, zip_with_offset, Branch, BranchIndex, CompactSeq, Index, IndexRef,
+        Leaf, LeafIndex, NodeInfo,
+    },
     query::Query,
     store::ReadOnlyStore,
     util::{BoxedIter, IterExt},
@@ -19,7 +13,147 @@ use anyhow::{anyhow, Result};
 use core::fmt::Debug;
 use futures::{prelude::*, stream::BoxStream};
 use libipld::cbor::DagCbor;
+use smallvec::{smallvec, SmallVec};
+
 use std::{iter, sync::Arc, time::Instant};
+
+pub struct ForestIter<'a, T: TreeTypes, V, R, Q: Query<T>, E: 'static> {
+    pub forest: &'a Forest<T, V, R>,
+    pub offset: u64,
+    pub query: Q,
+    pub mk_extra: &'static dyn Fn(IndexRef<T>) -> E,
+    pub index_stack: SmallVec<[Arc<Index<T>>; 64]>,
+    pub pos_stack: SmallVec<[(usize, SmallVec<[bool; 64]>); 32]>,
+}
+
+impl<'a, T: TreeTypes, V, R, Q: Query<T>, E> Iterator for ForestIter<'a, T, V, R, Q, E>
+where
+    T: TreeTypes + 'static,
+    V: DagCbor + Clone + Send + Sync + Debug + 'static,
+    R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static,
+    Q: Query<T>,
+{
+    type Item = Result<FilteredChunk<T, V, E>>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let res: FilteredChunk<T, V, E> = 'outer: loop {
+            let head = match self.index_stack.last() {
+                Some(i) => i,
+                // Nothing to do ..
+                _ => return None,
+            };
+
+            let (pos, matching) = self.pos_stack.last_mut().expect("not empty");
+
+            // Branch is exhausted: Ascend.
+            if *pos == matching.len() {
+                // tracing::trace!("branch exhausted");
+
+                // Ascend to parent's node
+                self.index_stack.pop().expect("not empty");
+                self.pos_stack.pop();
+
+                // increase last stack ptr, if there is still something left to
+                // traverse
+                if !self.index_stack.is_empty() {
+                    let last = self.pos_stack.last_mut().expect("not empty");
+                    last.0 += 1;
+                }
+                continue;
+            }
+
+            match self.forest.load_node(head) {
+                Ok(NodeInfo::Branch(index, branch)) => {
+                    // we hit this branch node for the first time. Apply the
+                    // query on its children and store it
+                    if *pos == 0 {
+                        let mut q_matching = smallvec![true; index.summaries.len()];
+                        self.query.intersecting(self.offset, index, &mut q_matching);
+                        debug_assert_eq!(branch.children.len(), q_matching.len());
+                        let _ = std::mem::replace(matching, q_matching);
+                    }
+
+                    while !matching[*pos] {
+                        self.offset += branch.children[*pos].count();
+                        *pos += 1;
+
+                        // Branch exhausted, ascend and continue
+                        if *pos == branch.children.len() {
+                            // Ascend to parent's node
+                            self.index_stack.pop().expect("not empty");
+                            self.pos_stack.pop();
+                            let last = self.pos_stack.last_mut().expect("not empty");
+                            last.0 += 1;
+                            continue 'outer;
+                        }
+                    }
+
+                    // Descend into next child
+                    self.index_stack
+                        // TODO: clone :-( ?
+                        .push(Arc::new(branch.children[*pos].clone()));
+                    let new_vec: SmallVec<[_; 64]> = smallvec![matching[*pos]];
+                    self.pos_stack.push((0, new_vec));
+                    continue;
+                }
+
+                Ok(NodeInfo::Leaf(index, leaf)) => {
+                    let chunk = {
+                        let mut matching: SmallVec<[_; 32]> = smallvec![true; index.keys.len()];
+                        self.query.containing(self.offset, index, &mut matching);
+                        let keys = index.select_keys(&matching);
+                        let elems: Vec<V> = match leaf.as_ref().select(&matching) {
+                            Ok(i) => i,
+                            Err(e) => return Some(Err(e)),
+                        };
+                        let pairs = keys
+                            .zip(elems)
+                            .map(|((o, k), v)| (o + self.offset, k, v))
+                            .collect::<Vec<_>>();
+                        FilteredChunk {
+                            range: self.offset..self.offset + index.keys.count(),
+                            data: pairs,
+                            extra: (self.mk_extra)(IndexRef::Leaf(index)),
+                        }
+                    };
+                    self.offset += index.keys.count();
+
+                    // Ascend to parent's node
+                    self.index_stack.pop().expect("not empty");
+                    self.pos_stack.pop();
+                    let last = self.pos_stack.last_mut().expect("not empty");
+                    last.0 += 1;
+
+                    break chunk;
+                }
+
+                // even for purged leafs and branches or ignored chunks,
+                // produce a placeholder.
+                //
+                // the caller can find out if we skipped purged parts of the
+                // tree by using an appropriate mk_extra fn, or check
+                // `data.len()`.
+                Ok(_) => {
+                    // Ascend to parent's node
+                    let index = self.index_stack.pop().expect("not empty");
+                    self.pos_stack.pop();
+                    let last = self.pos_stack.last_mut().expect("Index stack not empty");
+                    last.0 += 1;
+                    self.offset += index.count();
+
+                    let placeholder: FilteredChunk<T, V, E> = FilteredChunk {
+                        range: self.offset..self.offset + index.count(),
+                        data: Vec::new(),
+                        extra: (self.mk_extra)(index.as_index_ref()),
+                    };
+                    break placeholder;
+                }
+                Err(e) => return Some(Err(e)),
+            };
+        };
+        Some(Ok(res))
+    }
+}
 
 /// basic random access append only tree
 impl<T, V, R> Forest<T, V, R>
@@ -475,24 +609,9 @@ where
 
     pub(crate) fn dump0(&self, index: &Index<T>, prefix: &str) -> Result<()> {
         match self.load_node(index)? {
-            NodeInfo::Leaf(index, _) => {
-                println!(
-                    "{}Leaf(count={}, value_bytes={}, sealed={}, link={})",
-                    prefix,
-                    index.keys.count(),
-                    index.value_bytes,
-                    index.sealed,
-                    index
-                        .link
-                        .map(|x| format!("{}", x))
-                        .unwrap_or_else(|| "".to_string())
-                );
-            }
-
             NodeInfo::Branch(index, branch) => {
                 println!(
-                    "{}Branch(count={}, key_bytes={}, value_bytes={}, sealed={}, link={})",
-                    prefix,
+                    "Branch(count={}, key_bytes={}, value_bytes={}, sealed={}, link={}, children={})",
                     index.count,
                     index.key_bytes,
                     index.value_bytes,
@@ -500,28 +619,15 @@ where
                     index
                         .link
                         .map(|x| format!("{}", x))
-                        .unwrap_or_else(|| "".to_string())
-                );
+                        .unwrap_or_else(|| "".to_string()),
+                    branch.children.len()
+            );
                 let prefix = prefix.to_string() + "  ";
                 for x in branch.children.iter() {
                     self.dump0(x, &prefix)?;
                 }
             }
-            NodeInfo::PurgedBranch(index) => {
-                println!(
-                    "{}PurgedBranch(count={}, key_bytes={}, value_bytes={}, sealed={})",
-                    prefix, index.count, index.key_bytes, index.value_bytes, index.sealed,
-                );
-            }
-            NodeInfo::PurgedLeaf(index) => {
-                println!(
-                    "{}PurgedLeaf(count={}, key_bytes={}, sealed={})",
-                    prefix,
-                    index.keys.count(),
-                    index.value_bytes,
-                    index.sealed,
-                );
-            }
+            x => println!("{}{}", prefix, x),
         };
         Ok(())
     }

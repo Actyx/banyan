@@ -102,6 +102,7 @@ dependencies = [
  "rand_chacha",
  "salsa20",
  "sha2",
+ "smallvec",
  "tokio",
  "tracing",
  "tracing-subscriber",

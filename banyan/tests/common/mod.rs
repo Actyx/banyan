@@ -20,6 +20,7 @@ use std::{
     iter::FromIterator,
 };
 
+#[allow(dead_code)]
 pub type Txn = Transaction<TT, u64, MemStore<Sha256Digest>, MemStore<Sha256Digest>>;
 
 #[derive(Debug, Clone)]
@@ -79,6 +80,7 @@ impl Arbitrary for Key {
     }
 }
 
+#[allow(dead_code)]
 pub fn txn(store: MemStore<Sha256Digest>, cache_cap: usize) -> Txn {
     let branch_cache = BranchCache::new(cache_cap);
     Txn::new(
@@ -92,6 +94,7 @@ pub fn txn(store: MemStore<Sha256Digest>, cache_cap: usize) -> Txn {
     )
 }
 
+#[allow(dead_code)]
 pub async fn create_test_tree<I>(xs: I) -> anyhow::Result<(Tree<TT>, Txn)>
 where
     I: IntoIterator<Item = (Key, u64)>,
@@ -105,6 +108,7 @@ where
     Ok((tree, forest))
 }
 
+#[allow(dead_code)]
 pub async fn test<F: Future<Output = anyhow::Result<bool>>>(f: impl Fn() -> F) -> TestResult {
     match f().await {
         Ok(success) => TestResult::from_bool(success),

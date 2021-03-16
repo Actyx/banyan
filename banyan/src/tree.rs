@@ -1,13 +1,14 @@
 //! creation and traversal of banyan trees
 use super::index::*;
 use crate::{
-    forest::{FilteredChunk, Forest, Transaction, TreeTypes},
+    forest::{FilteredChunk, Forest, ForestIter, Transaction, TreeTypes},
     store::BlockWriter,
 };
 use crate::{query::Query, store::ReadOnlyStore, util::IterExt};
 use anyhow::Result;
 use futures::prelude::*;
 use libipld::cbor::DagCbor;
+use smallvec::{smallvec, SmallVec};
 use std::{collections::BTreeMap, fmt, fmt::Debug, iter, sync::Arc};
 use tracing::*;
 
@@ -91,6 +92,35 @@ impl<
         match &tree.root {
             Some(index) => self.dump_graph0(None, 0, index, f),
             None => anyhow::bail!("Tree must not be empty"),
+        }
+    }
+    pub fn query<
+        'a,
+        Q: Query<T> + Clone + Send + 'static,
+        E: Send + 'static,
+        F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
+    >(
+        &'a self,
+        offset: u64,
+        query: Q,
+        mk_extra: &'static F,
+        tree: &Tree<T>,
+    ) -> Result<ForestIter<'a, T, V, R, Q, E>> {
+        match tree.root {
+            Some(ref index) => {
+                let index_stack: SmallVec<[_; 64]> = smallvec![index.clone()];
+                let pos_stack: SmallVec<[_; 32]> = smallvec![(0usize, smallvec![true])];
+
+                Ok(ForestIter {
+                    forest: self,
+                    offset,
+                    query,
+                    mk_extra,
+                    index_stack,
+                    pos_stack,
+                })
+            }
+            _ => anyhow::bail!(".."),
         }
     }
 
@@ -219,6 +249,25 @@ impl<
         match &tree.root {
             Some(index) => self
                 .iter_filtered0(offset, crate::query::AllQuery, index.clone())
+                .left_iter(),
+            None => iter::empty().right_iter(),
+        }
+    }
+
+    pub fn iter_filtered_chunked<Q, E, F>(
+        &self,
+        tree: &Tree<T>,
+        query: Q,
+        mk_extra: &'static F,
+    ) -> impl Iterator<Item = Result<FilteredChunk<T, V, E>>> + 'static
+    where
+        Q: Query<T> + Send + Clone + 'static,
+        E: Send + 'static,
+        F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
+    {
+        match &tree.root {
+            Some(index) => self
+                .iter_filtered_chunked0(0, query, index.clone(), mk_extra)
                 .left_iter(),
             None => iter::empty().right_iter(),
         }

@@ -15,6 +15,8 @@ mod read;
 mod stream;
 mod write;
 
+pub use read::ForestIter;
+
 pub type FutureResult<'a, T> = BoxFuture<'a, Result<T>>;
 
 #[derive(Debug, Clone)]
