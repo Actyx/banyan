@@ -112,7 +112,7 @@ impl<
                 let offset = offset.clone();
                 let iter = forest
                     .clone()
-                    .iter_filtered_chunked0(0, query, index, mk_extra)
+                    .traverse0(0, query, index, mk_extra)
                     .take_while(move |result| {
                         if let Ok(chunk) = result {
                             // update the offset

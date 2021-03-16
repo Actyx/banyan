@@ -3,6 +3,7 @@ use super::index::*;
 use crate::{
     forest::{FilteredChunk, Forest, ForestIter, Transaction, TreeTypes},
     store::BlockWriter,
+    util::BoxedIter,
 };
 use crate::{query::Query, store::ReadOnlyStore, util::IterExt};
 use anyhow::Result;
@@ -94,34 +95,45 @@ impl<
             None => anyhow::bail!("Tree must not be empty"),
         }
     }
-    pub fn query<
-        'a,
+    pub fn traverse<
         Q: Query<T> + Clone + Send + 'static,
         E: Send + 'static,
         F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
     >(
-        &'a self,
+        &self,
         offset: u64,
         query: Q,
-        mk_extra: &'static F,
         tree: &Tree<T>,
-    ) -> Result<ForestIter<'a, T, V, R, Q, E>> {
+        mk_extra: &'static F,
+    ) -> Result<BoxedIter<'static, Result<FilteredChunk<T, V, E>>>> {
         match tree.root {
-            Some(ref index) => {
-                let index_stack: SmallVec<[_; 64]> = smallvec![index.clone()];
-                let pos_stack: SmallVec<[_; 32]> = smallvec![(0usize, smallvec![true])];
-
-                Ok(ForestIter {
-                    forest: self,
-                    offset,
-                    query,
-                    mk_extra,
-                    index_stack,
-                    pos_stack,
-                })
-            }
-            _ => anyhow::bail!(".."),
+            Some(ref index) => Ok(self.traverse0(offset, query, index.clone(), mk_extra)),
+            _ => anyhow::bail!("Empty tree"),
         }
+    }
+
+    pub(crate) fn traverse0<
+        Q: Query<T> + Clone + Send + 'static,
+        E: Send + 'static,
+        F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
+    >(
+        &self,
+        offset: u64,
+        query: Q,
+        index: Arc<Index<T>>,
+        mk_extra: &'static F,
+    ) -> BoxedIter<'static, Result<FilteredChunk<T, V, E>>> {
+        let index_stack: SmallVec<[_; 64]> = smallvec![index];
+        let pos_stack: SmallVec<[_; 32]> = smallvec![(0usize, smallvec![true])];
+
+        Box::new(ForestIter {
+            forest: self.clone(),
+            offset,
+            query,
+            mk_extra,
+            index_stack,
+            pos_stack,
+        })
     }
 
     pub(crate) fn dump_graph0<S>(
@@ -236,7 +248,10 @@ impl<
         query: impl Query<T> + Clone + 'static,
     ) -> impl Iterator<Item = Result<(u64, T::Key, V)>> + 'static {
         match &tree.root {
-            Some(index) => self.iter_filtered0(0, query, index.clone()).left_iter(),
+            Some(index) => self
+                .iter_filtered0(0, query, index.clone())
+                .boxed()
+                .left_iter(),
             None => iter::empty().right_iter(),
         }
     }
@@ -267,7 +282,7 @@ impl<
     {
         match &tree.root {
             Some(index) => self
-                .iter_filtered_chunked0(0, query, index.clone(), mk_extra)
+                .traverse0(0, query, index.clone(), mk_extra)
                 .left_iter(),
             None => iter::empty().right_iter(),
         }
