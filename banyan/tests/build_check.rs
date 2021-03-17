@@ -5,7 +5,7 @@ use banyan::{
     tree::Tree,
 };
 use futures::prelude::*;
-use libipld::{Cid, cbor::DagCborCodec, codec::Codec};
+use libipld::{cbor::DagCborCodec, codec::Codec, Cid};
 use quickcheck_macros::quickcheck;
 use std::{convert::TryInto, iter, ops::Range, str::FromStr};
 
@@ -381,8 +381,14 @@ fn deep_tree_traversal_no_stack_overflow() -> anyhow::Result<()> {
             for (_offset, k, v) in &elems {
                 tree = forest.extend_unpacked(&tree, vec![(*k, *v)]).unwrap();
             }
-            let elems1 = forest.iter_filtered(&tree, AllQuery).collect::<anyhow::Result<Vec<_>>>().unwrap();
-            let mut elems2 = forest.iter_filtered_reverse(&tree, AllQuery).collect::<anyhow::Result<Vec<_>>>().unwrap();
+            let elems1 = forest
+                .iter_filtered(&tree, AllQuery)
+                .collect::<anyhow::Result<Vec<_>>>()
+                .unwrap();
+            let mut elems2 = forest
+                .iter_filtered_reverse(&tree, AllQuery)
+                .collect::<anyhow::Result<Vec<_>>>()
+                .unwrap();
             elems2.reverse();
             assert_eq!(elems, elems1);
             assert_eq!(elems, elems2);
