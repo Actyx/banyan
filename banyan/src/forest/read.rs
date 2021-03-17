@@ -42,17 +42,10 @@ struct TraverseState<T: TreeTypes> {
 }
 
 impl<T: TreeTypes> TraverseState<T> {
-    fn new(index: Arc<Index<T>>, mode: &Mode) -> Self {
-        let position = match mode {
-            Mode::Forward => 0,
-            // We don't know yet the number of DIRECT children this index has,
-            // so this needs to be initialized after resolving a potential
-            // branch
-            Mode::Backward => isize::MAX,
-        };
+    fn new(index: Arc<Index<T>>) -> Self {
         Self {
             index,
-            position,
+            position: 0,
             filter: smallvec![],
         }
     }
@@ -86,7 +79,7 @@ where
         mk_extra: F,
     ) -> Self {
         let mode = Mode::Forward;
-        let stack = smallvec![TraverseState::new(index, &mode)];
+        let stack = smallvec![TraverseState::new(index)];
 
         Self {
             forest,
@@ -105,7 +98,7 @@ where
     ) -> Self {
         let offset = index.count();
         let mode = Mode::Backward;
-        let stack = smallvec![TraverseState::new(index, &mode)];
+        let stack = smallvec![TraverseState::new(index)];
 
         Self {
             forest,
@@ -174,6 +167,10 @@ where
                     // query on its children and store it
                     if head.filter.is_empty() {
                         head.filter = smallvec![true; index.summaries.len()];
+                        head.position = match self.mode {
+                            Mode::Forward => 0,
+                            Mode::Backward => branch.children.len() as isize - 1,
+                        };
                         let start_offset = match self.mode {
                             Mode::Forward => self.offset,
                             Mode::Backward => self.offset - index.count,
@@ -181,10 +178,6 @@ where
                         self.query
                             .intersecting(start_offset, index, &mut head.filter);
                         debug_assert_eq!(branch.children.len(), head.filter.len());
-
-                        if matches!(self.mode, Mode::Backward) {
-                            head.position = branch.children.len() as isize - 1;
-                        }
                     }
 
                     let next_idx = head.position as usize;
@@ -193,7 +186,6 @@ where
                         self.stack.push(TraverseState::new(
                             // TODO: clone :-( ?
                             Arc::new(branch.children[next_idx].clone()),
-                            &self.mode,
                         ));
                         continue;
                     } else {
