@@ -47,7 +47,7 @@ impl CompactSeq for KeySeq {
 
 impl Summarizable<Key> for KeySeq {
     fn summarize(&self) -> Key {
-        let mut res = self.0[0].clone();
+        let mut res = self.0[0];
         for i in 1..self.0.len() {
             res.combine(&self.0[i]);
         }
