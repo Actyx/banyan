@@ -25,9 +25,51 @@ pub(crate) struct ForestIter<T: TreeTypes, V, R, Q: Query<T>, F> {
     offset: u64,
     query: Q,
     mk_extra: F,
-    index_stack: SmallVec<[Arc<Index<T>>; 64]>,
-    pos_stack: SmallVec<[(usize, SmallVec<[bool; 64]>); 32]>,
+    stack: SmallVec<[TraverseState<T>; 5]>,
     mode: Mode,
+}
+
+struct TraverseState<T: TreeTypes> {
+    index: Arc<Index<T>>,
+    // If `index` points to a branch node, `position` points to the currently
+    // traversed child
+    position: usize,
+    // For each child, indicates whether it should be visited or not. This is
+    // initialized whenver we hit a branch.
+    filter: Option<SmallVec<[bool; 64]>>,
+}
+
+impl<T: TreeTypes> TraverseState<T> {
+    fn new(index: Arc<Index<T>>, mode: &Mode) -> Self {
+        let position = match mode {
+            Mode::Forward => 0,
+            // We don't know yet the number of DIRECT children this index has,
+            // so this needs to be initialized after resolving a potential
+            // branch
+            Mode::Backward => usize::MAX,
+        };
+        Self {
+            filter: None,
+            index,
+            position,
+        }
+    }
+    fn is_exhausted(&self, mode: &Mode) -> bool {
+        match mode {
+            Mode::Forward => self
+                .filter
+                .as_ref()
+                .map(|x| self.position == x.len())
+                .unwrap_or(false),
+            Mode::Backward => self.position == 0,
+        }
+    }
+    fn next_pos(&mut self, mode: &Mode) {
+        match mode {
+            Mode::Forward => self.position += 1,
+            Mode::Backward => self.position -= 1,
+        }
+    }
 }
 
 impl<T: TreeTypes, V, R, Q, E, F> ForestIter<T, V, R, Q, F>
@@ -45,17 +87,16 @@ where
         index: Arc<Index<T>>,
         mk_extra: F,
     ) -> Self {
-        let index_stack: SmallVec<[_; 64]> = smallvec![index];
-        let pos_stack: SmallVec<[_; 32]> = smallvec![(0usize, smallvec![true])];
+        let mode = Mode::Forward;
+        let stack = smallvec![TraverseState::new(index, &mode)];
 
-        ForestIter {
+        Self {
             forest,
             offset: 0,
             query,
             mk_extra,
-            index_stack,
-            pos_stack,
-            mode: Mode::Forward,
+            stack,
+            mode,
         }
     }
     pub(crate) fn new_rev(
@@ -65,17 +106,16 @@ where
         mk_extra: F,
     ) -> Self {
         let offset = index.count();
-        let index_stack: SmallVec<[_; 64]> = smallvec![index];
-        let pos_stack: SmallVec<[_; 32]> = smallvec![(usize::MAX, smallvec![true])];
+        let mode = Mode::Backward;
+        let stack = smallvec![TraverseState::new(index, &mode)];
 
-        ForestIter {
+        Self {
             forest,
             offset,
             query,
             mk_extra,
-            index_stack,
-            pos_stack,
-            mode: Mode::Backward,
+            stack,
+            mode,
         }
     }
 }
@@ -110,50 +150,31 @@ where
 
     fn next(&mut self) -> Option<Self::Item> {
         let res: FilteredChunk<T, V, E> = 'outer: loop {
-            let head = match self.index_stack.last() {
+            let head = match self.stack.last_mut() {
                 Some(i) => i,
                 // Nothing to do ..
                 _ => return None,
             };
 
-            let (pos, matching) = self.pos_stack.last_mut().expect("not empty");
-
-            // Branch is exhausted: Ascend.
-            let exhausted = match self.mode {
-                Mode::Forward => *pos == matching.len(),
-                Mode::Backward => *pos == 0,
-            };
-
-            if exhausted {
+            //  Branch is exhausted: Ascend.
+            if head.is_exhausted(&self.mode) {
                 // Ascend to parent's node
-                self.index_stack.pop().expect("not empty");
-                self.pos_stack.pop();
+                self.stack.pop();
 
                 // increase last stack ptr, if there is still something left to
                 // traverse
-                if !self.index_stack.is_empty() {
-                    let last = self.pos_stack.last_mut().expect("not empty");
-                    match self.mode {
-                        Mode::Forward => {
-                            last.0 += 1;
-                        }
-                        Mode::Backward => {
-                            last.0 -= 1;
-                        }
-                    }
+                if !self.stack.is_empty() {
+                    let last = self.stack.last_mut().expect("not empty");
+                    last.next_pos(&self.mode);
                 }
                 continue 'outer;
             }
 
-            match self.forest.load_node(head) {
+            match self.forest.load_node(&head.index) {
                 Ok(NodeInfo::Branch(index, branch)) => {
                     // we hit this branch node for the first time. Apply the
                     // query on its children and store it
-                    let new_branch = match self.mode {
-                        Mode::Forward => *pos == 0,
-                        Mode::Backward => *pos == usize::MAX,
-                    };
-                    if new_branch {
+                    if head.filter.is_none() {
                         let mut q_matching = smallvec![true; index.summaries.len()];
                         let start_offset = match self.mode {
                             Mode::Forward => self.offset,
@@ -162,44 +183,39 @@ where
                         self.query
                             .intersecting(start_offset, index, &mut q_matching);
                         debug_assert_eq!(branch.children.len(), q_matching.len());
-                        let _ = std::mem::replace(matching, q_matching);
+                        head.filter.replace(q_matching);
 
                         if matches!(self.mode, Mode::Backward) {
-                            *pos = branch.children.len();
+                            head.position = branch.children.len();
                         }
                     }
 
                     let next_idx = match self.mode {
-                        Mode::Forward => *pos,
-                        Mode::Backward => *pos - 1,
+                        Mode::Forward => head.position,
+                        Mode::Backward => head.position - 1,
                     };
-                    if matching[next_idx] {
+                    let should_descend = head.filter.as_ref().expect("not empty")[next_idx];
+                    if should_descend {
                         // Descend into next child
-                        self.index_stack
+                        self.stack.push(TraverseState::new(
                             // TODO: clone :-( ?
-                            .push(Arc::new(branch.children[next_idx].clone()));
-                        let new_vec: SmallVec<[_; 64]> = smallvec![matching[next_idx]];
-                        let start_pos = match self.mode {
-                            Mode::Forward => 0,
-                            Mode::Backward => usize::MAX,
-                        };
-                        self.pos_stack.push((start_pos, new_vec));
+                            Arc::new(branch.children[next_idx].clone()),
+                            &self.mode,
+                        ));
                         continue 'outer;
                     } else {
                         let index = &branch.children[next_idx];
-
                         let range = match self.mode {
                             Mode::Forward => {
                                 self.offset += index.count();
-                                *pos += 1;
                                 self.offset - index.count()..self.offset
                             }
                             Mode::Backward => {
                                 self.offset -= index.count();
-                                *pos -= 1;
                                 self.offset + index.count()..self.offset
                             }
                         };
+                        head.next_pos(&self.mode);
                         let placeholder: FilteredChunk<T, V, E> = FilteredChunk {
                             range,
                             data: Vec::new(),
@@ -222,9 +238,10 @@ where
                             Ok(i) => i,
                             Err(e) => return Some(Err(e)),
                         };
+                        let offset = self.offset;
                         let mut pairs = keys
                             .zip(elems)
-                            .map(|((o, k), v)| (o + self.offset, k, v))
+                            .map(|((o, k), v)| (o + offset, k, v))
                             .collect::<Vec<_>>();
                         if matches!(self.mode, Mode::Backward) {
                             pairs.reverse();
@@ -240,17 +257,9 @@ where
                     }
 
                     // Ascend to parent's node
-                    self.index_stack.pop().expect("not empty");
-                    self.pos_stack.pop();
-                    let last = self.pos_stack.last_mut().expect("not empty");
-                    match self.mode {
-                        Mode::Forward => {
-                            last.0 += 1;
-                        }
-                        Mode::Backward => {
-                            last.0 -= 1;
-                        }
-                    }
+                    self.stack.pop();
+                    let last = self.stack.last_mut().expect("not empty");
+                    last.next_pos(&self.mode);
 
                     break chunk;
                 }
@@ -262,20 +271,20 @@ where
                 // tree by using an appropriate mk_extra fn, or check
                 // `data.len()`.
                 Ok(_) => {
-                    // Ascend to parent's node
-                    let index = self.index_stack.pop().expect("not empty");
-                    self.pos_stack.pop();
-                    let last = self.pos_stack.last_mut().expect("Index stack not empty");
+                    let TraverseState { index, .. } = self.stack.pop().expect("not empty");
+                    // Ascend to parent's node. This might be none in case the
+                    // tree's root node is a `PurgedBranch`.
+                    if let Some(last) = self.stack.last_mut() {
+                        last.next_pos(&self.mode);
+                    }
 
                     let range = match self.mode {
                         Mode::Forward => {
                             self.offset += index.count();
-                            last.0 += 1;
                             self.offset - index.count()..self.offset
                         }
                         Mode::Backward => {
                             self.offset -= index.count();
-                            last.0 -= 1;
                             self.offset + index.count()..self.offset
                         }
                     };
