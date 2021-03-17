@@ -149,7 +149,7 @@ where
     type Item = Result<FilteredChunk<T, V, E>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let res: FilteredChunk<T, V, E> = 'outer: loop {
+        let res: FilteredChunk<T, V, E> = loop {
             let head = match self.stack.last_mut() {
                 Some(i) => i,
                 // Nothing to do ..
@@ -167,7 +167,7 @@ where
                     let last = self.stack.last_mut().expect("not empty");
                     last.next_pos(&self.mode);
                 }
-                continue 'outer;
+                continue;
             }
 
             match self.forest.load_node(&head.index) {
@@ -202,7 +202,7 @@ where
                             Arc::new(branch.children[next_idx].clone()),
                             &self.mode,
                         ));
-                        continue 'outer;
+                        continue;
                     } else {
                         let index = &branch.children[next_idx];
                         let range = match self.mode {
