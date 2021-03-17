@@ -35,8 +35,10 @@ struct TraverseState<T: TreeTypes> {
     // traversed child
     position: usize,
     // For each child, indicates whether it should be visited or not. This is
-    // initialized whenver we hit a branch.
-    filter: Option<SmallVec<[bool; 64]>>,
+    // initially empty, and initialized whenver we hit a branch.
+    // Branches can not have zero children, so when this is empty we know that we have
+    // to initialize it.
+    filter: SmallVec<[bool; 64]>,
 }
 
 impl<T: TreeTypes> TraverseState<T> {
@@ -49,18 +51,14 @@ impl<T: TreeTypes> TraverseState<T> {
             Mode::Backward => usize::MAX,
         };
         Self {
-            filter: None,
             index,
             position,
+            filter: smallvec![],
         }
     }
     fn is_exhausted(&self, mode: &Mode) -> bool {
         match mode {
-            Mode::Forward => self
-                .filter
-                .as_ref()
-                .map(|x| self.position == x.len())
-                .unwrap_or(false),
+            Mode::Forward => !self.filter.is_empty() && self.position == self.filter.len(),
             Mode::Backward => self.position == 0,
         }
     }
@@ -174,16 +172,15 @@ where
                 Ok(NodeInfo::Branch(index, branch)) => {
                     // we hit this branch node for the first time. Apply the
                     // query on its children and store it
-                    if head.filter.is_none() {
-                        let mut q_matching = smallvec![true; index.summaries.len()];
+                    if head.filter.is_empty() {
+                        head.filter = smallvec![true; index.summaries.len()];
                         let start_offset = match self.mode {
                             Mode::Forward => self.offset,
                             Mode::Backward => self.offset - index.count,
                         };
                         self.query
-                            .intersecting(start_offset, index, &mut q_matching);
-                        debug_assert_eq!(branch.children.len(), q_matching.len());
-                        head.filter.replace(q_matching);
+                            .intersecting(start_offset, index, &mut head.filter);
+                        debug_assert_eq!(branch.children.len(), head.filter.len());
 
                         if matches!(self.mode, Mode::Backward) {
                             head.position = branch.children.len();
@@ -194,8 +191,7 @@ where
                         Mode::Forward => head.position,
                         Mode::Backward => head.position - 1,
                     };
-                    let should_descend = head.filter.as_ref().expect("not empty")[next_idx];
-                    if should_descend {
+                    if head.filter[next_idx] {
                         // Descend into next child
                         self.stack.push(TraverseState::new(
                             // TODO: clone :-( ?
