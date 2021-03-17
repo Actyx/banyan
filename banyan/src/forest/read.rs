@@ -33,7 +33,7 @@ struct TraverseState<T: TreeTypes> {
     index: Arc<Index<T>>,
     // If `index` points to a branch node, `position` points to the currently
     // traversed child
-    position: usize,
+    position: isize,
     // For each child, indicates whether it should be visited or not. This is
     // initially empty, and initialized whenver we hit a branch.
     // Branches can not have zero children, so when this is empty we know that we have
@@ -48,7 +48,7 @@ impl<T: TreeTypes> TraverseState<T> {
             // We don't know yet the number of DIRECT children this index has,
             // so this needs to be initialized after resolving a potential
             // branch
-            Mode::Backward => usize::MAX,
+            Mode::Backward => isize::MAX,
         };
         Self {
             index,
@@ -58,8 +58,8 @@ impl<T: TreeTypes> TraverseState<T> {
     }
     fn is_exhausted(&self, mode: &Mode) -> bool {
         match mode {
-            Mode::Forward => !self.filter.is_empty() && self.position == self.filter.len(),
-            Mode::Backward => self.position == 0,
+            Mode::Forward => !self.filter.is_empty() && self.position == self.filter.len() as isize,
+            Mode::Backward => self.position < 0,
         }
     }
     fn next_pos(&mut self, mode: &Mode) {
@@ -183,14 +183,11 @@ where
                         debug_assert_eq!(branch.children.len(), head.filter.len());
 
                         if matches!(self.mode, Mode::Backward) {
-                            head.position = branch.children.len();
+                            head.position = branch.children.len() as isize - 1;
                         }
                     }
 
-                    let next_idx = match self.mode {
-                        Mode::Forward => head.position,
-                        Mode::Backward => head.position - 1,
-                    };
+                    let next_idx = head.position as usize;
                     if head.filter[next_idx] {
                         // Descend into next child
                         self.stack.push(TraverseState::new(
