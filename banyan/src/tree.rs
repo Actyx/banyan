@@ -101,12 +101,11 @@ impl<
         F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
     >(
         &self,
-        offset: u64,
         query: Q,
         index: Arc<Index<T>>,
         mk_extra: &'static F,
     ) -> BoxedIter<'static, Result<FilteredChunk<T, V, E>>> {
-        ForestIter::new(self.clone(), offset, query, index, mk_extra).boxed()
+        ForestIter::new(self.clone(), query, index, mk_extra).boxed()
     }
 
     pub(crate) fn traverse_rev0<
@@ -224,7 +223,7 @@ impl<
         query: impl Query<T> + Clone + 'static,
     ) -> impl Stream<Item = Result<(u64, T::Key, V)>> + 'static {
         match &tree.root {
-            Some(index) => self.stream_filtered0(0, query, index.clone()).left_stream(),
+            Some(index) => self.stream_filtered0(query, index.clone()).left_stream(),
             None => stream::empty().right_stream(),
         }
     }
@@ -236,7 +235,7 @@ impl<
     ) -> impl Iterator<Item = Result<(u64, T::Key, V)>> + 'static {
         match &tree.root {
             Some(index) => self
-                .iter_filtered0(0, query, index.clone())
+                .iter_filtered0(query, index.clone())
                 .boxed()
                 .left_iter(),
             None => iter::empty().right_iter(),
@@ -260,11 +259,10 @@ impl<
     pub fn iter_from(
         &self,
         tree: &Tree<T>,
-        offset: u64,
     ) -> impl Iterator<Item = Result<(u64, T::Key, V)>> + 'static {
         match &tree.root {
             Some(index) => self
-                .iter_filtered0(offset, crate::query::AllQuery, index.clone())
+                .iter_filtered0(crate::query::AllQuery, index.clone())
                 .left_iter(),
             None => iter::empty().right_iter(),
         }
@@ -282,9 +280,7 @@ impl<
         F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
     {
         match &tree.root {
-            Some(index) => self
-                .traverse0(0, query, index.clone(), mk_extra)
-                .left_iter(),
+            Some(index) => self.traverse0(query, index.clone(), mk_extra).left_iter(),
             None => iter::empty().right_iter(),
         }
     }
@@ -321,7 +317,7 @@ impl<
     {
         match &tree.root {
             Some(index) => self
-                .stream_filtered_chunked0(0, query, index.clone(), mk_extra)
+                .stream_filtered_chunked0(query, index.clone(), mk_extra)
                 .left_stream(),
             None => stream::empty().right_stream(),
         }

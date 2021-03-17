@@ -65,7 +65,7 @@ impl<
                 let query = AndQuery(OffsetRangeQuery::from(range), query.clone()).boxed();
                 let offset = offset.clone();
                 forest
-                    .stream_filtered_chunked0(0, query, index, mk_extra)
+                    .stream_filtered_chunked0(query, index, mk_extra)
                     .take_while(move |result| {
                         if let Ok(chunk) = result {
                             // update the offset
@@ -110,17 +110,18 @@ impl<
                 let range = offset.load(Ordering::SeqCst)..=*range.end();
                 let query = AndQuery(OffsetRangeQuery::from(range), query.clone()).boxed();
                 let offset = offset.clone();
-                let iter = forest
-                    .clone()
-                    .traverse0(0, query, index, mk_extra)
-                    .take_while(move |result| {
-                        if let Ok(chunk) = result {
-                            // update the offset
-                            offset.store(chunk.range.end, Ordering::SeqCst)
-                        }
-                        // abort at the first non-ok offset
-                        result.is_ok()
-                    });
+                let iter =
+                    forest
+                        .clone()
+                        .traverse0(query, index, mk_extra)
+                        .take_while(move |result| {
+                            if let Ok(chunk) = result {
+                                // update the offset
+                                offset.store(chunk.range.end, Ordering::SeqCst)
+                            }
+                            // abort at the first non-ok offset
+                            result.is_ok()
+                        });
                 iter.into_stream(1, thread_pool.clone())
             })
     }
