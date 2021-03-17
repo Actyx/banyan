@@ -26,7 +26,7 @@ pub type Txn = Transaction<TT, u64, MemStore<Sha256Digest>, MemStore<Sha256Diges
 #[derive(Debug, Clone)]
 pub struct TT;
 
-#[derive(Debug, Clone, PartialEq, Eq, DagCbor)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, DagCbor)]
 pub struct Key(pub u64);
 
 /// A trivial implementation of a CompactSeq as just a Seq.

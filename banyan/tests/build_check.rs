@@ -5,7 +5,7 @@ use banyan::{
     tree::Tree,
 };
 use futures::prelude::*;
-use libipld::{cbor::DagCborCodec, codec::Codec, Cid};
+use libipld::{Cid, cbor::DagCborCodec, codec::Codec};
 use quickcheck_macros::quickcheck;
 use std::{convert::TryInto, iter, ops::Range, str::FromStr};
 
@@ -364,6 +364,31 @@ fn from_cbor_me(text: &str) -> anyhow::Result<Vec<u8>> {
         .flat_map(|x| x.split_whitespace())
         .collect::<String>();
     Ok(hex::decode(parts)?)
+}
+
+#[test]
+fn deep_tree_traversal_no_stack_overflow() -> anyhow::Result<()> {
+    // traverse a tree on a thread with a tiny stack
+    // this would fail with recursive traversal
+    let handle = std::thread::Builder::new()
+        .name("stack-overflow-test".into())
+        .stack_size(65536)
+        .spawn(|| {
+            let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
+            let forest = txn(store, 1000);
+            let mut tree = Tree::<TT>::empty();
+            let elems = (0u64..100).map(|i| (i, Key(i), i)).collect::<Vec<_>>();
+            for (_offset, k, v) in &elems {
+                tree = forest.extend_unpacked(&tree, vec![(*k, *v)]).unwrap();
+            }
+            let elems1 = forest.iter_filtered(&tree, AllQuery).collect::<anyhow::Result<Vec<_>>>().unwrap();
+            let mut elems2 = forest.iter_filtered_reverse(&tree, AllQuery).collect::<anyhow::Result<Vec<_>>>().unwrap();
+            elems2.reverse();
+            assert_eq!(elems, elems1);
+            assert_eq!(elems, elems2);
+        })?;
+    handle.join().unwrap();
+    Ok(())
 }
 
 #[test]
