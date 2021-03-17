@@ -79,7 +79,9 @@ async fn compare_filtered_chunked_with_reverse(
     let (tree, txn) = create_test_tree(xs.clone()).await?;
     let reverse = txn
         .stream_filtered_chunked_reverse(&tree, OffsetRangeQuery::from(range.clone()), &|_| ())
-        .map(|chunk_result| chunk_result.map(|chunk| stream::iter(chunk.data.into_iter().map(Ok))))
+        .map(|chunk_result| {
+            chunk_result.map(|chunk| stream::iter(chunk.data.into_iter().rev().map(Ok)))
+        })
         .try_flatten()
         .collect::<Vec<_>>()
         .await
@@ -114,7 +116,9 @@ async fn compare_filtered_chunked_reverse(
     let (tree, txn) = create_test_tree(xs.clone()).await?;
     let actual = txn
         .stream_filtered_chunked_reverse(&tree, OffsetRangeQuery::from(range.clone()), &|_| ())
-        .map(|chunk_result| chunk_result.map(|chunk| stream::iter(chunk.data.into_iter().map(Ok))))
+        .map(|chunk_result| {
+            chunk_result.map(|chunk| stream::iter(chunk.data.into_iter().rev().map(Ok)))
+        })
         .try_flatten()
         .collect::<Vec<_>>()
         .await

@@ -191,7 +191,7 @@ where
                             }
                             Mode::Backward => {
                                 self.offset -= index.count();
-                                self.offset + index.count()..self.offset
+                                self.offset..self.offset + index.count()
                             }
                         };
                         head.next_pos(&self.mode);
@@ -218,13 +218,10 @@ where
                             Err(e) => return Some(Err(e)),
                         };
                         let offset = self.offset;
-                        let mut pairs = keys
+                        let pairs = keys
                             .zip(elems)
                             .map(|((o, k), v)| (o + offset, k, v))
                             .collect::<Vec<_>>();
-                        if matches!(self.mode, Mode::Backward) {
-                            pairs.reverse();
-                        }
                         FilteredChunk {
                             range: self.offset..self.offset + index.keys.count(),
                             data: pairs,
@@ -264,7 +261,7 @@ where
                         }
                         Mode::Backward => {
                             self.offset -= index.count();
-                            self.offset + index.count()..self.offset
+                            self.offset..self.offset + index.count()
                         }
                     };
 
