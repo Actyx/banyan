@@ -6,6 +6,7 @@ use banyan::{
 };
 use futures::prelude::*;
 use libipld::{cbor::DagCborCodec, codec::Codec, Cid};
+use quickcheck_macros::quickcheck;
 use std::{convert::TryInto, iter, ops::Range, str::FromStr};
 
 use common::{create_test_tree, test, txn, Key, KeySeq, Sha256Digest, TT};
@@ -257,6 +258,29 @@ async fn retain(xss: Vec<Vec<(Key, u64)>>) -> quickcheck::TestResult {
         Ok(true)
     })
     .await
+}
+
+#[quickcheck]
+fn iter_from_should_return_all_items(xs: Vec<(Key, u64)>) -> anyhow::Result<bool> {
+    let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
+    let forest = txn(store, 1000);
+    let mut tree = Tree::<TT>::empty();
+    tree = forest.extend(&tree, xs.clone().into_iter())?;
+    forest.assert_invariants(&tree)?;
+    let actual = forest
+        .iter_from(&tree)
+        .map(Result::unwrap)
+        .collect::<Vec<_>>();
+    let expected = xs
+        .iter()
+        .cloned()
+        .enumerate()
+        .map(|(i, (k, v))| (i as u64, k, v))
+        .collect::<Vec<_>>();
+    if expected != actual {
+        println!("{:?} {:?}", expected, actual);
+    }
+    Ok(expected == actual)
 }
 
 #[tokio::test]
