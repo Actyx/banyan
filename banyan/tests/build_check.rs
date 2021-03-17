@@ -69,6 +69,40 @@ async fn compare_filtered_chunked(xs: Vec<(Key, u64)>, range: Range<u64>) -> any
         .collect::<Vec<_>>();
     Ok(actual == expected)
 }
+/// checks that stream_filtered_chunked returns the same elements as stream_filtered_chunked_reverse
+async fn compare_filtered_chunked_with_reverse(
+    xs: Vec<(Key, u64)>,
+    range: Range<u64>,
+) -> anyhow::Result<bool> {
+    let range = range.clone();
+    let (tree, txn) = create_test_tree(xs.clone()).await?;
+    let reverse = txn
+        .stream_filtered_chunked_reverse(&tree, OffsetRangeQuery::from(range.clone()), &|_| ())
+        .map(|chunk_result| chunk_result.map(|chunk| stream::iter(chunk.data.into_iter().map(Ok))))
+        .try_flatten()
+        .collect::<Vec<_>>()
+        .await
+        .into_iter()
+        .rev()
+        .collect::<anyhow::Result<Vec<_>>>()?;
+
+    let forward = txn
+        .stream_filtered_chunked(&tree, OffsetRangeQuery::from(range.clone()), &|_| ())
+        .map(|chunk_result| chunk_result.map(|chunk| stream::iter(chunk.data.into_iter().map(Ok))))
+        .try_flatten()
+        .collect::<Vec<_>>()
+        .await
+        .into_iter()
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    let expected = xs
+        .iter()
+        .cloned()
+        .enumerate()
+        .map(|(i, (k, v))| (i as u64, k, v))
+        .filter(|(offset, _, _)| range.contains(offset))
+        .collect::<Vec<_>>();
+    Ok(reverse == forward && forward == expected)
+}
 
 /// checks that stream_filtered_chunked returns the same elements as filtering each element manually
 async fn compare_filtered_chunked_reverse(
@@ -130,6 +164,14 @@ async fn build_stream_filtered_chunked(
     range: Range<u64>,
 ) -> quickcheck::TestResult {
     test(|| compare_filtered_chunked(xs.clone(), range.clone())).await
+}
+
+#[quickcheck_async::tokio]
+async fn build_stream_filtered_chunked_forward_and_reverse(
+    xs: Vec<(Key, u64)>,
+    range: Range<u64>,
+) -> quickcheck::TestResult {
+    test(|| compare_filtered_chunked_with_reverse(xs.clone(), range.clone())).await
 }
 
 #[quickcheck_async::tokio]
