@@ -118,23 +118,6 @@ where
     }
 }
 
-// This is not exposed, as `ForestIter` has to be constructed with the proper
-// initial values for reverse iteration
-impl<T: TreeTypes, V, R, Q, E, F> DoubleEndedIterator for ForestIter<T, V, R, Q, F>
-where
-    T: TreeTypes + 'static,
-    V: DagCbor + Clone + Send + Sync + Debug + 'static,
-    R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static,
-    Q: Query<T> + Clone + Send + 'static,
-    E: Send + 'static,
-    F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
-{
-    fn next_back(&mut self) -> Option<Self::Item> {
-        debug_assert!(matches!(self.mode, Mode::Backward));
-        self.next()
-    }
-}
-
 impl<T: TreeTypes, V, R, Q, E, F> Iterator for ForestIter<T, V, R, Q, F>
 where
     T: TreeTypes + 'static,

@@ -118,9 +118,7 @@ impl<
         index: Arc<Index<T>>,
         mk_extra: &'static F,
     ) -> BoxedIter<'static, Result<FilteredChunk<T, V, E>>> {
-        ForestIter::new_rev(self.clone(), query, index, mk_extra)
-            .rev()
-            .boxed()
+        ForestIter::new_rev(self.clone(), query, index, mk_extra).boxed()
     }
     pub(crate) fn dump_graph0<S>(
         &self,
