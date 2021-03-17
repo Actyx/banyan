@@ -61,16 +61,17 @@ where
     }
     pub(crate) fn new_rev(
         forest: Forest<T, V, R>,
-        offset: u64,
         query: Q,
         index: Arc<Index<T>>,
         mk_extra: F,
     ) -> Self {
+        let offset = index.count();
         let index_stack: SmallVec<[_; 64]> = smallvec![index];
         let pos_stack: SmallVec<[_; 32]> = smallvec![(usize::MAX, smallvec![true])];
 
         ForestIter {
             forest,
+            // Reverse traversal doesn't support arbitrary offsets to start with (yet)
             offset,
             query,
             mk_extra,
@@ -528,11 +529,10 @@ where
     }
     pub(crate) fn iter_filtered_reverse0<Q: Query<T> + Clone + Send + 'static>(
         &self,
-        offset: u64,
         query: Q,
         index: Arc<Index<T>>,
     ) -> BoxedIter<'static, Result<(u64, T::Key, V)>> {
-        self.traverse_rev0(offset, query, index, &|_| {})
+        self.traverse_rev0(query, index, &|_| {})
             .map(|res| match res {
                 Ok(chunk) => chunk.data.into_iter().map(Ok).left_iter(),
                 Err(cause) => iter::once(Err(cause)).right_iter(),
@@ -547,12 +547,11 @@ where
         F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
     >(
         &self,
-        offset: u64,
         query: Q,
         index: Arc<Index<T>>,
         mk_extra: &'static F,
     ) -> BoxStream<'static, Result<FilteredChunk<T, V, E>>> {
-        let iter = self.traverse_rev0(offset, query, index, mk_extra);
+        let iter = self.traverse_rev0(query, index, mk_extra);
         stream::unfold(iter, |mut iter| async move {
             iter.next().map(|res| (res, iter))
         })

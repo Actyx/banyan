@@ -115,12 +115,11 @@ impl<
         F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
     >(
         &self,
-        offset: u64,
         query: Q,
         index: Arc<Index<T>>,
         mk_extra: &'static F,
     ) -> BoxedIter<'static, Result<FilteredChunk<T, V, E>>> {
-        ForestIter::new_rev(self.clone(), offset, query, index, mk_extra)
+        ForestIter::new_rev(self.clone(), query, index, mk_extra)
             .rev()
             .boxed()
     }
@@ -251,7 +250,7 @@ impl<
     ) -> impl Iterator<Item = Result<(u64, T::Key, V)>> + 'static {
         match &tree.root {
             Some(index) => self
-                .iter_filtered_reverse0(index.count(), query, index.clone())
+                .iter_filtered_reverse0(query, index.clone())
                 .boxed()
                 .left_iter(),
             None => iter::empty().right_iter(),
@@ -303,7 +302,7 @@ impl<
     {
         match &tree.root {
             Some(index) => self
-                .traverse_rev0(index.count(), query, index.clone(), mk_extra)
+                .traverse_rev0(query, index.clone(), mk_extra)
                 .left_iter(),
             None => iter::empty().right_iter(),
         }
@@ -341,7 +340,7 @@ impl<
     {
         match &tree.root {
             Some(index) => self
-                .stream_filtered_chunked_reverse0(index.count(), query, index.clone(), mk_extra)
+                .stream_filtered_chunked_reverse0(query, index.clone(), mk_extra)
                 .left_stream(),
             None => stream::empty().right_stream(),
         }
