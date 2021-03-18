@@ -16,6 +16,7 @@ use libipld::cbor::DagCbor;
 use smallvec::{smallvec, SmallVec};
 
 use std::{iter, sync::Arc, time::Instant};
+#[derive(PartialEq)]
 enum Mode {
     Forward,
     Backward,
@@ -51,7 +52,7 @@ impl<T: TreeTypes> TraverseState<T> {
     }
     fn is_exhausted(&self, mode: &Mode) -> bool {
         match mode {
-            Mode::Forward => !self.filter.is_empty() && self.position == self.filter.len() as isize,
+            Mode::Forward => !self.filter.is_empty() && self.position >= self.filter.len() as isize,
             Mode::Backward => self.position < 0,
         }
     }
@@ -137,8 +138,7 @@ where
 
                 // increase last stack ptr, if there is still something left to
                 // traverse
-                if !self.stack.is_empty() {
-                    let last = self.stack.last_mut().expect("not empty");
+                if let Some(last) = self.stack.last_mut() {
                     last.next_pos(&self.mode);
                 }
                 continue;
@@ -146,9 +146,9 @@ where
 
             match self.forest.load_node(&head.index) {
                 Ok(NodeInfo::Branch(index, branch)) => {
-                    // we hit this branch node for the first time. Apply the
-                    // query on its children and store it
                     if head.filter.is_empty() {
+                        // we hit this branch node for the first time. Apply the
+                        // query on its children and store it
                         head.filter = smallvec![true; index.summaries.len()];
                         head.position = match self.mode {
                             Mode::Forward => 0,
@@ -175,12 +175,14 @@ where
                         let index = &branch.children[next_idx];
                         let range = match self.mode {
                             Mode::Forward => {
+                                let before = self.offset;
                                 self.offset += index.count();
-                                self.offset - index.count()..self.offset
+                                before..self.offset
                             }
                             Mode::Backward => {
+                                let before = self.offset;
                                 self.offset -= index.count();
-                                self.offset..self.offset + index.count()
+                                self.offset..before
                             }
                         };
                         head.next_pos(&self.mode);
@@ -196,7 +198,7 @@ where
 
                 Ok(NodeInfo::Leaf(index, leaf)) => {
                     let chunk = {
-                        if matches!(self.mode, Mode::Backward) {
+                        if self.mode == Mode::Backward {
                             self.offset -= index.keys.count();
                         }
                         let mut matching: SmallVec<[_; 32]> = smallvec![true; index.keys.len()];
@@ -207,17 +209,17 @@ where
                             Err(e) => return Some(Err(e)),
                         };
                         let offset = self.offset;
-                        let pairs = keys
+                        let triples = keys
                             .zip(elems)
                             .map(|((o, k), v)| (o + offset, k, v))
                             .collect::<Vec<_>>();
                         FilteredChunk {
                             range: self.offset..self.offset + index.keys.count(),
-                            data: pairs,
+                            data: triples,
                             extra: (self.mk_extra)(IndexRef::Leaf(index)),
                         }
                     };
-                    if matches!(self.mode, Mode::Forward) {
+                    if self.mode == Mode::Forward {
                         self.offset += index.keys.count();
                     }
 
@@ -241,16 +243,17 @@ where
                     // tree's root node is a `PurgedBranch`.
                     if let Some(last) = self.stack.last_mut() {
                         last.next_pos(&self.mode);
-                    }
-
+                    };
                     let range = match self.mode {
                         Mode::Forward => {
+                            let before = self.offset;
                             self.offset += index.count();
-                            self.offset - index.count()..self.offset
+                            before..self.offset
                         }
                         Mode::Backward => {
+                            let before = self.offset;
                             self.offset -= index.count();
-                            self.offset..self.offset + index.count()
+                            self.offset..before
                         }
                     };
 
