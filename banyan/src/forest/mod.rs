@@ -285,9 +285,16 @@ pub(crate) enum CreateMode {
 pub struct FilteredChunk<T: TreeTypes, V, E> {
     /// index range for this chunk
     pub range: Range<u64>,
-    // filtered data (offset, key, value)
+
+    /// filtered data (offset, key, value)
+    /// Note that this is always in ascending order, even when traversing a tree
+    /// in descending order.
+    ///
+    /// If no elements were filtered, this will have the same number of elements
+    /// as the range.
     pub data: Vec<(u64, T::Key, V)>,
-    // arbitrary extra data computed from the leaf or branch index.
-    // If you don't need this you can just pass a fn that returns ()
+
+    /// arbitrary extra data computed from the leaf or branch index.
+    /// If you don't need this you can just pass a fn that returns ()
     pub extra: E,
 }
