@@ -1,15 +1,9 @@
 use super::{BranchCache, Config, CryptoConfig, FilteredChunk, Forest, TreeTypes};
 use crate::{
-    index::deserialize_compressed,
-    index::zip_with_offset,
-    index::Branch,
-    index::BranchIndex,
-    index::CompactSeq,
-    index::Index,
-    index::IndexRef,
-    index::Leaf,
-    index::LeafIndex,
-    index::NodeInfo,
+    index::{
+        deserialize_compressed, Branch, BranchIndex, CompactSeq, Index, IndexRef, Leaf, LeafIndex,
+        NodeInfo,
+    },
     query::Query,
     store::ReadOnlyStore,
     util::{BoxedIter, IterExt},
@@ -19,7 +13,263 @@ use anyhow::{anyhow, Result};
 use core::fmt::Debug;
 use futures::{prelude::*, stream::BoxStream};
 use libipld::cbor::DagCbor;
+use smallvec::{smallvec, SmallVec};
+
 use std::{iter, sync::Arc, time::Instant};
+#[derive(PartialEq)]
+enum Mode {
+    Forward,
+    Backward,
+}
+pub(crate) struct ForestIter<T: TreeTypes, V, R, Q: Query<T>, F> {
+    forest: Forest<T, V, R>,
+    offset: u64,
+    query: Q,
+    mk_extra: F,
+    stack: SmallVec<[TraverseState<T>; 5]>,
+    mode: Mode,
+}
+
+struct TraverseState<T: TreeTypes> {
+    index: Arc<Index<T>>,
+    // If `index` points to a branch node, `position` points to the currently
+    // traversed child
+    position: isize,
+    // For each child, indicates whether it should be visited or not. This is
+    // initially empty, and initialized whenver we hit a branch.
+    // Branches can not have zero children, so when this is empty we know that we have
+    // to initialize it.
+    filter: SmallVec<[bool; 64]>,
+}
+
+impl<T: TreeTypes> TraverseState<T> {
+    fn new(index: Arc<Index<T>>) -> Self {
+        Self {
+            index,
+            position: 0,
+            filter: smallvec![],
+        }
+    }
+    fn is_exhausted(&self, mode: &Mode) -> bool {
+        match mode {
+            Mode::Forward => !self.filter.is_empty() && self.position >= self.filter.len() as isize,
+            Mode::Backward => self.position < 0,
+        }
+    }
+    fn next_pos(&mut self, mode: &Mode) {
+        match mode {
+            Mode::Forward => self.position += 1,
+            Mode::Backward => self.position -= 1,
+        }
+    }
+}
+
+impl<T: TreeTypes, V, R, Q, E, F> ForestIter<T, V, R, Q, F>
+where
+    T: TreeTypes + 'static,
+    V: DagCbor + Clone + Send + Sync + Debug + 'static,
+    R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static,
+    Q: Query<T> + Clone + Send + 'static,
+    E: Send + 'static,
+    F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
+{
+    pub(crate) fn new(
+        forest: Forest<T, V, R>,
+        query: Q,
+        index: Arc<Index<T>>,
+        mk_extra: F,
+    ) -> Self {
+        let mode = Mode::Forward;
+        let stack = smallvec![TraverseState::new(index)];
+
+        Self {
+            forest,
+            offset: 0,
+            query,
+            mk_extra,
+            stack,
+            mode,
+        }
+    }
+    pub(crate) fn new_rev(
+        forest: Forest<T, V, R>,
+        query: Q,
+        index: Arc<Index<T>>,
+        mk_extra: F,
+    ) -> Self {
+        let offset = index.count();
+        let mode = Mode::Backward;
+        let stack = smallvec![TraverseState::new(index)];
+
+        Self {
+            forest,
+            offset,
+            query,
+            mk_extra,
+            stack,
+            mode,
+        }
+    }
+}
+
+impl<T: TreeTypes, V, R, Q, E, F> Iterator for ForestIter<T, V, R, Q, F>
+where
+    T: TreeTypes + 'static,
+    V: DagCbor + Clone + Send + Sync + Debug + 'static,
+    R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static,
+    Q: Query<T> + Clone + Send + 'static,
+    E: Send + 'static,
+    F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
+{
+    type Item = Result<FilteredChunk<T, V, E>>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let res: FilteredChunk<T, V, E> = loop {
+            let head = match self.stack.last_mut() {
+                Some(i) => i,
+                // Nothing to do ..
+                _ => return None,
+            };
+
+            //  Branch is exhausted: Ascend.
+            if head.is_exhausted(&self.mode) {
+                // Ascend to parent's node
+                self.stack.pop();
+
+                // increase last stack ptr, if there is still something left to
+                // traverse
+                if let Some(last) = self.stack.last_mut() {
+                    last.next_pos(&self.mode);
+                }
+                continue;
+            }
+
+            match self.forest.load_node(&head.index) {
+                Ok(NodeInfo::Branch(index, branch)) => {
+                    if head.filter.is_empty() {
+                        // we hit this branch node for the first time. Apply the
+                        // query on its children and store it
+                        head.filter = smallvec![true; index.summaries.len()];
+                        head.position = match self.mode {
+                            Mode::Forward => 0,
+                            Mode::Backward => branch.children.len() as isize - 1,
+                        };
+                        let start_offset = match self.mode {
+                            Mode::Forward => self.offset,
+                            Mode::Backward => self.offset - index.count,
+                        };
+                        self.query
+                            .intersecting(start_offset, index, &mut head.filter);
+                        debug_assert_eq!(branch.children.len(), head.filter.len());
+                    }
+
+                    let next_idx = head.position as usize;
+                    if head.filter[next_idx] {
+                        // Descend into next child
+                        self.stack.push(TraverseState::new(
+                            // TODO: clone :-( ?
+                            Arc::new(branch.children[next_idx].clone()),
+                        ));
+                        continue;
+                    } else {
+                        let index = &branch.children[next_idx];
+                        let range = match self.mode {
+                            Mode::Forward => {
+                                let before = self.offset;
+                                self.offset += index.count();
+                                before..self.offset
+                            }
+                            Mode::Backward => {
+                                let before = self.offset;
+                                self.offset -= index.count();
+                                self.offset..before
+                            }
+                        };
+                        head.next_pos(&self.mode);
+                        let placeholder: FilteredChunk<T, V, E> = FilteredChunk {
+                            range,
+                            data: Vec::new(),
+                            extra: (self.mk_extra)(index.as_index_ref()),
+                        };
+
+                        break placeholder;
+                    }
+                }
+
+                Ok(NodeInfo::Leaf(index, leaf)) => {
+                    let chunk = {
+                        if self.mode == Mode::Backward {
+                            self.offset -= index.keys.count();
+                        }
+                        let mut matching: SmallVec<[_; 32]> = smallvec![true; index.keys.len()];
+                        self.query.containing(self.offset, index, &mut matching);
+                        let keys = index.select_keys(&matching);
+                        let elems: Vec<V> = match leaf.as_ref().select(&matching) {
+                            Ok(i) => i,
+                            Err(e) => return Some(Err(e)),
+                        };
+                        let offset = self.offset;
+                        let triples = keys
+                            .zip(elems)
+                            .map(|((o, k), v)| (o + offset, k, v))
+                            .collect::<Vec<_>>();
+                        FilteredChunk {
+                            range: self.offset..self.offset + index.keys.count(),
+                            data: triples,
+                            extra: (self.mk_extra)(IndexRef::Leaf(index)),
+                        }
+                    };
+                    if self.mode == Mode::Forward {
+                        self.offset += index.keys.count();
+                    }
+
+                    // Ascend to parent's node
+                    self.stack.pop();
+                    let last = self.stack.last_mut().expect("not empty");
+                    last.next_pos(&self.mode);
+
+                    break chunk;
+                }
+
+                // even for purged leafs and branches or ignored chunks,
+                // produce a placeholder.
+                //
+                // the caller can find out if we skipped purged parts of the
+                // tree by using an appropriate mk_extra fn, or check
+                // `data.len()`.
+                Ok(_) => {
+                    let TraverseState { index, .. } = self.stack.pop().expect("not empty");
+                    // Ascend to parent's node. This might be none in case the
+                    // tree's root node is a `PurgedBranch`.
+                    if let Some(last) = self.stack.last_mut() {
+                        last.next_pos(&self.mode);
+                    };
+                    let range = match self.mode {
+                        Mode::Forward => {
+                            let before = self.offset;
+                            self.offset += index.count();
+                            before..self.offset
+                        }
+                        Mode::Backward => {
+                            let before = self.offset;
+                            self.offset -= index.count();
+                            self.offset..before
+                        }
+                    };
+
+                    let placeholder: FilteredChunk<T, V, E> = FilteredChunk {
+                        range,
+                        data: Vec::new(),
+                        extra: (self.mk_extra)(index.as_index_ref()),
+                    };
+                    break placeholder;
+                }
+                Err(e) => return Some(Err(e)),
+            };
+        };
+        Some(Ok(res))
+    }
+}
 
 /// basic random access append only tree
 impl<T, V, R> Forest<T, V, R>
@@ -209,11 +459,10 @@ where
     /// Implemented in terms of stream_filtered_chunked
     pub(crate) fn stream_filtered0<Q: Query<T> + Clone + 'static>(
         &self,
-        offset: u64,
         query: Q,
         index: Arc<Index<T>>,
     ) -> BoxStream<'static, Result<(u64, T::Key, V)>> {
-        self.stream_filtered_chunked0(offset, query, index, &|_| {})
+        self.stream_filtered_chunked0(query, index, &|_| {})
             .map_ok(|chunk| stream::iter(chunk.data).map(Ok))
             .try_flatten()
             .boxed()
@@ -225,88 +474,37 @@ where
         F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
     >(
         &self,
-        offset: u64,
         query: Q,
         index: Arc<Index<T>>,
         mk_extra: &'static F,
     ) -> BoxStream<'static, Result<FilteredChunk<T, V, E>>> {
-        let this: Forest<T, V, R> = self.clone();
-        async move {
-            Ok(match this.load_node(&index)? {
-                NodeInfo::Leaf(index, node) => {
-                    // todo: don't get the node here, since we might not need it
-                    let mut matching = vec![true; index.keys.len()];
-                    query.containing(offset, index, &mut matching);
-                    let keys = index.select_keys(&matching);
-                    let elems: Vec<V> = node.as_ref().select(&matching)?;
-                    let pairs = keys
-                        .zip(elems)
-                        .map(|((o, k), v)| (o + offset, k, v))
-                        .collect::<Vec<_>>();
-                    let chunk = FilteredChunk {
-                        range: offset..offset + index.keys.count(),
-                        data: pairs,
-                        extra: mk_extra(IndexRef::Leaf(index)),
-                    };
-                    stream::once(future::ok(chunk)).left_stream().left_stream()
-                }
-                NodeInfo::Branch(index, node) => {
-                    // todo: don't get the node here, since we might not need it
-                    let mut matching = vec![true; index.summaries.len()];
-                    query.intersecting(offset, index, &mut matching);
-                    let offsets = zip_with_offset(node.children.to_vec(), offset);
-                    let iter = matching.into_iter().zip(offsets).map(
-                        move |(is_matching, (child, offset))| {
-                            if is_matching {
-                                this.clone()
-                                    .stream_filtered_chunked0(
-                                        offset,
-                                        query.clone(),
-                                        Arc::new(child),
-                                        mk_extra,
-                                    )
-                                    .right_stream()
-                            } else {
-                                let placeholder = FilteredChunk {
-                                    range: offset..offset + child.count(),
-                                    data: Vec::new(),
-                                    extra: mk_extra(child.as_index_ref()),
-                                };
-                                stream::once(future::ok(placeholder)).left_stream()
-                            }
-                        },
-                    );
-                    stream::iter(iter).flatten().right_stream().left_stream()
-                }
-                NodeInfo::PurgedBranch(_) | NodeInfo::PurgedLeaf(_) => {
-                    // even for purged leafs and branches, produce a placeholder.
-                    //
-                    // the caller can find out if we skipped purged parts of the tree by
-                    // using an appropriate mk_extra fn.
-                    let placeholder = FilteredChunk {
-                        range: offset..offset + index.count(),
-                        data: Vec::new(),
-                        extra: mk_extra(index.as_index_ref()),
-                    };
-                    stream::once(future::ok(placeholder)).right_stream()
-                }
-            })
-        }
-        .try_flatten_stream()
+        let iter = self.traverse0(query, index, mk_extra);
+        stream::unfold(iter, |mut iter| async move {
+            iter.next().map(|res| (res, iter))
+        })
         .boxed()
     }
 
     /// Convenience method to iterate filtered.
-    ///
-    /// Implemented in terms of stream_filtered_chunked
-    pub(crate) fn iter_filtered0<Q: Query<T> + Clone + 'static>(
+    pub(crate) fn iter_filtered0<Q: Query<T> + Clone + Send + 'static>(
         &self,
-        offset: u64,
         query: Q,
         index: Arc<Index<T>>,
     ) -> BoxedIter<'static, Result<(u64, T::Key, V)>> {
-        self.clone()
-            .iter_filtered_chunked0(offset, query, index, &|_| {})
+        self.traverse0(query, index, &|_| {})
+            .map(|res| match res {
+                Ok(chunk) => chunk.data.into_iter().map(Ok).left_iter(),
+                Err(cause) => iter::once(Err(cause)).right_iter(),
+            })
+            .flatten()
+            .boxed()
+    }
+    pub(crate) fn iter_filtered_reverse0<Q: Query<T> + Clone + Send + 'static>(
+        &self,
+        query: Q,
+        index: Arc<Index<T>>,
+    ) -> BoxedIter<'static, Result<(u64, T::Key, V)>> {
+        self.traverse_rev0(query, index, &|_| {})
             .map(|res| match res {
                 Ok(chunk) => chunk.data.into_iter().map(Ok).left_iter(),
                 Err(cause) => iter::once(Err(cause)).right_iter(),
@@ -315,184 +513,28 @@ where
             .boxed()
     }
 
-    pub(crate) fn iter_filtered_chunked0<
-        Q: Query<T> + Clone + Send + 'static,
-        E: Send + 'static,
-        F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
-    >(
-        &self,
-        offset: u64,
-        query: Q,
-        index: Arc<Index<T>>,
-        mk_extra: &'static F,
-    ) -> BoxedIter<'static, Result<FilteredChunk<T, V, E>>> {
-        let this = self.clone();
-        let inner = || {
-            Ok(match self.load_node(&index)? {
-                NodeInfo::Leaf(index, node) => {
-                    // todo: don't get the node here, since we might not need it
-                    let mut matching = vec![true; index.keys.len()];
-                    query.containing(offset, index, &mut matching);
-                    let keys = index.select_keys(&matching);
-                    let elems: Vec<V> = node.as_ref().select(&matching)?;
-                    let pairs = keys
-                        .zip(elems)
-                        .map(|((o, k), v)| (o + offset, k, v))
-                        .collect::<Vec<_>>();
-                    let chunk = FilteredChunk {
-                        range: offset..offset + index.keys.count(),
-                        data: pairs,
-                        extra: mk_extra(IndexRef::Leaf(index)),
-                    };
-                    iter::once(Ok(chunk)).left_iter().left_iter()
-                }
-                NodeInfo::Branch(index, node) => {
-                    // todo: don't get the node here, since we might not need it
-                    let mut matching = vec![true; index.summaries.len()];
-                    query.intersecting(offset, index, &mut matching);
-                    let offsets = zip_with_offset(node.children.to_vec(), offset);
-                    let iter = matching.into_iter().zip(offsets).map(
-                        move |(is_matching, (child, offset))| {
-                            if is_matching {
-                                this.iter_filtered_chunked0(
-                                    offset,
-                                    query.clone(),
-                                    Arc::new(child),
-                                    mk_extra,
-                                )
-                                .left_iter()
-                            } else {
-                                let placeholder = FilteredChunk {
-                                    range: offset..offset + child.count(),
-                                    data: Vec::new(),
-                                    extra: mk_extra(child.as_index_ref()),
-                                };
-                                iter::once(Ok(placeholder)).right_iter()
-                            }
-                        },
-                    );
-                    iter.flatten().right_iter().left_iter()
-                }
-                NodeInfo::PurgedBranch(_) | NodeInfo::PurgedLeaf(_) => {
-                    // even for purged leafs and branches, produce a placeholder.
-                    //
-                    // the caller can find out if we skipped purged parts of the tree by
-                    // using an appropriate mk_extra fn.
-                    let placeholder = FilteredChunk {
-                        range: offset..offset + index.count(),
-                        data: Vec::new(),
-                        extra: mk_extra(index.as_index_ref()),
-                    };
-                    iter::once(Ok(placeholder)).right_iter()
-                }
-            })
-        };
-        match inner() {
-            Ok(iter) => iter.boxed(),
-            Err(cause) => iter::once(Err(cause)).boxed(),
-        }
-    }
-
     pub(crate) fn stream_filtered_chunked_reverse0<
         Q: Query<T> + Clone + Send + 'static,
         E: Send + 'static,
         F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
     >(
         &self,
-        offset: u64,
         query: Q,
         index: Arc<Index<T>>,
         mk_extra: &'static F,
     ) -> BoxStream<'static, Result<FilteredChunk<T, V, E>>> {
-        let this = self.clone();
-        let s =
-            async move {
-                Ok(match this.load_node(&index)? {
-                    NodeInfo::Leaf(index, node) => {
-                        // todo: don't get the node here, since we might not need it
-                        let mut matching = vec![true; index.keys.len()];
-                        query.containing(offset, index, &mut matching);
-                        let keys = index.select_keys(&matching);
-                        let elems: Vec<V> = node.as_ref().select(&matching)?;
-                        let mut pairs = keys
-                            .zip(elems)
-                            .map(|((o, k), v)| (o + offset, k, v))
-                            .collect::<Vec<_>>();
-                        pairs.reverse();
-                        let chunk = FilteredChunk {
-                            range: offset..offset + index.keys.count(),
-                            data: pairs,
-                            extra: mk_extra(IndexRef::Leaf(index)),
-                        };
-                        stream::once(future::ok(chunk)).left_stream().left_stream()
-                    }
-                    NodeInfo::Branch(index, node) => {
-                        // todo: don't get the node here, since we might not need it
-                        let mut matching = vec![true; index.summaries.len()];
-                        query.intersecting(offset, index, &mut matching);
-                        let offsets = zip_with_offset(node.children.to_vec(), offset);
-                        let children: Vec<_> = matching.into_iter().zip(offsets).collect();
-                        let iter = children.into_iter().rev().map(
-                            move |(is_matching, (child, offset))| {
-                                if is_matching {
-                                    this.clone()
-                                        .stream_filtered_chunked_reverse0(
-                                            offset,
-                                            query.clone(),
-                                            Arc::new(child),
-                                            mk_extra,
-                                        )
-                                        .right_stream()
-                                } else {
-                                    let placeholder = FilteredChunk {
-                                        range: offset..offset + child.count(),
-                                        data: Vec::new(),
-                                        extra: mk_extra(child.as_index_ref()),
-                                    };
-                                    stream::once(future::ok(placeholder)).left_stream()
-                                }
-                            },
-                        );
-                        stream::iter(iter).flatten().right_stream().left_stream()
-                    }
-                    NodeInfo::PurgedBranch(_) | NodeInfo::PurgedLeaf(_) => {
-                        // even for purged leafs and branches, produce a placeholder.
-                        //
-                        // the caller can find out if we skipped purged parts of the tree by
-                        // using an appropriate mk_extra fn.
-                        let placeholder = FilteredChunk {
-                            range: offset..offset + index.count(),
-                            data: Vec::new(),
-                            extra: mk_extra(index.as_index_ref()),
-                        };
-                        stream::once(future::ok(placeholder)).right_stream()
-                    }
-                })
-            }
-            .try_flatten_stream();
-        Box::pin(s)
+        let iter = self.traverse_rev0(query, index, mk_extra);
+        stream::unfold(iter, |mut iter| async move {
+            iter.next().map(|res| (res, iter))
+        })
+        .boxed()
     }
 
     pub(crate) fn dump0(&self, index: &Index<T>, prefix: &str) -> Result<()> {
         match self.load_node(index)? {
-            NodeInfo::Leaf(index, _) => {
-                println!(
-                    "{}Leaf(count={}, value_bytes={}, sealed={}, link={})",
-                    prefix,
-                    index.keys.count(),
-                    index.value_bytes,
-                    index.sealed,
-                    index
-                        .link
-                        .map(|x| format!("{}", x))
-                        .unwrap_or_else(|| "".to_string())
-                );
-            }
-
             NodeInfo::Branch(index, branch) => {
                 println!(
-                    "{}Branch(count={}, key_bytes={}, value_bytes={}, sealed={}, link={})",
-                    prefix,
+                    "Branch(count={}, key_bytes={}, value_bytes={}, sealed={}, link={}, children={})",
                     index.count,
                     index.key_bytes,
                     index.value_bytes,
@@ -500,28 +542,15 @@ where
                     index
                         .link
                         .map(|x| format!("{}", x))
-                        .unwrap_or_else(|| "".to_string())
-                );
+                        .unwrap_or_else(|| "".to_string()),
+                    branch.children.len()
+            );
                 let prefix = prefix.to_string() + "  ";
                 for x in branch.children.iter() {
                     self.dump0(x, &prefix)?;
                 }
             }
-            NodeInfo::PurgedBranch(index) => {
-                println!(
-                    "{}PurgedBranch(count={}, key_bytes={}, value_bytes={}, sealed={})",
-                    prefix, index.count, index.key_bytes, index.value_bytes, index.sealed,
-                );
-            }
-            NodeInfo::PurgedLeaf(index) => {
-                println!(
-                    "{}PurgedLeaf(count={}, key_bytes={}, sealed={})",
-                    prefix,
-                    index.keys.count(),
-                    index.value_bytes,
-                    index.sealed,
-                );
-            }
+            x => println!("{}{}", prefix, x),
         };
         Ok(())
     }

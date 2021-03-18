@@ -371,7 +371,7 @@ async fn main() -> Result<()> {
         }
         Command::DumpValues { root } => {
             let tree = forest.load_tree(root)?;
-            let iter = forest.iter_from(&tree, 0);
+            let iter = forest.iter_from(&tree);
             for res in iter {
                 let (i, k, v) = res?;
                 println!("{:?} {:?} {:?}", i, k, v);

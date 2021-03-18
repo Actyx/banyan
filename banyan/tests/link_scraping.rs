@@ -5,12 +5,13 @@ use banyan::{
     memstore::MemStore,
     tree::Tree,
 };
+use common::Sha256Digest;
 use fnv::FnvHashSet;
 use libipld::{cbor::DagCborCodec, codec::Codec, ipld, Cid, DagCbor, Ipld};
 use quickcheck::{quickcheck, Arbitrary, Gen};
 use std::str::FromStr;
-use store::Sha256Digest;
-mod store;
+
+mod common;
 
 type Txn = Transaction<TT, Payload, MemStore<Sha256Digest>, MemStore<Sha256Digest>>;
 
