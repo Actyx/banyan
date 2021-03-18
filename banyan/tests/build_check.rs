@@ -4,12 +4,11 @@ use banyan::{
     query::{AllQuery, OffsetRangeQuery},
     tree::Tree,
 };
+use common::{create_test_tree, test, txn, IterExt, Key, KeySeq, Sha256Digest, TT};
 use futures::prelude::*;
 use libipld::{cbor::DagCborCodec, codec::Codec, Cid};
 use quickcheck_macros::quickcheck;
 use std::{convert::TryInto, iter, ops::Range, str::FromStr};
-
-use common::{create_test_tree, test, txn, Key, KeySeq, Sha256Digest, TT};
 
 mod common;
 
@@ -115,13 +114,13 @@ async fn compare_filtered_chunked_reverse(
     let range = range.clone();
     let (tree, txn) = create_test_tree(xs.clone())?;
     let actual = txn
-        .stream_filtered_chunked_reverse(&tree, OffsetRangeQuery::from(range.clone()), &|_| ())
-        .map(|chunk_result| {
-            chunk_result.map(|chunk| stream::iter(chunk.data.into_iter().rev().map(Ok)))
+        .iter_filtered_chunked_reverse(&tree, OffsetRangeQuery::from(range.clone()), &|_| ())
+        .map(|chunk_result| match chunk_result {
+            Ok(chunk) => chunk.data.into_iter().rev().map(Ok).boxed(),
+            Err(cause) => iter::once(Err(cause)).boxed(),
         })
-        .try_flatten()
+        .flatten()
         .collect::<Vec<_>>()
-        .await
         .into_iter()
         .collect::<anyhow::Result<Vec<_>>>()?;
     let expected = xs

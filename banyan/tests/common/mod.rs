@@ -172,3 +172,15 @@ impl TryFrom<Cid> for Sha256Digest {
         Ok(Self(digest))
     }
 }
+
+/// Some convenience fns so we don't have to depend on IterTools
+pub(crate) trait IterExt<'a>
+where
+    Self: Iterator + Sized + Send + 'a,
+{
+    fn boxed(self) -> Box<dyn Iterator<Item = Self::Item> + Send + 'a> {
+        Box::new(self)
+    }
+}
+
+impl<'a, T: Iterator + Sized + Send + 'a> IterExt<'a> for T {}
