@@ -303,14 +303,10 @@ where
     }
 
     /// load a leaf given a leaf index
-    pub(crate) fn load_leaf(&self, index: &LeafIndex<T>) -> Result<Option<Leaf>> {
-        Ok(if let Some(link) = &index.link {
-            let data = &self.store().get(link)?;
-            let items = ZstdDagCborSeq::decrypt(data, &self.value_key())?;
-            Some(Leaf::new(items))
-        } else {
-            None
-        })
+    pub(crate) fn load_leaf(&self, link: &T::Link) -> Result<Leaf> {
+        let data = &self.store().get(link)?;
+        let items = ZstdDagCborSeq::decrypt(data, &self.value_key())?;
+        Ok(Leaf::new(items))
     }
 
     pub(crate) fn load_branch_from_link(&self, link: T::Link) -> Result<Index<T>> {
@@ -337,21 +333,15 @@ where
     }
 
     /// load a branch given a branch index, from the cache
-    pub(crate) fn load_branch_cached(&self, index: &BranchIndex<T>) -> Result<Option<Branch<T>>> {
-        if let Some(link) = &index.link {
-            let res = self.branch_cache().get(link);
-            match res {
-                Some(branch) => Ok(Some(branch)),
-                None => {
-                    let branch = self.load_branch(index)?;
-                    if let Some(branch) = &branch {
-                        self.branch_cache().put(*link, branch.clone());
-                    }
-                    Ok(branch)
-                }
+    pub(crate) fn load_branch_cached(&self, link: &T::Link) -> Result<Branch<T>> {
+        let res = self.branch_cache().get(link);
+        match res {
+            Some(branch) => Ok(branch),
+            None => {
+                let branch = self.load_branch(link)?;
+                self.branch_cache().put(*link, branch.clone());
+                Ok(branch)
             }
-        } else {
-            Ok(None)
         }
     }
 
@@ -361,14 +351,24 @@ where
         let t0 = Instant::now();
         let result = Ok(match index {
             Index::Branch(index) => {
-                if let Some(branch) = self.load_branch_cached(index)? {
+                if let Some(branch) = index
+                    .link
+                    .as_ref()
+                    .map(|link| self.load_branch_cached(link))
+                    .transpose()?
+                {
                     NodeInfo::Branch(index, branch)
                 } else {
                     NodeInfo::PurgedBranch(index)
                 }
             }
             Index::Leaf(index) => {
-                if let Some(leaf) = self.load_leaf(index)? {
+                if let Some(leaf) = index
+                    .link
+                    .as_ref()
+                    .map(|link| self.load_leaf(link))
+                    .transpose()?
+                {
                     NodeInfo::Leaf(index, leaf)
                 } else {
                     NodeInfo::PurgedLeaf(index)
@@ -379,18 +379,13 @@ where
         result
     }
 
-    /// load a branch given a branch index
-    pub(crate) fn load_branch(&self, index: &BranchIndex<T>) -> Result<Option<Branch<T>>> {
+    pub(crate) fn load_branch(&self, link: &T::Link) -> Result<Branch<T>> {
         let t0 = Instant::now();
-        let result = Ok(if let Some(link) = &index.link {
-            let bytes = self.store.get(&link)?;
-            let children = deserialize_compressed(&self.index_key(), &bytes)?;
-            Some(Branch::<T>::new(children))
-        } else {
-            None
-        });
+        let bytes = self.store.get(&link)?;
+        let children = deserialize_compressed(&self.index_key(), &bytes)?;
+        let result = Branch::<T>::new(children);
         tracing::debug!("load_branch {}", t0.elapsed().as_secs_f64());
-        result
+        Ok(result)
     }
 
     pub(crate) fn get0(&self, index: &Index<T>, mut offset: u64) -> Result<Option<(T::Key, V)>> {
@@ -571,7 +566,12 @@ where
         } else {
             *level = (*level).min(index.level() as i32 - 1);
             if let Index::Branch(b) = index {
-                if let Some(branch) = self.load_branch(b)? {
+                if let Some(branch) = b
+                    .link
+                    .as_ref()
+                    .map(|link| self.load_branch(link))
+                    .transpose()?
+                {
                     for child in branch.children.iter() {
                         self.roots0(child, level, res)?;
                     }

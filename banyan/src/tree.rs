@@ -171,7 +171,12 @@ impl<
     /// leftmost branches of the tree as separate trees
     fn left_roots0(&self, index: &Index<T>) -> Result<Vec<Index<T>>> {
         let mut result = if let Index::Branch(branch) = index {
-            if let Some(branch) = self.load_branch_cached(branch)? {
+            if let Some(branch) = branch
+                .link
+                .as_ref()
+                .map(|link| self.load_branch_cached(link))
+                .transpose()?
+            {
                 self.left_roots0(branch.first_child())?
             } else {
                 Vec::new()

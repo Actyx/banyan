@@ -354,7 +354,12 @@ where
                     index.link = None;
                 }
                 // this will only be executed unless we are already purged
-                if let Some(node) = self.load_branch(&index)? {
+                if let Some(node) = index
+                    .link
+                    .as_ref()
+                    .map(|link| self.load_branch(link))
+                    .transpose()?
+                {
                     let mut children = node.children.to_vec();
                     let mut changed = false;
                     let offsets = zip_with_offset_ref(node.children.iter(), offset);
@@ -402,7 +407,11 @@ where
         match index {
             Index::Branch(index) => {
                 // important not to hit the cache here!
-                let branch = self.load_branch(index);
+                let branch = index
+                    .link
+                    .as_ref()
+                    .map(|link| self.load_branch(link))
+                    .transpose();
                 let mut index = index.clone();
                 match branch {
                     Ok(Some(node)) => {
@@ -440,7 +449,12 @@ where
             Index::Leaf(index) => {
                 let mut index = index.clone();
                 // important not to hit the cache here!
-                if let Err(cause) = self.load_leaf(&index) {
+                if let Err(cause) = index
+                    .link
+                    .as_ref()
+                    .map(|link| self.load_leaf(link))
+                    .transpose()
+                {
                     let link_txt = index.link.map(|x| x.to_string()).unwrap_or_default();
                     report.push(format!("forgetting leaf {} due to {}", link_txt, cause));
                     if !index.sealed {
