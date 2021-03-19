@@ -53,11 +53,13 @@ async fn compare_filtered_chunked(xs: Vec<(Key, u64)>, range: Range<u64>) -> any
     let range = range.clone();
     let (tree, txn) = create_test_tree(xs.clone())?;
     let actual = txn
-        .stream_filtered_chunked(&tree, OffsetRangeQuery::from(range.clone()), &|_| ())
-        .map(|chunk_result| chunk_result.map(|chunk| stream::iter(chunk.data.into_iter().map(Ok))))
-        .try_flatten()
+        .iter_filtered_chunked(&tree, OffsetRangeQuery::from(range.clone()), &|_| ())
+        .map(|chunk_result| match chunk_result {
+            Ok(chunk) => chunk.data.into_iter().map(Ok).boxed(),
+            Err(cause) => iter::once(Err(cause)).boxed(),
+        })
+        .flatten()
         .collect::<Vec<_>>()
-        .await
         .into_iter()
         .collect::<anyhow::Result<Vec<_>>>()?;
     let expected = xs
@@ -70,30 +72,32 @@ async fn compare_filtered_chunked(xs: Vec<(Key, u64)>, range: Range<u64>) -> any
     Ok(actual == expected)
 }
 /// checks that stream_filtered_chunked returns the same elements as stream_filtered_chunked_reverse
-async fn compare_filtered_chunked_with_reverse(
+fn compare_filtered_chunked_with_reverse(
     xs: Vec<(Key, u64)>,
     range: Range<u64>,
 ) -> anyhow::Result<bool> {
     let range = range.clone();
     let (tree, txn) = create_test_tree(xs.clone())?;
     let reverse = txn
-        .stream_filtered_chunked_reverse(&tree, OffsetRangeQuery::from(range.clone()), &|_| ())
-        .map(|chunk_result| {
-            chunk_result.map(|chunk| stream::iter(chunk.data.into_iter().rev().map(Ok)))
+        .iter_filtered_chunked_reverse(&tree, OffsetRangeQuery::from(range.clone()), &|_| ())
+        .map(|chunk_result| match chunk_result {
+            Ok(chunk) => chunk.data.into_iter().rev().map(Ok).boxed(),
+            Err(cause) => iter::once(Err(cause)).boxed(),
         })
-        .try_flatten()
+        .flatten()
         .collect::<Vec<_>>()
-        .await
         .into_iter()
         .rev()
         .collect::<anyhow::Result<Vec<_>>>()?;
 
     let forward = txn
-        .stream_filtered_chunked(&tree, OffsetRangeQuery::from(range.clone()), &|_| ())
-        .map(|chunk_result| chunk_result.map(|chunk| stream::iter(chunk.data.into_iter().map(Ok))))
-        .try_flatten()
+        .iter_filtered_chunked(&tree, OffsetRangeQuery::from(range.clone()), &|_| ())
+        .map(|chunk_result| match chunk_result {
+            Ok(chunk) => chunk.data.into_iter().map(Ok).boxed(),
+            Err(cause) => iter::once(Err(cause)).boxed(),
+        })
+        .flatten()
         .collect::<Vec<_>>()
-        .await
         .into_iter()
         .collect::<anyhow::Result<Vec<_>>>()?;
     let expected = xs
@@ -107,7 +111,7 @@ async fn compare_filtered_chunked_with_reverse(
 }
 
 /// checks that stream_filtered_chunked returns the same elements as filtering each element manually
-async fn compare_filtered_chunked_reverse(
+fn compare_filtered_chunked_reverse(
     xs: Vec<(Key, u64)>,
     range: Range<u64>,
 ) -> anyhow::Result<bool> {
@@ -169,20 +173,20 @@ async fn build_stream_filtered_chunked(
     test(|| compare_filtered_chunked(xs.clone(), range.clone())).await
 }
 
-#[quickcheck_async::tokio]
-async fn build_stream_filtered_chunked_forward_and_reverse(
+#[quickcheck]
+fn build_stream_filtered_chunked_forward_and_reverse(
     xs: Vec<(Key, u64)>,
     range: Range<u64>,
-) -> quickcheck::TestResult {
-    test(|| compare_filtered_chunked_with_reverse(xs.clone(), range.clone())).await
+) -> anyhow::Result<bool> {
+    compare_filtered_chunked_with_reverse(xs.clone(), range.clone())
 }
 
-#[quickcheck_async::tokio]
-async fn build_stream_filtered_chunked_reverse(
+#[quickcheck]
+fn build_stream_filtered_chunked_reverse(
     xs: Vec<(Key, u64)>,
     range: Range<u64>,
-) -> quickcheck::TestResult {
-    test(|| compare_filtered_chunked_reverse(xs.clone(), range.clone())).await
+) -> anyhow::Result<bool> {
+    compare_filtered_chunked_reverse(xs.clone(), range.clone())
 }
 
 #[quickcheck]
