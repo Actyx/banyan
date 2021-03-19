@@ -92,7 +92,6 @@ dependencies = [
  "generic-array",
  "hex",
  "libipld",
- "lru",
  "maplit",
  "multihash",
  "parking_lot",
@@ -107,6 +106,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "weight-cache",
  "zstd",
 ]
 
@@ -919,6 +919,12 @@ dependencies = [
  "pkg-config",
  "vcpkg",
 ]
+
+[[package]]
+name = "linked-hash-map"
+version = "0.5.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7fb9b38af92608140b86b693604b9ffcc5824240a484d1ecd4795bacb2fe88f3"
 
 [[package]]
 name = "lock_api"
@@ -2166,6 +2172,15 @@ checksum = "b8e38c0608262c46d4a56202ebabdeb094cef7e560ca7a226c6bf055188aa4ea"
 dependencies = [
  "ring",
  "untrusted",
+]
+
+[[package]]
+name = "weight-cache"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a070060cd18dd2fedd2e44ac14d2ba52f905c9731c9ada7edcdc3d8eeabe1457"
+dependencies = [
+ "linked-hash-map",
 ]
 
 [[package]]
