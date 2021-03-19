@@ -186,9 +186,6 @@ impl<
     pub fn check_invariants(&self, tree: &Tree<T>) -> Result<Vec<String>> {
         let mut msgs = Vec::new();
         if let Some(root) = &tree.root {
-            if root.level() == 0 {
-                msgs.push("tree should not have a leaf as direct child.".into());
-            }
             let mut level = i32::max_value();
             self.check_invariants0(&root, &mut level, &mut msgs)?;
         }

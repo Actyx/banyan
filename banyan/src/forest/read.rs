@@ -223,11 +223,11 @@ where
                         self.offset += index.keys.count();
                     }
 
-                    // Ascend to parent's node
+                    // Ascend to parent's node, if it exists
                     self.stack.pop();
-                    let last = self.stack.last_mut().expect("not empty");
-                    last.next_pos(&self.mode);
-
+                    if let Some(last) = self.stack.last_mut() {
+                        last.next_pos(&self.mode);
+                    }
                     break chunk;
                 }
 
@@ -423,7 +423,9 @@ where
         mut offset: u64,
         into: &mut Vec<Option<(T::Key, V)>>,
     ) -> Result<()> {
-        assert!(offset < index.count());
+        if offset >= index.count() {
+            return Ok(());
+        }
         match self.load_node(index)? {
             NodeInfo::Branch(_, node) => {
                 for child in node.children.iter() {
