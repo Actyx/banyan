@@ -16,8 +16,8 @@ pub(crate) use read::ForestIter;
 
 pub type FutureResult<'a, T> = BoxFuture<'a, Result<T>>;
 
-impl<T: TreeTypes> Weigheable<Branch<T>> for Branch<T> {
-    fn measure(value: &Branch<T>) -> usize {
+impl<T: TreeTypes> Weigheable for Branch<T> {
+    fn measure(value: &Self) -> usize {
         let mut bytes = std::mem::size_of::<Branch<T>>();
         for child in value.children.iter() {
             bytes += std::mem::size_of::<Index<T>>();

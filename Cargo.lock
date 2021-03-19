@@ -2176,9 +2176,9 @@ dependencies = [
 
 [[package]]
 name = "weight-cache"
-version = "0.1.0"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a070060cd18dd2fedd2e44ac14d2ba52f905c9731c9ada7edcdc3d8eeabe1457"
+checksum = "deac6482af31a2044f6834327bd2956e1fb9e39bcc747ed2180550db263de86d"
 dependencies = [
  "linked-hash-map",
 ]
