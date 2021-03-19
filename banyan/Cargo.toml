@@ -17,6 +17,7 @@ futures = { version = "0.3.12", features = ["thread-pool"] }
 libipld = { version = "0.11.0", features = ["unleashed"] }
 lru = "0.6.4"
 maplit = "1.0.2"
+parking_lot = "0.11.1"
 rand = "0.8.3"
 salsa20 = "0.7.2"
 smallvec = "1.6.1"

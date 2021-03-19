@@ -6,11 +6,9 @@ use core::{fmt::Debug, hash::Hash, iter::FromIterator, marker::PhantomData, ops:
 use futures::future::BoxFuture;
 use libipld::cbor::DagCbor;
 use lru::LruCache;
+use parking_lot::Mutex;
 use rand::RngCore;
-use std::{
-    fmt::Display,
-    sync::{Arc, Mutex},
-};
+use std::{fmt::Display, sync::Arc};
 mod read;
 mod stream;
 mod write;
@@ -27,11 +25,11 @@ impl<T: TreeTypes> BranchCache<T> {
     }
 
     pub fn get<'a>(&'a self, link: &'a T::Link) -> Option<Branch<T>> {
-        self.0.lock().unwrap().get(link).cloned()
+        self.0.lock().get(link).cloned()
     }
 
     pub fn put(&self, link: T::Link, branch: Branch<T>) {
-        self.0.lock().unwrap().put(link, branch);
+        self.0.lock().put(link, branch);
     }
 }
 
