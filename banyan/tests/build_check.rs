@@ -24,7 +24,6 @@ fn build_stream(xs: Vec<(Key, u64)>) -> anyhow::Result<bool> {
 
 /// checks that stream_filtered returns the same elements as filtering each element manually
 fn compare_filtered(xs: Vec<(Key, u64)>, range: Range<u64>) -> anyhow::Result<bool> {
-    let range = range.clone();
     let (tree, txn) = create_test_tree(xs.clone())?;
     let actual = txn
         .iter_filtered(&tree, OffsetRangeQuery::from(range.clone()))
@@ -41,7 +40,6 @@ fn compare_filtered(xs: Vec<(Key, u64)>, range: Range<u64>) -> anyhow::Result<bo
 
 /// checks that stream_filtered_chunked returns the same elements as filtering each element manually
 fn compare_filtered_chunked(xs: Vec<(Key, u64)>, range: Range<u64>) -> anyhow::Result<bool> {
-    let range = range.clone();
     let (tree, txn) = create_test_tree(xs.clone())?;
     let actual = txn
         .iter_filtered_chunked(&tree, OffsetRangeQuery::from(range.clone()), &|_| ())
@@ -65,7 +63,6 @@ fn compare_filtered_chunked_with_reverse(
     xs: Vec<(Key, u64)>,
     range: Range<u64>,
 ) -> anyhow::Result<bool> {
-    let range = range.clone();
     let (tree, txn) = create_test_tree(xs.clone())?;
     let mut reverse = txn
         .iter_filtered_chunked_reverse(&tree, OffsetRangeQuery::from(range.clone()), &|_| ())
@@ -100,7 +97,6 @@ fn compare_filtered_chunked_reverse(
     xs: Vec<(Key, u64)>,
     range: Range<u64>,
 ) -> anyhow::Result<bool> {
-    let range = range.clone();
     let (tree, txn) = create_test_tree(xs.clone())?;
     let actual = txn
         .iter_filtered_chunked_reverse(&tree, OffsetRangeQuery::from(range.clone()), &|_| ())
@@ -126,10 +122,9 @@ fn compare_filtered_chunked_reverse(
 
 /// checks that stream_filtered_chunked returns the same elements as filtering each element manually
 fn filtered_chunked_no_holes(xs: Vec<(Key, u64)>, range: Range<u64>) -> anyhow::Result<bool> {
-    let range = range.clone();
     let (tree, txn) = create_test_tree(xs.clone())?;
     let chunks = txn
-        .iter_filtered_chunked(&tree, OffsetRangeQuery::from(range.clone()), &|_| ())
+        .iter_filtered_chunked(&tree, OffsetRangeQuery::from(range), &|_| ())
         .collect::<anyhow::Result<Vec<_>>>()?;
     let max_offset = chunks.iter().fold(0, |offset, chunk| {
         if offset == chunk.range.start {
@@ -143,12 +138,12 @@ fn filtered_chunked_no_holes(xs: Vec<(Key, u64)>, range: Range<u64>) -> anyhow::
 
 #[quickcheck]
 fn build_stream_filtered(xs: Vec<(Key, u64)>, range: Range<u64>) -> anyhow::Result<bool> {
-    compare_filtered(xs.clone(), range.clone())
+    compare_filtered(xs, range)
 }
 
 #[quickcheck]
 fn build_stream_filtered_chunked(xs: Vec<(Key, u64)>, range: Range<u64>) -> anyhow::Result<bool> {
-    compare_filtered_chunked(xs.clone(), range.clone())
+    compare_filtered_chunked(xs, range)
 }
 
 #[quickcheck]
@@ -156,7 +151,7 @@ fn build_stream_filtered_chunked_forward_and_reverse(
     xs: Vec<(Key, u64)>,
     range: Range<u64>,
 ) -> anyhow::Result<bool> {
-    compare_filtered_chunked_with_reverse(xs.clone(), range.clone())
+    compare_filtered_chunked_with_reverse(xs, range)
 }
 
 #[quickcheck]
@@ -164,7 +159,7 @@ fn build_stream_filtered_chunked_reverse(
     xs: Vec<(Key, u64)>,
     range: Range<u64>,
 ) -> anyhow::Result<bool> {
-    compare_filtered_chunked_reverse(xs.clone(), range.clone())
+    compare_filtered_chunked_reverse(xs, range)
 }
 
 #[quickcheck]
@@ -172,7 +167,7 @@ fn build_stream_filtered_chunked_no_holes(
     xs: Vec<(Key, u64)>,
     range: Range<u64>,
 ) -> anyhow::Result<bool> {
-    filtered_chunked_no_holes(xs.clone(), range.clone())
+    filtered_chunked_no_holes(xs, range)
 }
 
 #[quickcheck]
@@ -260,8 +255,8 @@ fn iter_from_should_return_all_items(xs: Vec<(Key, u64)>) -> anyhow::Result<bool
 #[test]
 fn filter_test_simple() -> anyhow::Result<()> {
     let _ = env_logger::builder().is_test(true).try_init();
-    let res = compare_filtered(vec![(Key(1), 1), (Key(2), 2)], 0..1);
-    assert_eq!(res.ok(), Some(true));
+    let ok = compare_filtered(vec![(Key(1), 1), (Key(2), 2)], 0..1)?;
+    assert!(ok);
     Ok(())
 }
 
