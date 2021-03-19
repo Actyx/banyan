@@ -95,7 +95,7 @@ pub fn txn(store: MemStore<Sha256Digest>, cache_cap: usize) -> Txn {
 }
 
 #[allow(dead_code)]
-pub async fn create_test_tree<I>(xs: I) -> anyhow::Result<(Tree<TT>, Txn)>
+pub fn create_test_tree<I>(xs: I) -> anyhow::Result<(Tree<TT>, Txn)>
 where
     I: IntoIterator<Item = (Key, u64)>,
     I::IntoIter: Send,
@@ -172,3 +172,15 @@ impl TryFrom<Cid> for Sha256Digest {
         Ok(Self(digest))
     }
 }
+
+/// Some convenience fns so we don't have to depend on IterTools
+pub(crate) trait IterExt<'a>
+where
+    Self: Iterator + Sized + Send + 'a,
+{
+    fn boxed(self) -> Box<dyn Iterator<Item = Self::Item> + Send + 'a> {
+        Box::new(self)
+    }
+}
+
+impl<'a, T: Iterator + Sized + Send + 'a> IterExt<'a> for T {}

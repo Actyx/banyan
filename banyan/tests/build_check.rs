@@ -4,40 +4,29 @@ use banyan::{
     query::{AllQuery, OffsetRangeQuery},
     tree::Tree,
 };
+use common::{create_test_tree, txn, IterExt, Key, KeySeq, Sha256Digest, TT};
 use futures::prelude::*;
 use libipld::{cbor::DagCborCodec, codec::Codec, Cid};
 use quickcheck_macros::quickcheck;
 use std::{convert::TryInto, iter, ops::Range, str::FromStr};
 
-use common::{create_test_tree, test, txn, Key, KeySeq, Sha256Digest, TT};
-
 mod common;
 
-#[quickcheck_async::tokio]
-async fn build_stream(xs: Vec<(Key, u64)>) -> quickcheck::TestResult {
-    test(|| async {
-        let (tree, txn) = create_test_tree(xs.clone()).await?;
-        let actual = txn
-            .stream_filtered(&tree, AllQuery)
-            .map_ok(|(_, k, v)| (k, v))
-            .collect::<Vec<_>>()
-            .await
-            .into_iter()
-            .collect::<anyhow::Result<Vec<_>>>()?;
-        Ok(actual == xs)
-    })
-    .await
+#[quickcheck]
+fn build_stream(xs: Vec<(Key, u64)>) -> anyhow::Result<bool> {
+    let (tree, txn) = create_test_tree(xs.clone())?;
+    let actual = txn
+        .iter_filtered(&tree, AllQuery)
+        .map(|res| res.map(|(_, k, v)| (k, v)))
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    Ok(actual == xs)
 }
 
 /// checks that stream_filtered returns the same elements as filtering each element manually
-async fn compare_filtered(xs: Vec<(Key, u64)>, range: Range<u64>) -> anyhow::Result<bool> {
-    let range = range.clone();
-    let (tree, txn) = create_test_tree(xs.clone()).await?;
+fn compare_filtered(xs: Vec<(Key, u64)>, range: Range<u64>) -> anyhow::Result<bool> {
+    let (tree, txn) = create_test_tree(xs.clone())?;
     let actual = txn
-        .stream_filtered(&tree, OffsetRangeQuery::from(range.clone()))
-        .collect::<Vec<_>>()
-        .await
-        .into_iter()
+        .iter_filtered(&tree, OffsetRangeQuery::from(range.clone()))
         .collect::<anyhow::Result<Vec<_>>>()?;
     let expected = xs
         .iter()
@@ -50,16 +39,15 @@ async fn compare_filtered(xs: Vec<(Key, u64)>, range: Range<u64>) -> anyhow::Res
 }
 
 /// checks that stream_filtered_chunked returns the same elements as filtering each element manually
-async fn compare_filtered_chunked(xs: Vec<(Key, u64)>, range: Range<u64>) -> anyhow::Result<bool> {
-    let range = range.clone();
-    let (tree, txn) = create_test_tree(xs.clone()).await?;
+fn compare_filtered_chunked(xs: Vec<(Key, u64)>, range: Range<u64>) -> anyhow::Result<bool> {
+    let (tree, txn) = create_test_tree(xs.clone())?;
     let actual = txn
-        .stream_filtered_chunked(&tree, OffsetRangeQuery::from(range.clone()), &|_| ())
-        .map(|chunk_result| chunk_result.map(|chunk| stream::iter(chunk.data.into_iter().map(Ok))))
-        .try_flatten()
-        .collect::<Vec<_>>()
-        .await
-        .into_iter()
+        .iter_filtered_chunked(&tree, OffsetRangeQuery::from(range.clone()), &|_| ())
+        .map(|chunk_result| match chunk_result {
+            Ok(chunk) => chunk.data.into_iter().map(Ok).boxed(),
+            Err(cause) => iter::once(Err(cause)).boxed(),
+        })
+        .flatten()
         .collect::<anyhow::Result<Vec<_>>>()?;
     let expected = xs
         .iter()
@@ -71,31 +59,28 @@ async fn compare_filtered_chunked(xs: Vec<(Key, u64)>, range: Range<u64>) -> any
     Ok(actual == expected)
 }
 /// checks that stream_filtered_chunked returns the same elements as stream_filtered_chunked_reverse
-async fn compare_filtered_chunked_with_reverse(
+fn compare_filtered_chunked_with_reverse(
     xs: Vec<(Key, u64)>,
     range: Range<u64>,
 ) -> anyhow::Result<bool> {
-    let range = range.clone();
-    let (tree, txn) = create_test_tree(xs.clone()).await?;
-    let reverse = txn
-        .stream_filtered_chunked_reverse(&tree, OffsetRangeQuery::from(range.clone()), &|_| ())
-        .map(|chunk_result| {
-            chunk_result.map(|chunk| stream::iter(chunk.data.into_iter().rev().map(Ok)))
+    let (tree, txn) = create_test_tree(xs.clone())?;
+    let mut reverse = txn
+        .iter_filtered_chunked_reverse(&tree, OffsetRangeQuery::from(range.clone()), &|_| ())
+        .map(|chunk_result| match chunk_result {
+            Ok(chunk) => chunk.data.into_iter().rev().map(Ok).boxed(),
+            Err(cause) => iter::once(Err(cause)).boxed(),
         })
-        .try_flatten()
-        .collect::<Vec<_>>()
-        .await
-        .into_iter()
-        .rev()
+        .flatten()
         .collect::<anyhow::Result<Vec<_>>>()?;
+    reverse.reverse();
 
     let forward = txn
-        .stream_filtered_chunked(&tree, OffsetRangeQuery::from(range.clone()), &|_| ())
-        .map(|chunk_result| chunk_result.map(|chunk| stream::iter(chunk.data.into_iter().map(Ok))))
-        .try_flatten()
-        .collect::<Vec<_>>()
-        .await
-        .into_iter()
+        .iter_filtered_chunked(&tree, OffsetRangeQuery::from(range.clone()), &|_| ())
+        .map(|chunk_result| match chunk_result {
+            Ok(chunk) => chunk.data.into_iter().map(Ok).boxed(),
+            Err(cause) => iter::once(Err(cause)).boxed(),
+        })
+        .flatten()
         .collect::<anyhow::Result<Vec<_>>>()?;
     let expected = xs
         .iter()
@@ -108,21 +93,18 @@ async fn compare_filtered_chunked_with_reverse(
 }
 
 /// checks that stream_filtered_chunked returns the same elements as filtering each element manually
-async fn compare_filtered_chunked_reverse(
+fn compare_filtered_chunked_reverse(
     xs: Vec<(Key, u64)>,
     range: Range<u64>,
 ) -> anyhow::Result<bool> {
-    let range = range.clone();
-    let (tree, txn) = create_test_tree(xs.clone()).await?;
+    let (tree, txn) = create_test_tree(xs.clone())?;
     let actual = txn
-        .stream_filtered_chunked_reverse(&tree, OffsetRangeQuery::from(range.clone()), &|_| ())
-        .map(|chunk_result| {
-            chunk_result.map(|chunk| stream::iter(chunk.data.into_iter().rev().map(Ok)))
+        .iter_filtered_chunked_reverse(&tree, OffsetRangeQuery::from(range.clone()), &|_| ())
+        .map(|chunk_result| match chunk_result {
+            Ok(chunk) => chunk.data.into_iter().rev().map(Ok).boxed(),
+            Err(cause) => iter::once(Err(cause)).boxed(),
         })
-        .try_flatten()
-        .collect::<Vec<_>>()
-        .await
-        .into_iter()
+        .flatten()
         .collect::<anyhow::Result<Vec<_>>>()?;
     let expected = xs
         .iter()
@@ -139,14 +121,10 @@ async fn compare_filtered_chunked_reverse(
 }
 
 /// checks that stream_filtered_chunked returns the same elements as filtering each element manually
-async fn filtered_chunked_no_holes(xs: Vec<(Key, u64)>, range: Range<u64>) -> anyhow::Result<bool> {
-    let range = range.clone();
-    let (tree, txn) = create_test_tree(xs.clone()).await?;
+fn filtered_chunked_no_holes(xs: Vec<(Key, u64)>, range: Range<u64>) -> anyhow::Result<bool> {
+    let (tree, txn) = create_test_tree(xs.clone())?;
     let chunks = txn
-        .stream_filtered_chunked(&tree, OffsetRangeQuery::from(range.clone()), &|_| ())
-        .collect::<Vec<_>>()
-        .await
-        .into_iter()
+        .iter_filtered_chunked(&tree, OffsetRangeQuery::from(range), &|_| ())
         .collect::<anyhow::Result<Vec<_>>>()?;
     let max_offset = chunks.iter().fold(0, |offset, chunk| {
         if offset == chunk.range.start {
@@ -158,110 +136,98 @@ async fn filtered_chunked_no_holes(xs: Vec<(Key, u64)>, range: Range<u64>) -> an
     Ok(max_offset == (xs.len() as u64))
 }
 
-#[quickcheck_async::tokio]
-async fn build_stream_filtered(xs: Vec<(Key, u64)>, range: Range<u64>) -> quickcheck::TestResult {
-    test(|| compare_filtered(xs.clone(), range.clone())).await
+#[quickcheck]
+fn build_stream_filtered(xs: Vec<(Key, u64)>, range: Range<u64>) -> anyhow::Result<bool> {
+    compare_filtered(xs, range)
 }
 
-#[quickcheck_async::tokio]
-async fn build_stream_filtered_chunked(
+#[quickcheck]
+fn build_stream_filtered_chunked(xs: Vec<(Key, u64)>, range: Range<u64>) -> anyhow::Result<bool> {
+    compare_filtered_chunked(xs, range)
+}
+
+#[quickcheck]
+fn build_stream_filtered_chunked_forward_and_reverse(
     xs: Vec<(Key, u64)>,
     range: Range<u64>,
-) -> quickcheck::TestResult {
-    test(|| compare_filtered_chunked(xs.clone(), range.clone())).await
+) -> anyhow::Result<bool> {
+    compare_filtered_chunked_with_reverse(xs, range)
 }
 
-#[quickcheck_async::tokio]
-async fn build_stream_filtered_chunked_forward_and_reverse(
+#[quickcheck]
+fn build_stream_filtered_chunked_reverse(
     xs: Vec<(Key, u64)>,
     range: Range<u64>,
-) -> quickcheck::TestResult {
-    test(|| compare_filtered_chunked_with_reverse(xs.clone(), range.clone())).await
+) -> anyhow::Result<bool> {
+    compare_filtered_chunked_reverse(xs, range)
 }
 
-#[quickcheck_async::tokio]
-async fn build_stream_filtered_chunked_reverse(
+#[quickcheck]
+fn build_stream_filtered_chunked_no_holes(
     xs: Vec<(Key, u64)>,
     range: Range<u64>,
-) -> quickcheck::TestResult {
-    test(|| compare_filtered_chunked_reverse(xs.clone(), range.clone())).await
+) -> anyhow::Result<bool> {
+    filtered_chunked_no_holes(xs, range)
 }
 
-#[quickcheck_async::tokio]
-async fn build_stream_filtered_chunked_no_holes(
-    xs: Vec<(Key, u64)>,
-    range: Range<u64>,
-) -> quickcheck::TestResult {
-    test(|| filtered_chunked_no_holes(xs.clone(), range.clone())).await
+#[quickcheck]
+fn build_get(xs: Vec<(Key, u64)>) -> anyhow::Result<bool> {
+    let (tree, txn) = create_test_tree(xs.clone())?;
+    let mut actual = Vec::new();
+    for i in 0..xs.len() as u64 {
+        actual.push(txn.get(&tree, i)?.unwrap());
+    }
+    Ok(actual == xs)
 }
 
-#[quickcheck_async::tokio]
-async fn build_get(xs: Vec<(Key, u64)>) -> quickcheck::TestResult {
-    test(|| async {
-        let (tree, txn) = create_test_tree(xs.clone()).await?;
-        let mut actual = Vec::new();
-        for i in 0..xs.len() as u64 {
-            actual.push(txn.get(&tree, i)?.unwrap());
-        }
-        Ok(actual == xs)
-    })
-    .await
+#[quickcheck]
+fn build_pack(xss: Vec<Vec<(Key, u64)>>) -> anyhow::Result<bool> {
+    let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
+    let forest = txn(store, 1000);
+    let mut tree = Tree::<TT>::empty();
+    // flattened xss for reference
+    let xs = xss.iter().cloned().flatten().collect::<Vec<_>>();
+    // build complex unbalanced tree
+    for xs in xss.iter() {
+        tree = forest.extend_unpacked(&tree, xs.clone()).unwrap();
+    }
+    // check that the unbalanced tree itself matches the elements
+    let actual: Vec<_> = forest
+        .collect(&tree)?
+        .into_iter()
+        .collect::<Option<Vec<_>>>()
+        .unwrap();
+    let unpacked_matches = xs == actual;
+
+    tree = forest.pack(&tree)?;
+    assert!(forest.is_packed(&tree)?);
+    let actual: Vec<_> = forest
+        .collect(&tree)?
+        .into_iter()
+        .collect::<Option<Vec<_>>>()
+        .unwrap();
+    let packed_matches = xs == actual;
+
+    Ok(unpacked_matches && packed_matches)
 }
 
-#[quickcheck_async::tokio]
-async fn build_pack(xss: Vec<Vec<(Key, u64)>>) -> quickcheck::TestResult {
-    test(|| async {
-        let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
-        let forest = txn(store, 1000);
-        let mut tree = Tree::<TT>::empty();
-        // flattened xss for reference
-        let xs = xss.iter().cloned().flatten().collect::<Vec<_>>();
-        // build complex unbalanced tree
-        for xs in xss.iter() {
-            tree = forest.extend_unpacked(&tree, xs.clone()).unwrap();
-        }
-        // check that the unbalanced tree itself matches the elements
-        let actual: Vec<_> = forest
-            .collect(&tree)?
-            .into_iter()
-            .collect::<Option<Vec<_>>>()
-            .unwrap();
-        let unpacked_matches = xs == actual;
-
-        tree = forest.pack(&tree)?;
-        assert!(forest.is_packed(&tree)?);
-        let actual: Vec<_> = forest
-            .collect(&tree)?
-            .into_iter()
-            .collect::<Option<Vec<_>>>()
-            .unwrap();
-        let packed_matches = xs == actual;
-
-        Ok(unpacked_matches && packed_matches)
-    })
-    .await
-}
-
-#[quickcheck_async::tokio]
-async fn retain(xss: Vec<Vec<(Key, u64)>>) -> quickcheck::TestResult {
-    test(|| async {
-        let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
-        let forest = txn(store, 1000);
-        let mut tree = Tree::<TT>::empty();
-        // flattened xss for reference
-        let xs = xss.iter().cloned().flatten().collect::<Vec<_>>();
-        // build complex unbalanced tree
-        for xs in xss.iter() {
-            tree = forest.extend_unpacked(&tree, xs.clone()).unwrap();
-        }
-        tree = forest.retain(&tree, &OffsetRangeQuery::from(xs.len() as u64..))?;
-        forest.assert_invariants(&tree)?;
-        tree = forest.pack(&tree)?;
-        tree = forest.retain(&tree, &OffsetRangeQuery::from(xs.len() as u64..))?;
-        forest.assert_invariants(&tree)?;
-        Ok(true)
-    })
-    .await
+#[quickcheck]
+fn retain(xss: Vec<Vec<(Key, u64)>>) -> anyhow::Result<bool> {
+    let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
+    let forest = txn(store, 1000);
+    let mut tree = Tree::<TT>::empty();
+    // flattened xss for reference
+    let xs = xss.iter().cloned().flatten().collect::<Vec<_>>();
+    // build complex unbalanced tree
+    for xs in xss.iter() {
+        tree = forest.extend_unpacked(&tree, xs.clone()).unwrap();
+    }
+    tree = forest.retain(&tree, &OffsetRangeQuery::from(xs.len() as u64..))?;
+    forest.assert_invariants(&tree)?;
+    tree = forest.pack(&tree)?;
+    tree = forest.retain(&tree, &OffsetRangeQuery::from(xs.len() as u64..))?;
+    forest.assert_invariants(&tree)?;
+    Ok(true)
 }
 
 #[quickcheck]
@@ -273,8 +239,7 @@ fn iter_from_should_return_all_items(xs: Vec<(Key, u64)>) -> anyhow::Result<bool
     forest.assert_invariants(&tree)?;
     let actual = forest
         .iter_from(&tree)
-        .map(Result::unwrap)
-        .collect::<Vec<_>>();
+        .collect::<anyhow::Result<Vec<_>>>()?;
     let expected = xs
         .iter()
         .cloned()
@@ -287,11 +252,11 @@ fn iter_from_should_return_all_items(xs: Vec<(Key, u64)>) -> anyhow::Result<bool
     Ok(expected == actual)
 }
 
-#[tokio::test]
-async fn filter_test_simple() -> anyhow::Result<()> {
+#[test]
+fn filter_test_simple() -> anyhow::Result<()> {
     let _ = env_logger::builder().is_test(true).try_init();
-    let res = compare_filtered(vec![(Key(1), 1), (Key(2), 2)], 0..1).await;
-    assert_eq!(res.ok(), Some(true));
+    let ok = compare_filtered(vec![(Key(1), 1), (Key(2), 2)], 0..1)?;
+    assert!(ok);
     Ok(())
 }
 
@@ -349,8 +314,8 @@ fn build_test() {
     println!("{:?}", v);
 }
 
-#[quickcheck_async::tokio]
-async fn build_converges(data: Vec<u32>) -> bool {
+#[quickcheck]
+fn build_converges(data: Vec<u32>) -> bool {
     let mut v = data;
     v.sort_unstable();
     v.reverse();
