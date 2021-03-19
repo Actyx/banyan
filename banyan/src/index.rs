@@ -102,9 +102,10 @@ pub trait CompactSeq: DagCbor {
         self.len() == 0
     }
     /// Provide a size hint, which is used to calculate the overall size of the
-    /// node this is include in for caching purposes. This should be overriden,
-    /// if the used item type contains any heap allocated objects, otherwise the
-    /// default implementation is a rough estimate.
+    /// node, which is used for caching purposes.
+    /// This function should be overridden, if the used item type contains any
+    /// heap allocated objects, otherwise the default implementation is a rough
+    /// estimate.
     fn size_hint(&self) -> usize {
         self.len() * std::mem::size_of::<Self::Item>()
     }
