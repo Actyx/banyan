@@ -4,7 +4,7 @@ use banyan::{
     query::{AllQuery, OffsetRangeQuery},
     tree::Tree,
 };
-use common::{create_test_tree, test, txn, IterExt, Key, KeySeq, Sha256Digest, TT};
+use common::{create_test_tree, txn, IterExt, Key, KeySeq, Sha256Digest, TT};
 use futures::prelude::*;
 use libipld::{cbor::DagCborCodec, codec::Codec, Cid};
 use quickcheck_macros::quickcheck;
@@ -12,31 +12,22 @@ use std::{convert::TryInto, iter, ops::Range, str::FromStr};
 
 mod common;
 
-#[quickcheck_async::tokio]
-async fn build_stream(xs: Vec<(Key, u64)>) -> quickcheck::TestResult {
-    test(|| async {
-        let (tree, txn) = create_test_tree(xs.clone())?;
-        let actual = txn
-            .stream_filtered(&tree, AllQuery)
-            .map_ok(|(_, k, v)| (k, v))
-            .collect::<Vec<_>>()
-            .await
-            .into_iter()
-            .collect::<anyhow::Result<Vec<_>>>()?;
-        Ok(actual == xs)
-    })
-    .await
+#[quickcheck]
+fn build_stream(xs: Vec<(Key, u64)>) -> anyhow::Result<bool> {
+    let (tree, txn) = create_test_tree(xs.clone())?;
+    let actual = txn
+        .iter_filtered(&tree, AllQuery)
+        .map(|res| res.map(|(_, k, v)| (k, v)))
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    Ok(actual == xs)
 }
 
 /// checks that stream_filtered returns the same elements as filtering each element manually
-async fn compare_filtered(xs: Vec<(Key, u64)>, range: Range<u64>) -> anyhow::Result<bool> {
+fn compare_filtered(xs: Vec<(Key, u64)>, range: Range<u64>) -> anyhow::Result<bool> {
     let range = range.clone();
     let (tree, txn) = create_test_tree(xs.clone())?;
     let actual = txn
-        .stream_filtered(&tree, OffsetRangeQuery::from(range.clone()))
-        .collect::<Vec<_>>()
-        .await
-        .into_iter()
+        .iter_filtered(&tree, OffsetRangeQuery::from(range.clone()))
         .collect::<anyhow::Result<Vec<_>>>()?;
     let expected = xs
         .iter()
@@ -49,7 +40,7 @@ async fn compare_filtered(xs: Vec<(Key, u64)>, range: Range<u64>) -> anyhow::Res
 }
 
 /// checks that stream_filtered_chunked returns the same elements as filtering each element manually
-async fn compare_filtered_chunked(xs: Vec<(Key, u64)>, range: Range<u64>) -> anyhow::Result<bool> {
+fn compare_filtered_chunked(xs: Vec<(Key, u64)>, range: Range<u64>) -> anyhow::Result<bool> {
     let range = range.clone();
     let (tree, txn) = create_test_tree(xs.clone())?;
     let actual = txn
@@ -59,8 +50,6 @@ async fn compare_filtered_chunked(xs: Vec<(Key, u64)>, range: Range<u64>) -> any
             Err(cause) => iter::once(Err(cause)).boxed(),
         })
         .flatten()
-        .collect::<Vec<_>>()
-        .into_iter()
         .collect::<anyhow::Result<Vec<_>>>()?;
     let expected = xs
         .iter()
@@ -78,17 +67,15 @@ fn compare_filtered_chunked_with_reverse(
 ) -> anyhow::Result<bool> {
     let range = range.clone();
     let (tree, txn) = create_test_tree(xs.clone())?;
-    let reverse = txn
+    let mut reverse = txn
         .iter_filtered_chunked_reverse(&tree, OffsetRangeQuery::from(range.clone()), &|_| ())
         .map(|chunk_result| match chunk_result {
             Ok(chunk) => chunk.data.into_iter().rev().map(Ok).boxed(),
             Err(cause) => iter::once(Err(cause)).boxed(),
         })
         .flatten()
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
         .collect::<anyhow::Result<Vec<_>>>()?;
+    reverse.reverse();
 
     let forward = txn
         .iter_filtered_chunked(&tree, OffsetRangeQuery::from(range.clone()), &|_| ())
@@ -97,8 +84,6 @@ fn compare_filtered_chunked_with_reverse(
             Err(cause) => iter::once(Err(cause)).boxed(),
         })
         .flatten()
-        .collect::<Vec<_>>()
-        .into_iter()
         .collect::<anyhow::Result<Vec<_>>>()?;
     let expected = xs
         .iter()
@@ -124,8 +109,6 @@ fn compare_filtered_chunked_reverse(
             Err(cause) => iter::once(Err(cause)).boxed(),
         })
         .flatten()
-        .collect::<Vec<_>>()
-        .into_iter()
         .collect::<anyhow::Result<Vec<_>>>()?;
     let expected = xs
         .iter()
@@ -147,8 +130,6 @@ fn filtered_chunked_no_holes(xs: Vec<(Key, u64)>, range: Range<u64>) -> anyhow::
     let (tree, txn) = create_test_tree(xs.clone())?;
     let chunks = txn
         .iter_filtered_chunked(&tree, OffsetRangeQuery::from(range.clone()), &|_| ())
-        .collect::<Vec<_>>()
-        .into_iter()
         .collect::<anyhow::Result<Vec<_>>>()?;
     let max_offset = chunks.iter().fold(0, |offset, chunk| {
         if offset == chunk.range.start {
@@ -160,17 +141,14 @@ fn filtered_chunked_no_holes(xs: Vec<(Key, u64)>, range: Range<u64>) -> anyhow::
     Ok(max_offset == (xs.len() as u64))
 }
 
-#[quickcheck_async::tokio]
-async fn build_stream_filtered(xs: Vec<(Key, u64)>, range: Range<u64>) -> quickcheck::TestResult {
-    test(|| compare_filtered(xs.clone(), range.clone())).await
+#[quickcheck]
+fn build_stream_filtered(xs: Vec<(Key, u64)>, range: Range<u64>) -> anyhow::Result<bool> {
+    compare_filtered(xs.clone(), range.clone())
 }
 
-#[quickcheck_async::tokio]
-async fn build_stream_filtered_chunked(
-    xs: Vec<(Key, u64)>,
-    range: Range<u64>,
-) -> quickcheck::TestResult {
-    test(|| compare_filtered_chunked(xs.clone(), range.clone())).await
+#[quickcheck]
+fn build_stream_filtered_chunked(xs: Vec<(Key, u64)>, range: Range<u64>) -> anyhow::Result<bool> {
+    compare_filtered_chunked(xs.clone(), range.clone())
 }
 
 #[quickcheck]
@@ -266,8 +244,7 @@ fn iter_from_should_return_all_items(xs: Vec<(Key, u64)>) -> anyhow::Result<bool
     forest.assert_invariants(&tree)?;
     let actual = forest
         .iter_from(&tree)
-        .map(Result::unwrap)
-        .collect::<Vec<_>>();
+        .collect::<anyhow::Result<Vec<_>>>()?;
     let expected = xs
         .iter()
         .cloned()
@@ -280,10 +257,10 @@ fn iter_from_should_return_all_items(xs: Vec<(Key, u64)>) -> anyhow::Result<bool
     Ok(expected == actual)
 }
 
-#[tokio::test]
-async fn filter_test_simple() -> anyhow::Result<()> {
+#[test]
+fn filter_test_simple() -> anyhow::Result<()> {
     let _ = env_logger::builder().is_test(true).try_init();
-    let res = compare_filtered(vec![(Key(1), 1), (Key(2), 2)], 0..1).await;
+    let res = compare_filtered(vec![(Key(1), 1), (Key(2), 2)], 0..1);
     assert_eq!(res.ok(), Some(true));
     Ok(())
 }
