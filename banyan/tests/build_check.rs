@@ -211,8 +211,7 @@ fn build_pack(xss: Vec<Vec<(Key, u64)>>) -> anyhow::Result<bool> {
     Ok(unpacked_matches && packed_matches)
 }
 
-#[quickcheck]
-fn retain(xss: Vec<Vec<(Key, u64)>>) -> anyhow::Result<bool> {
+fn do_retain(xss: Vec<Vec<(Key, u64)>>) -> anyhow::Result<bool> {
     let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
     let forest = txn(store, 1000);
     let mut tree = Tree::<TT>::empty();
@@ -228,6 +227,11 @@ fn retain(xss: Vec<Vec<(Key, u64)>>) -> anyhow::Result<bool> {
     tree = forest.retain(&tree, &OffsetRangeQuery::from(xs.len() as u64..))?;
     forest.assert_invariants(&tree)?;
     Ok(true)
+}
+
+#[quickcheck]
+fn retain(xss: Vec<Vec<(Key, u64)>>) -> anyhow::Result<bool> {
+    do_retain(xss)
 }
 
 #[quickcheck]
@@ -278,51 +282,6 @@ async fn stream_test_simple() -> anyhow::Result<()> {
     let res = res.collect::<Vec<_>>().await;
     println!("{:?}", res);
     Ok(())
-}
-
-fn build(items: &mut Vec<u32>) {
-    const MAX_BRANCH: usize = 8;
-    if items.len() > 1 {
-        let pos = items
-            .iter()
-            .position(|x| *x != items[0])
-            .unwrap_or(items.len());
-        if pos >= MAX_BRANCH || pos == items.len() || pos == items.len() - 1 {
-            // a valid node can be built from the start
-            items.splice(
-                0..MAX_BRANCH.min(items.len()),
-                vec![items[0].wrapping_add(1)],
-            );
-        } else {
-            // temporarily remove the start and recurse
-            let removed = items.splice(0..pos, iter::empty()).collect::<Vec<_>>();
-            build(items);
-            items.splice(0..0, removed);
-        }
-    }
-}
-
-#[test]
-fn build_test() {
-    let mut v = vec![
-        1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    ];
-    while v.len() > 1 {
-        println!("{:?}", v);
-        build(&mut v);
-    }
-    println!("{:?}", v);
-}
-
-#[quickcheck]
-fn build_converges(data: Vec<u32>) -> bool {
-    let mut v = data;
-    v.sort_unstable();
-    v.reverse();
-    while v.len() > 1 {
-        build(&mut v);
-    }
-    true
 }
 
 // parses hex from cbor.me format
@@ -457,5 +416,24 @@ A7                                      # map(7)
 "#,
     )?;
     assert_eq!(serialized, expected);
+    Ok(())
+}
+
+#[test]
+fn retain1() -> anyhow::Result<()> {
+    let xs = (0..10).map(|i| (Key(i), i)).collect::<Vec<_>>();
+    let ok = do_retain(vec![xs])?;
+    assert!(ok);
+    Ok(())
+}
+
+#[test]
+fn build1() -> anyhow::Result<()> {
+    let xs = (0..10).map(|i| (Key(i), i)).collect::<Vec<_>>();
+    let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
+    let forest = txn(store, 1000);
+    let tree = forest.extend(&Tree::empty(), xs)?;
+    forest.dump(&tree)?;
+    // let foo = Tree::empty()
     Ok(())
 }
