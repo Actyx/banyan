@@ -337,9 +337,18 @@ where
         index: &Index<T>,
         level: &mut i32,
     ) -> Result<Index<T>> {
-        if !index.sealed() {
-            *level = (*level).min((index.level() as i32) - 1);
+        if index.sealed() && index.level() as i32 <= *level {
+            // this node is sealed and below the level, so we can proceed.
+            // but we must still set the level so we can not go "up" again.
+            *level = index.level() as i32;
+        } else {
+            // this node might be either non-sealed, or we went "up",
+            // so we must exclude the current level
+            *level = (*level).min(index.level() as i32 - 1);
         }
+        // if !index.sealed() {
+        //     *level = (*level).min((index.level() as i32) - 1);
+        // }
         match index {
             Index::Branch(index) => {
                 let mut index = index.clone();
