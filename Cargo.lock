@@ -81,7 +81,7 @@ checksum = "cdb031dd78e28731d87d56cc8ffef4a8f36ca26c38fe2de700543e627f8a464a"
 
 [[package]]
 name = "banyan"
-version = "0.9.1"
+version = "0.9.2"
 dependencies = [
  "anyhow",
  "clap",
@@ -92,9 +92,9 @@ dependencies = [
  "generic-array",
  "hex",
  "libipld",
- "lru",
  "maplit",
  "multihash",
+ "parking_lot",
  "quickcheck",
  "quickcheck_async",
  "quickcheck_macros",
@@ -106,6 +106,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "weight-cache",
  "zstd",
 ]
 
@@ -127,6 +128,7 @@ dependencies = [
  "lru",
  "maplit",
  "multihash",
+ "parking_lot",
  "percent-encoding",
  "quickcheck",
  "rand",
@@ -917,6 +919,12 @@ dependencies = [
  "pkg-config",
  "vcpkg",
 ]
+
+[[package]]
+name = "linked-hash-map"
+version = "0.5.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7fb9b38af92608140b86b693604b9ffcc5824240a484d1ecd4795bacb2fe88f3"
 
 [[package]]
 name = "lock_api"
@@ -2164,6 +2172,15 @@ checksum = "b8e38c0608262c46d4a56202ebabdeb094cef7e560ca7a226c6bf055188aa4ea"
 dependencies = [
  "ring",
  "untrusted",
+]
+
+[[package]]
+name = "weight-cache"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6792d56b6593d433d9f75e690889c6a6297a42c8049da329e4d865f5de3b83c6"
+dependencies = [
+ "linked-hash-map",
 ]
 
 [[package]]

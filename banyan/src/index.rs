@@ -101,6 +101,13 @@ pub trait CompactSeq: DagCbor {
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
+    /// Provide a size estimation, which is used to calculate the overall size of
+    /// the node for caching purposes. This function should be overridden, if the
+    /// used item type contains any heap allocated objects, otherwise the default
+    /// implementation is a rough estimate.
+    fn estimated_size(&self) -> usize {
+        self.len() * std::mem::size_of::<Self::Item>()
+    }
 }
 
 /// index for a leaf node, containing keys and some statistics data for its children
@@ -473,6 +480,9 @@ impl<T: DagCbor + Clone> CompactSeq for VecSeq<T> {
     }
     fn len(&self) -> usize {
         self.0.len()
+    }
+    fn estimated_size(&self) -> usize {
+        std::mem::size_of::<Self>() + self.0.capacity() * std::mem::size_of::<T>()
     }
 }
 

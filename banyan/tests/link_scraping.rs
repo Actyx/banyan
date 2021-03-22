@@ -63,7 +63,7 @@ impl TreeTypes for TT {
 }
 
 fn txn(store: MemStore<Sha256Digest>) -> Txn {
-    let branch_cache = BranchCache::new(1000);
+    let branch_cache = BranchCache::default();
     Txn::new(
         Forest::new(
             store.clone(),
