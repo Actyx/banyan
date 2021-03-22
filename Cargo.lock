@@ -81,7 +81,7 @@ checksum = "cdb031dd78e28731d87d56cc8ffef4a8f36ca26c38fe2de700543e627f8a464a"
 
 [[package]]
 name = "banyan"
-version = "0.9.1"
+version = "0.9.2"
 dependencies = [
  "anyhow",
  "clap",
@@ -2176,9 +2176,9 @@ dependencies = [
 
 [[package]]
 name = "weight-cache"
-version = "0.1.2"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "deac6482af31a2044f6834327bd2956e1fb9e39bcc747ed2180550db263de86d"
+checksum = "6792d56b6593d433d9f75e690889c6a6297a42c8049da329e4d865f5de3b83c6"
 dependencies = [
  "linked-hash-map",
 ]

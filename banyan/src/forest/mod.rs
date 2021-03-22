@@ -8,7 +8,7 @@ use libipld::cbor::DagCbor;
 use parking_lot::Mutex;
 use rand::RngCore;
 use std::{fmt::Display, num::NonZeroUsize, sync::Arc};
-use weight_cache::{Weigheable, WeightCache};
+use weight_cache::{Weighable, WeightCache};
 mod read;
 mod stream;
 mod write;
@@ -16,17 +16,17 @@ pub(crate) use read::ForestIter;
 
 pub type FutureResult<'a, T> = BoxFuture<'a, Result<T>>;
 
-impl<T: TreeTypes> Weigheable for Branch<T> {
+impl<T: TreeTypes> Weighable for Branch<T> {
     fn measure(value: &Self) -> usize {
         let mut bytes = std::mem::size_of::<Branch<T>>();
         for child in value.children.iter() {
             bytes += std::mem::size_of::<Index<T>>();
             match child {
                 Index::Leaf(leaf) => {
-                    bytes += leaf.keys.size_hint();
+                    bytes += leaf.keys.estimated_size();
                 }
                 Index::Branch(branch) => {
-                    bytes += branch.summaries.size_hint();
+                    bytes += branch.summaries.estimated_size();
                 }
             }
         }
