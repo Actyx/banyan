@@ -212,7 +212,7 @@ where
         } else {
             self.leaf_from_iter(from)?.into()
         };
-        while from.peek().is_some() && node.level() < level {
+        while (from.peek().is_some() || node.level() == 0) && node.level() < level {
             let level = node.level() + 1;
             node = self
                 .extend_branch(vec![node], level, from, CreateMode::Packed)?
