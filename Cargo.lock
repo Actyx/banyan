@@ -91,10 +91,12 @@ dependencies = [
  "futures",
  "generic-array",
  "hex",
+ "lazy_static",
  "libipld",
  "maplit",
  "multihash",
  "parking_lot",
+ "prometheus",
  "quickcheck",
  "quickcheck_async",
  "quickcheck_macros",
@@ -1268,6 +1270,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "prometheus"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5986aa8d62380092d2f50f8b1cdba9cb9b6731ffd4b25b51fd126b6c3e05b99c"
+dependencies = [
+ "cfg-if 1.0.0",
+ "fnv",
+ "lazy_static",
+ "memchr",
+ "parking_lot",
+ "protobuf",
+ "thiserror",
+]
+
+[[package]]
 name = "prost"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1317,6 +1334,12 @@ dependencies = [
  "bytes",
  "prost",
 ]
+
+[[package]]
+name = "protobuf"
+version = "2.22.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1b7f4a129bb3754c25a4e04032a90173c68f85168f77118ac4cb4936e7f06f92"
 
 [[package]]
 name = "quickcheck"
@@ -2176,11 +2199,12 @@ dependencies = [
 
 [[package]]
 name = "weight-cache"
-version = "0.2.1"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6792d56b6593d433d9f75e690889c6a6297a42c8049da329e4d865f5de3b83c6"
+checksum = "189f5a20133dc5c9145b9f65da39b2932d3223c59167ea49f5f8d300bd16534f"
 dependencies = [
  "linked-hash-map",
+ "prometheus",
 ]
 
 [[package]]

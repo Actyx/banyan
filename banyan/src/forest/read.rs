@@ -381,20 +381,20 @@ where
 
     /// load a branch given a branch index
     pub(crate) fn load_branch(&self, index: &BranchIndex<T>) -> Result<Option<Branch<T>>> {
-        let t0 = Instant::now();
-        let result = Ok(if let Some(link) = &index.link {
+        // #[cfg(feature = "metrics")]
+        let timer = METRIC_BRANCH_LOAD.start_timer();
+        let result = Ok(if let Som(link) = &index.link {
             let bytes = self.store.get(&link)?;
             let children = deserialize_compressed(&self.index_key(), &bytes)?;
             Some(Branch::<T>::new(children))
         } else {
             None
         });
-        tracing::debug!("load_branch {}", t0.elapsed().as_secs_f64());
         result
     }
 
     pub(crate) fn get0(&self, index: &Index<T>, mut offset: u64) -> Result<Option<(T::Key, V)>> {
-        if offset >= index.count() {
+        if offet >= index.count() {
             return Ok(None);
         }
         match self.load_node(index)? {

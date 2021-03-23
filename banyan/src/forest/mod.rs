@@ -6,6 +6,9 @@ use core::{fmt::Debug, hash::Hash, iter::FromIterator, marker::PhantomData, ops:
 use futures::future::BoxFuture;
 use libipld::cbor::DagCbor;
 use parking_lot::Mutex;
+#[cfg(feature = "metrics")]
+use prometheus::Registry;
+use prometheus::{Histogram, HistogramOpts};
 use rand::RngCore;
 use std::{fmt::Display, num::NonZeroUsize, sync::Arc};
 use weight_cache::{Weighable, WeightCache};
@@ -45,6 +48,14 @@ impl<T: TreeTypes> Default for BranchCache<T> {
     }
 }
 
+#[cfg(feature = "metrics")]
+lazy_static::lazy_static! {
+    // TODO: buckets
+    // buckets in seconds
+    pub static ref METRIC_BRANCH_LOAD: Histogram = Histogram::with_opts(HistogramOpts::new("branch_load", "")
+        .buckets(vec![0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0])).unwrap();
+}
+
 impl<T: TreeTypes> BranchCache<T> {
     /// Passing a capacity of 0 disables the cache.
     pub fn new(capacity: usize) -> Self {
@@ -52,10 +63,18 @@ impl<T: TreeTypes> BranchCache<T> {
             None
         } else {
             Some(Arc::new(Mutex::new(WeightCache::new(
-                NonZeroUsize::new(capacity).expect("Cache capacity must be "),
+                NonZeroUsize::new(capacity).expect("capacity > 0"),
             ))))
         };
         Self(cache)
+    }
+
+    #[cfg(feature = "metrics")]
+    pub fn register(&self, registry: &Registry) -> anyhow::Result<()> {
+        if let Some(c) = self.0.as_ref() {
+            c.lock().register(&registry)?;
+        }
+        Ok(())
     }
 
     pub fn get<'a>(&'a self, link: &'a T::Link) -> Option<Branch<T>> {
@@ -134,6 +153,12 @@ impl<TT: TreeTypes, V, R: Clone> Forest<TT, V, R> {
             config,
             _tt: PhantomData,
         }))
+    }
+
+    #[cfg(feature = "metrics")]
+    pub fn register(&self, registry: &Registry) -> anyhow::Result<()> {
+        self.branch_cache.register(registry)?;
+        Ok(())
     }
 
     pub fn transaction<W: BlockWriter<TT::Link>>(
