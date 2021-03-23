@@ -1,8 +1,7 @@
 use super::{BranchCache, Config, CryptoConfig, FilteredChunk, Forest, TreeTypes};
 use crate::{
     index::{
-        deserialize_compressed, Branch, BranchIndex, CompactSeq, Index, IndexRef, Leaf, LeafIndex,
-        NodeInfo,
+        deserialize_compressed, Branch, BranchIndex, CompactSeq, Index, IndexRef, Leaf, NodeInfo,
     },
     query::Query,
     store::ReadOnlyStore,
