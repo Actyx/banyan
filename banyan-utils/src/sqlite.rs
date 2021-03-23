@@ -3,7 +3,8 @@ use anyhow::{anyhow, Result};
 use banyan::store::{BlockWriter, ReadOnlyStore};
 use ipfs_sqlite_block_store::{BlockStore, OwnedBlock};
 use libipld::Cid;
-use std::sync::{Arc, Mutex};
+use parking_lot::Mutex;
+use std::sync::Arc;
 
 use crate::tags::Sha256Digest;
 
@@ -19,7 +20,7 @@ impl SqliteStore {
 impl ReadOnlyStore<Sha256Digest> for SqliteStore {
     fn get(&self, link: &Sha256Digest) -> Result<Box<[u8]>> {
         let cid = Cid::from(*link);
-        let block = self.0.lock().unwrap().get_block(&cid)?;
+        let block = self.0.lock().get_block(&cid)?;
         if let Some(block) = block {
             Ok(block.into())
         } else {
@@ -33,7 +34,7 @@ impl BlockWriter<Sha256Digest> for SqliteStore {
         let digest = Sha256Digest::new(&data);
         let cid = digest.into();
         let block = OwnedBlock::new(cid, data);
-        self.0.lock().unwrap().put_block(&block, None)?;
+        self.0.lock().put_block(&block, None)?;
         Ok(digest)
     }
 }

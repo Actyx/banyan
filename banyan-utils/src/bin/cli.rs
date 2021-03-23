@@ -352,9 +352,8 @@ async fn main() -> Result<()> {
         value_key,
     };
     let txn = || {
-        let branch_cache = BranchCache::new(1000);
         Txn::new(
-            Forest::new(store.clone(), branch_cache, crypto_config, config),
+            Forest::new(store.clone(), BranchCache::default(), crypto_config, config),
             store.clone(),
         )
     };
@@ -415,7 +414,7 @@ async fn main() -> Result<()> {
                 index_key,
                 value_key,
             };
-            let branch_cache = BranchCache::new(1000);
+            let branch_cache = BranchCache::default();
             let forest = Txn::new(
                 Forest::new(store.clone(), branch_cache, crypto_config, config),
                 store,

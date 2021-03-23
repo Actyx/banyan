@@ -2,7 +2,7 @@ use core::fmt::Debug;
 use std::collections::BTreeMap;
 
 use banyan::{
-    forest::{Transaction, TreeTypes},
+    forest::{Forest, TreeTypes},
     store::{ArcReadOnlyStore, ReadOnlyStore},
     tree::Tree,
     ZstdDagCborSeq,
@@ -102,8 +102,8 @@ impl<'a> dot::GraphWalk<'a, Node<'a>, Edge<'a>> for ForestWithTree {
     }
 }
 
-pub fn graph<TT, V, R, W>(
-    forest: &Transaction<TT, V, R, W>,
+pub fn graph<TT, V, R>(
+    forest: &Forest<TT, V, R>,
     tree: &Tree<TT>,
     mut out: impl std::io::Write,
 ) -> anyhow::Result<()>

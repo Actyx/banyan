@@ -1,12 +1,13 @@
 [package]
 name = "banyan-utils"
-version = "0.1.0"
+version = "0.2.1"
 authors = ["Rüdiger Klaehn <rklaehn@protonmail.com>", "Actyx AG"]
 edition = "2018"
 license = "MIT OR Apache-2.0"
 keywords = ["database", "immutable", "persistent", "tree"]
 categories = ["data-structures"]
 description = "Utilities to work with banyan trees"
+repository = "https://github.com/Actyx/banyan"
 
 [lib]
 crate-type = ["lib"]
@@ -17,7 +18,7 @@ path = "src/bin/cli.rs"
 
 [dependencies]
 anyhow = "1.0.38"
-banyan = { version = "0.8.2", path = "../banyan" }
+banyan = { version = "0.9.1", path = "../banyan" }
 base64 = "0.13.0"
 derive_more = "0.99.11"
 dot = "0.1.4"
@@ -29,6 +30,7 @@ libipld = { version = "0.11.0", features = ["unleashed"] }
 lru = "0.6.4"
 maplit = "1.0.2"
 multihash = "0.13.2"
+parking_lot = "0.11.1"
 percent-encoding = "2.1.0"
 rand = "0.8.3"
 reduce = "0.1.4"

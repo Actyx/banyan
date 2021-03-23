@@ -1,6 +1,6 @@
 [package]
 name = "banyan"
-version = "0.8.2"
+version = "0.9.2"
 authors = ["Rüdiger Klaehn <rklaehn@protonmail.com>", "Actyx AG"]
 edition = "2018"
 license = "MIT OR Apache-2.0"
@@ -15,12 +15,13 @@ derive_more = "0.99.11"
 fnv = "1.0.7"
 futures = { version = "0.3.12", features = ["thread-pool"] }
 libipld = { version = "0.11.0", features = ["unleashed"] }
-lru = "0.6.4"
 maplit = "1.0.2"
+parking_lot = "0.11.1"
 rand = "0.8.3"
 salsa20 = "0.7.2"
 smallvec = "1.6.1"
 tracing = "0.1.23"
+weight-cache = { version = "0.2.1" }
 zstd = "0.6.0"
 
 [dev-dependencies]
