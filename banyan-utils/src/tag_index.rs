@@ -293,8 +293,12 @@ impl Expression {
     pub fn dnf(self) -> Dnf {
         match self {
             Expression::Literal(x) => Dnf::literal(x),
-            Expression::Or(es) => Reduce::reduce(es.into_iter().map(|x| x.dnf()), Dnf::bitor).unwrap(),
-            Expression::And(es) => Reduce::reduce(es.into_iter().map(|x| x.dnf()), Dnf::bitand).unwrap(),
+            Expression::Or(es) => {
+                Reduce::reduce(es.into_iter().map(|x| x.dnf()), Dnf::bitor).unwrap()
+            }
+            Expression::And(es) => {
+                Reduce::reduce(es.into_iter().map(|x| x.dnf()), Dnf::bitand).unwrap()
+            }
         }
     }
 }
@@ -327,18 +331,11 @@ impl Dnf {
 
     /// converts the disjunctive normal form back to an expression
     pub fn expression(self) -> Expression {
-        Reduce::reduce(self.0
-            .into_iter()
-            .map(Dnf::and_expr),
-            Expression::bitor)
-            .unwrap()
+        Reduce::reduce(self.0.into_iter().map(Dnf::and_expr), Expression::bitor).unwrap()
     }
 
     fn and_expr(v: TagSet) -> Expression {
-        Reduce::reduce(v.into_iter()
-            .map(Expression::literal),
-            Expression::bitand)
-            .unwrap()
+        Reduce::reduce(v.into_iter().map(Expression::literal), Expression::bitand).unwrap()
     }
 }
 
