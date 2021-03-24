@@ -346,9 +346,6 @@ where
             // so we must exclude the current level
             *level = (*level).min(index.level() as i32 - 1);
         }
-        // if !index.sealed() {
-        //     *level = (*level).min((index.level() as i32) - 1);
-        // }
         match index {
             Index::Branch(index) => {
                 let mut index = index.clone();
