@@ -19,7 +19,6 @@ use core::fmt::Debug;
 use libipld::cbor::DagCbor;
 use rand::RngCore;
 use std::{iter, time::Instant};
-use tracing::info;
 
 /// basic random access append only tree
 impl<T, V, R, W> Transaction<T, V, R, W>
@@ -76,7 +75,7 @@ where
             sealed,
             keys,
         };
-        tracing::info!(
+        tracing::debug!(
             "leaf created count={} bytes={} sealed={}",
             index.keys.count(),
             index.value_bytes,
@@ -128,7 +127,7 @@ where
             children.push(child);
         }
         let index = self.new_branch(&children, mode)?;
-        info!(
+        tracing::debug!(
             "branch created count={} value_bytes={} key_bytes={} sealed={}",
             index.summaries.count(),
             index.value_bytes,
@@ -260,7 +259,7 @@ where
         index: &Index<T>,
         from: &mut iter::Peekable<impl Iterator<Item = (T::Key, V)> + Send>,
     ) -> Result<Index<T>> {
-        info!(
+        tracing::debug!(
             "extend {} {} {} {}",
             index.level(),
             index.key_bytes(),
@@ -272,13 +271,13 @@ where
         }
         Ok(match self.load_node(index)? {
             NodeInfo::Leaf(index, leaf) => {
-                info!("extending existing leaf");
+                tracing::debug!("extending existing leaf");
                 let keys = index.keys.clone();
                 self.extend_leaf(leaf.as_ref().compressed(), Some(keys), from)?
                     .into()
             }
             NodeInfo::Branch(index, branch) => {
-                info!("extending existing branch");
+                tracing::debug!("extending existing branch");
                 let mut children = branch.children.to_vec();
                 if let Some(last_child) = children.last_mut() {
                     *last_child = self.extend_above(Some(last_child), index.level - 1, from)?;
