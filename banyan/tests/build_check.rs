@@ -428,6 +428,69 @@ fn retain1() -> anyhow::Result<()> {
 }
 
 #[test]
+fn retain2() -> anyhow::Result<()> {
+    let xs = vec![
+        vec![
+            (Key(0), 0),
+            (Key(1), 0),
+            (Key(2), 0),
+            (Key(3), 0),
+            (Key(4), 0),
+            (Key(5), 0),
+            (Key(6), 0),
+            (Key(7), 0),
+            (Key(8), 0),
+            (Key(9), 0),
+        ],
+        vec![
+            (Key(0), 0),
+            (Key(1), 0),
+            (Key(2), 0),
+            (Key(3), 0),
+            (Key(4), 0),
+            (Key(5), 0),
+            (Key(6), 0),
+            (Key(7), 0),
+            (Key(8), 0),
+            (Key(9), 0),
+            (Key(10), 0),
+            (Key(11), 0),
+            (Key(12), 0),
+            (Key(13), 0),
+            (Key(14), 0),
+            (Key(15), 0),
+            (Key(16), 0),
+            (Key(17), 0),
+            (Key(18), 0),
+            (Key(19), 0),
+            (Key(20), 0),
+            (Key(21), 0),
+            (Key(22), 0),
+            (Key(23), 0),
+            (Key(24), 0),
+            (Key(25), 0),
+            (Key(26), 0),
+            (Key(27), 0),
+            (Key(28), 0),
+            (Key(29), 0),
+            (Key(30), 0),
+            (Key(31), 0),
+            (Key(32), 0),
+            (Key(33), 0),
+            (Key(34), 0),
+            (Key(35), 0),
+            (Key(36), 0),
+            (Key(37), 0),
+            (Key(38), 0),
+            (Key(39), 0),
+        ],
+    ];
+    let ok = do_retain(xs)?;
+    assert!(ok);
+    Ok(())
+}
+
+#[test]
 fn build1() -> anyhow::Result<()> {
     let xs = (0..10).map(|i| (Key(i), i)).collect::<Vec<_>>();
     let store = MemStore::new(usize::max_value(), Sha256Digest::digest);

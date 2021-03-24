@@ -212,7 +212,7 @@ where
         } else {
             self.leaf_from_iter(from)?.into()
         };
-        while from.peek().is_some() && node.level() < level {
+        while (from.peek().is_some() || node.level() == 0) && node.level() < level {
             let level = node.level() + 1;
             node = self
                 .extend_branch(vec![node], level, from, CreateMode::Packed)?
@@ -337,8 +337,14 @@ where
         index: &Index<T>,
         level: &mut i32,
     ) -> Result<Index<T>> {
-        if !index.sealed() {
-            *level = (*level).min((index.level() as i32) - 1);
+        if index.sealed() && index.level() as i32 <= *level {
+            // this node is sealed and below the level, so we can proceed.
+            // but we must still set the level so we can not go "up" again.
+            *level = index.level() as i32;
+        } else {
+            // this node might be either non-sealed, or we went "up",
+            // so we must exclude the current level
+            *level = (*level).min(index.level() as i32 - 1);
         }
         match index {
             Index::Branch(index) => {
