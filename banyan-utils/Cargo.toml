@@ -1,6 +1,6 @@
 [package]
 name = "banyan-utils"
-version = "0.2.1"
+version = "0.2.2"
 authors = ["Rüdiger Klaehn <rklaehn@protonmail.com>", "Actyx AG"]
 edition = "2018"
 license = "MIT OR Apache-2.0"
