@@ -46,6 +46,7 @@ impl Arbitrary for Payload {
 }
 
 #[derive(Debug, Clone)]
+#[allow(clippy::upper_case_acronyms)]
 struct TT;
 
 #[derive(Debug, Clone, PartialEq, DagCbor)]

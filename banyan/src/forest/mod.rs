@@ -9,9 +9,11 @@ use parking_lot::Mutex;
 use rand::RngCore;
 use std::{fmt::Display, num::NonZeroUsize, sync::Arc};
 use weight_cache::{Weighable, WeightCache};
+mod index_iter;
 mod read;
 mod stream;
 mod write;
+pub(crate) use index_iter::IndexIter;
 pub(crate) use read::ForestIter;
 
 pub type FutureResult<'a, T> = BoxFuture<'a, Result<T>>;

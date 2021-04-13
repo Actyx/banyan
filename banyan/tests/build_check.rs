@@ -136,6 +136,29 @@ fn filtered_chunked_no_holes(xs: Vec<(Key, u64)>, range: Range<u64>) -> anyhow::
     Ok(max_offset == (xs.len() as u64))
 }
 
+fn iter_index(xs: Vec<(Key, u64)>) -> anyhow::Result<bool> {
+    let len = xs.len() as u64;
+    let (tree, txn) = create_test_tree(xs)?;
+    let actual = txn
+        .iter_index(&tree, AllQuery)
+        .collect::<anyhow::Result<Vec<_>>>()?;
+
+    // should visit all indices
+    let cnt = actual.iter().fold(0, |acc, idx| {
+        if let Index::Leaf(l) = idx.as_ref() {
+            acc + l.keys().count() as u64
+        } else {
+            acc
+        }
+    });
+    Ok(cnt == len)
+}
+
+#[quickcheck]
+fn build_iter_index(xs: Vec<(Key, u64)>) -> anyhow::Result<bool> {
+    iter_index(xs)
+}
+
 #[quickcheck]
 fn build_stream_filtered(xs: Vec<(Key, u64)>, range: Range<u64>) -> anyhow::Result<bool> {
     compare_filtered(xs, range)

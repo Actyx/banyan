@@ -18,6 +18,7 @@ use std::{
 use vec_collections::VecSet;
 
 #[derive(Debug, Clone)]
+#[allow(clippy::upper_case_acronyms)]
 pub struct TT {}
 
 #[derive(Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
