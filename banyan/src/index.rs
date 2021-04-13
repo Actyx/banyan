@@ -398,7 +398,7 @@ pub(crate) fn serialize_compressed<T: TreeTypes>(
     level: i32,
 ) -> Result<Vec<u8>> {
     let zs = ZstdDagCborSeq::from_iter(items, level)?;
-    Ok(zs.into_encrypted(nonce, key)?)
+    zs.into_encrypted(nonce, key)
 }
 
 pub(crate) fn deserialize_compressed<T: TreeTypes>(

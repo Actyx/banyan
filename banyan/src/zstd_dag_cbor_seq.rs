@@ -175,7 +175,7 @@ impl ZstdDagCborSeq {
     /// Computes the number of cbor items in the cbor seq
     pub fn count(&self) -> anyhow::Result<u64> {
         decompress_and_transform(self.compressed(), &mut |uncompressed| {
-            Ok(count_cbor_items(uncompressed)?)
+            count_cbor_items(uncompressed)
         })?
         .1
     }

@@ -1,7 +1,7 @@
 //! creation and traversal of banyan trees
 use super::index::*;
 use crate::{
-    forest::{FilteredChunk, Forest, ForestIter, Transaction, TreeTypes},
+    forest::{FilteredChunk, Forest, ForestIter, IndexIter, Transaction, TreeTypes},
     store::BlockWriter,
     util::BoxedIter,
 };
@@ -120,6 +120,23 @@ impl<
     ) -> BoxedIter<'static, Result<FilteredChunk<T, V, E>>> {
         ForestIter::new_rev(self.clone(), query, index, mk_extra).boxed()
     }
+
+    fn index_iter0<Q: Query<T> + Clone + Send + 'static>(
+        &self,
+        query: Q,
+        index: Arc<Index<T>>,
+    ) -> BoxedIter<'static, Result<Arc<Index<T>>>> {
+        IndexIter::new(self.clone(), query, index).boxed()
+    }
+
+    fn index_iter_rev0<Q: Query<T> + Clone + Send + 'static>(
+        &self,
+        query: Q,
+        index: Arc<Index<T>>,
+    ) -> BoxedIter<'static, Result<Arc<Index<T>>>> {
+        IndexIter::new_rev(self.clone(), query, index).boxed()
+    }
+
     pub(crate) fn dump_graph0<S>(
         &self,
         parent_id: Option<usize>,
@@ -220,6 +237,35 @@ impl<
         match &tree.root {
             Some(index) => self.stream_filtered0(query, index.clone()).left_stream(),
             None => stream::empty().right_stream(),
+        }
+    }
+
+    /// Returns an iterator yielding all indexes that have values matching the
+    /// provided query.
+    pub fn iter_index(
+        &self,
+        tree: &Tree<T>,
+        query: impl Query<T> + Clone + 'static,
+    ) -> impl Iterator<Item = Result<Arc<Index<T>>>> + 'static {
+        match &tree.root {
+            Some(index) => self.index_iter0(query, index.clone()).boxed().left_iter(),
+            None => iter::empty().right_iter(),
+        }
+    }
+
+    /// Returns an iterator yielding all indexes that have values matching the
+    /// provided query in reverse order.
+    pub fn iter_index_reverse(
+        &self,
+        tree: &Tree<T>,
+        query: impl Query<T> + Clone + 'static,
+    ) -> impl Iterator<Item = Result<Arc<Index<T>>>> + 'static {
+        match &tree.root {
+            Some(index) => self
+                .index_iter_rev0(query, index.clone())
+                .boxed()
+                .left_iter(),
+            None => iter::empty().right_iter(),
         }
     }
 
