@@ -1,3 +1,4 @@
+#![allow(clippy::upper_case_acronyms)]
 pub mod dump;
 pub mod ipfs;
 pub mod sqlite;

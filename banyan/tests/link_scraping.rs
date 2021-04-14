@@ -1,3 +1,4 @@
+#![allow(clippy::upper_case_acronyms)]
 use banyan::{
     forest::{BranchCache, CryptoConfig, Forest},
     forest::{Config, Transaction, TreeTypes},
@@ -46,7 +47,6 @@ impl Arbitrary for Payload {
 }
 
 #[derive(Debug, Clone)]
-#[allow(clippy::upper_case_acronyms)]
 struct TT;
 
 #[derive(Debug, Clone, PartialEq, DagCbor)]
