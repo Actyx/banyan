@@ -1,3 +1,4 @@
+#![allow(clippy::upper_case_acronyms)]
 //! helper methods for the tests
 use banyan::{
     forest::{BranchCache, Config, CryptoConfig, Forest, Transaction, TreeTypes},
@@ -24,7 +25,6 @@ use std::{
 pub type Txn = Transaction<TT, u64, MemStore<Sha256Digest>, MemStore<Sha256Digest>>;
 
 #[derive(Debug, Clone)]
-#[allow(clippy::upper_case_acronyms)]
 pub struct TT;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, DagCbor)]
