@@ -10,30 +10,30 @@ description = "Persistent indexable tree data structure"
 repository = "https://github.com/actyx/banyan/"
 
 [dependencies]
-anyhow = "1.0.38"
-derive_more = "0.99.11"
+anyhow = "1.0.40"
+derive_more = "0.99.13"
 fnv = "1.0.7"
-futures = { version = "0.3.12", features = ["thread-pool"] }
+futures = { version = "0.3.14", features = ["thread-pool"] }
 libipld = { version = "0.11.0", features = ["unleashed"] }
 maplit = "1.0.2"
 parking_lot = "0.11.1"
 rand = "0.8.3"
 salsa20 = "0.7.2"
 smallvec = "1.6.1"
-tracing = "0.1.23"
-weight-cache = { version = "0.2.1" }
-zstd = "0.6.0"
+tracing = "0.1.25"
+weight-cache = "0.2.3"
+zstd = "0.7.0"
 
 [dev-dependencies]
 clap = "2.33.3"
-env_logger = "0.8.2"
+env_logger = "0.8.3"
 generic-array = "0.14.4"
-hex = "0.4.2"
+hex = "0.4.3"
 multihash = "0.13.2"
 quickcheck = "1.0.3"
 quickcheck_async = "0.1.1"
 quickcheck_macros = "1.0.0"
 rand_chacha = "0.3.0"
 sha2 = "0.9.3"
-tokio = { version = "1.2.0", features = ["full"] }
-tracing-subscriber = "0.2.15"
+tokio = { version = "1.5.0", features = ["full"] }
+tracing-subscriber = "0.2.17"

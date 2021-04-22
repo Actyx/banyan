@@ -20,6 +20,7 @@ use banyan_utils::{
     tag_index::{Tag, TagSet},
     tags::{DnfQuery, Key, Sha256Digest, TT},
 };
+use libipld::DefaultParams;
 
 #[cfg(target_env = "musl")]
 #[global_allocator]
@@ -33,7 +34,7 @@ type Txn = Transaction<TT, String, ArcReadOnlyStore<Sha256Digest>, ArcBlockWrite
 enum Storage {
     Memory(MemStore<Sha256Digest>),
     Ipfs(IpfsStore),
-    Sqlite(SqliteStore),
+    Sqlite(SqliteStore<DefaultParams>),
 }
 impl ReadOnlyStore<Sha256Digest> for Storage {
     fn get(&self, link: &Sha256Digest) -> Result<Box<[u8]>> {
