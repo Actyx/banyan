@@ -37,9 +37,9 @@ use libipld::{
     raw_value::IgnoredAny,
     Cid, DagCbor, Ipld,
 };
-use salsa20::{
+use chacha20::{
     cipher::{NewStreamCipher, SyncStreamCipher},
-    XSalsa20,
+    ChaCha20,
 };
 
 #[derive(Clone, PartialEq, Eq)]
@@ -246,19 +246,19 @@ impl ZstdDagCborSeq {
     }
 
     /// encrypt using the given key and nonce
-    pub fn encrypt(&self, nonce: &salsa20::XNonce, key: &salsa20::Key) -> anyhow::Result<Vec<u8>> {
+    pub fn encrypt(&self, nonce: &chacha20::Nonce, key: &chacha20::Key) -> anyhow::Result<Vec<u8>> {
         self.clone().into_encrypted(nonce, key)
     }
 
     /// convert into an encrypted blob, using the given key and nonce
     pub fn into_encrypted(
         self,
-        nonce: &salsa20::XNonce,
-        key: &salsa20::Key,
+        nonce: &chacha20::Nonce,
+        key: &chacha20::Key,
     ) -> anyhow::Result<Vec<u8>> {
         let Self { mut data, links } = self;
         // encrypt in place with the key and nonce
-        XSalsa20::new(key, nonce).apply_keystream(&mut data);
+        ChaCha20::new(key, nonce).apply_keystream(&mut data);
         // add the nonce
         data.extend(nonce.as_slice());
         // encode via IpldNode
@@ -267,12 +267,12 @@ impl ZstdDagCborSeq {
     }
 
     /// decrypt using the given key
-    pub fn decrypt(data: &[u8], key: &salsa20::Key) -> anyhow::Result<Self> {
+    pub fn decrypt(data: &[u8], key: &chacha20::Key) -> anyhow::Result<Self> {
         let (links, mut encrypted) = DagCborCodec.decode::<IpldNode>(data)?.into_data()?;
         let len = encrypted.len();
         anyhow::ensure!(len >= 24);
         let (compressed, nonce) = encrypted.split_at_mut(len - 24);
-        XSalsa20::new(key, (&*nonce).into()).apply_keystream(compressed);
+        ChaCha20::new(key, (&*nonce).into()).apply_keystream(compressed);
         // just remove the nonce, but don't use a new vec.
         let mut decrypted = encrypted;
         decrypted.drain(len - 24..);

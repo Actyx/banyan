@@ -309,8 +309,8 @@ where
         Ok(())
     }
 
-    fn random_nonce(&self) -> salsa20::XNonce {
-        let mut nonce = [0u8; 24];
+    fn random_nonce(&self) -> chacha20::Nonce {
+        let mut nonce = [0u8; 12];
         rand::thread_rng().fill_bytes(&mut nonce);
         nonce.into()
     }

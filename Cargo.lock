@@ -84,6 +84,7 @@ name = "banyan"
 version = "0.10.0"
 dependencies = [
  "anyhow",
+ "chacha20",
  "clap",
  "derive_more",
  "env_logger",
@@ -100,7 +101,6 @@ dependencies = [
  "quickcheck_macros",
  "rand",
  "rand_chacha",
- "salsa20",
  "sha2",
  "smallvec",
  "tokio",
@@ -265,6 +265,15 @@ name = "cfg-if"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
+
+[[package]]
+name = "chacha20"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ed8738f14471a99f0e316c327e68fc82a3611cc2895fcb604b89eedaf8f39d95"
+dependencies = [
+ "cipher",
+]
 
 [[package]]
 name = "chrono"

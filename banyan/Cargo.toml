@@ -11,6 +11,7 @@ repository = "https://github.com/actyx/banyan/"
 
 [dependencies]
 anyhow = "1.0.40"
+chacha20 = "0.6.0"
 derive_more = "0.99.13"
 fnv = "1.0.7"
 futures = { version = "0.3.14", features = ["thread-pool"] }
@@ -18,7 +19,6 @@ libipld = { version = "0.11.0", features = ["unleashed"] }
 maplit = "1.0.2"
 parking_lot = "0.11.1"
 rand = "0.8.3"
-salsa20 = "0.7.2"
 smallvec = "1.6.1"
 tracing = "0.1.25"
 weight-cache = "0.2.3"
