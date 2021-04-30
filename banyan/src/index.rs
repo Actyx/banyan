@@ -393,7 +393,7 @@ impl<T: TreeTypes> Display for NodeInfo<'_, T> {
 
 pub(crate) fn serialize_compressed<T: TreeTypes>(
     key: &chacha20::Key,
-    nonce: &chacha20::Nonce,
+    nonce: &chacha20::XNonce,
     items: &[Index<T>],
     level: i32,
 ) -> Result<Vec<u8>> {
