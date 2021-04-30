@@ -37,7 +37,7 @@ use libipld::{
     raw_value::IgnoredAny,
     Cid, DagCbor, Ipld,
 };
-use chacha20::{ChaCha20, cipher::{NewStreamCipher, SyncStreamCipher}};
+use chacha20::{ChaCha20, cipher::{NewStreamCipher, SyncStreamCipher, SyncStreamCipherSeek}};
 
 const EXTRA_LEN: usize = 12;
 const NONCE: [u8; 12] = [0u8; 12];
@@ -258,7 +258,9 @@ impl ZstdDagCborSeq {
     ) -> anyhow::Result<Vec<u8>> {
         let Self { mut data, links } = self;
         // encrypt in place with the key and nonce    
-        ChaCha20::new(key, nonce).apply_keystream(&mut data);
+        let mut chacha20 = ChaCha20::new(key, nonce);
+        chacha20.seek(0u64);
+        chacha20.apply_keystream(&mut data);
         // add the nonce
         data.extend(nonce.as_slice());
         // encode via IpldNode
