@@ -39,7 +39,8 @@ use libipld::{
 };
 use chacha20::{ChaCha20, cipher::{NewStreamCipher, SyncStreamCipher}};
 
-const NONCE_LEN: usize = 12;
+const EXTRA_LEN: usize = 12;
+const NONCE: [u8; 12] = [0u8; 12];
 
 #[derive(Clone, PartialEq, Eq)]
 pub struct ZstdDagCborSeq {
@@ -269,12 +270,12 @@ impl ZstdDagCborSeq {
     pub fn decrypt(data: &[u8], key: &chacha20::Key) -> anyhow::Result<Self> {
         let (links, mut encrypted) = DagCborCodec.decode::<IpldNode>(data)?.into_data()?;
         let len = encrypted.len();
-        anyhow::ensure!(len >= NONCE_LEN);
-        let (compressed, nonce) = encrypted.split_at_mut(len - NONCE_LEN);
+        anyhow::ensure!(len >= EXTRA_LEN);
+        let (compressed, nonce) = encrypted.split_at_mut(len - EXTRA_LEN);
         ChaCha20::new(key, (&*nonce).into()).apply_keystream(compressed);
         // just remove the nonce, but don't use a new vec.
         let mut decrypted = encrypted;
-        decrypted.drain(len - NONCE_LEN..);
+        decrypted.drain(len - EXTRA_LEN..);
         Ok(Self::new(decrypted, links))
     }
 }
@@ -454,7 +455,7 @@ mod tests {
             usize::max_value(),
         )?;
         let mut rng = ChaCha8Rng::seed_from_u64(seed);
-        let nonce: chacha20::Nonce = rng.gen::<[u8; NONCE_LEN]>().into();
+        let nonce: chacha20::Nonce = rng.gen::<[u8; EXTRA_LEN]>().into();
         let key: chacha20::Key = rng.gen::<[u8; 32]>().into();
         let encrypted = za.encrypt(&nonce, &key)?;
         let za2 = ZstdDagCborSeq::decrypt(&encrypted, &key)?;
@@ -485,7 +486,7 @@ mod tests {
     #[test]
     fn test_disk_format() -> anyhow::Result<()> {
         let data = vec![1u32, 2, 3, 4];
-        let nonce: chacha20::Nonce = [0u8; NONCE_LEN].into();
+        let nonce: chacha20::Nonce = [0u8; EXTRA_LEN].into();
         let key: chacha20::Key = [0u8; 32].into();
 
         let res = ZstdDagCborSeq::single(&data, 10)?;
@@ -506,9 +507,9 @@ mod tests {
         if let Ipld::Bytes(bytes) = &items[1] {
             use std::ops::Deref;
             let len = bytes.len();
-            assert!(len >= NONCE_LEN);
+            assert!(len >= EXTRA_LEN);
             // nonce should be stored last
-            let (encrypted, nonce1) = bytes.split_at(len - NONCE_LEN);
+            let (encrypted, nonce1) = bytes.split_at(len - EXTRA_LEN);
             assert_eq!(nonce1, nonce.deref());
             // once decrypted, must be valid zstd
             let mut decrypted = encrypted.to_vec();
