@@ -37,10 +37,9 @@ use libipld::{
     raw_value::IgnoredAny,
     Cid, DagCbor, Ipld,
 };
-use chacha20::{
-    cipher::{NewStreamCipher, SyncStreamCipher},
-    ChaCha20,
-};
+use chacha20::{ChaCha20, cipher::{NewStreamCipher, SyncStreamCipher}};
+
+const NONCE_LEN: usize = 12;
 
 #[derive(Clone, PartialEq, Eq)]
 pub struct ZstdDagCborSeq {
@@ -257,7 +256,7 @@ impl ZstdDagCborSeq {
         key: &chacha20::Key,
     ) -> anyhow::Result<Vec<u8>> {
         let Self { mut data, links } = self;
-        // encrypt in place with the key and nonce
+        // encrypt in place with the key and nonce    
         ChaCha20::new(key, nonce).apply_keystream(&mut data);
         // add the nonce
         data.extend(nonce.as_slice());
@@ -270,12 +269,12 @@ impl ZstdDagCborSeq {
     pub fn decrypt(data: &[u8], key: &chacha20::Key) -> anyhow::Result<Self> {
         let (links, mut encrypted) = DagCborCodec.decode::<IpldNode>(data)?.into_data()?;
         let len = encrypted.len();
-        anyhow::ensure!(len >= 24);
-        let (compressed, nonce) = encrypted.split_at_mut(len - 24);
+        anyhow::ensure!(len >= NONCE_LEN);
+        let (compressed, nonce) = encrypted.split_at_mut(len - NONCE_LEN);
         ChaCha20::new(key, (&*nonce).into()).apply_keystream(compressed);
         // just remove the nonce, but don't use a new vec.
         let mut decrypted = encrypted;
-        decrypted.drain(len - 24..);
+        decrypted.drain(len - NONCE_LEN..);
         Ok(Self::new(decrypted, links))
     }
 }
@@ -455,8 +454,8 @@ mod tests {
             usize::max_value(),
         )?;
         let mut rng = ChaCha8Rng::seed_from_u64(seed);
-        let nonce: salsa20::XNonce = rng.gen::<[u8; 24]>().into();
-        let key: salsa20::Key = rng.gen::<[u8; 32]>().into();
+        let nonce: chacha20::Nonce = rng.gen::<[u8; NONCE_LEN]>().into();
+        let key: chacha20::Key = rng.gen::<[u8; 32]>().into();
         let encrypted = za.encrypt(&nonce, &key)?;
         let za2 = ZstdDagCborSeq::decrypt(&encrypted, &key)?;
         if za != za2 {
@@ -486,8 +485,8 @@ mod tests {
     #[test]
     fn test_disk_format() -> anyhow::Result<()> {
         let data = vec![1u32, 2, 3, 4];
-        let nonce: salsa20::XNonce = [0u8; 24].into();
-        let key: salsa20::Key = [0u8; 32].into();
+        let nonce: chacha20::Nonce = [0u8; NONCE_LEN].into();
+        let key: chacha20::Key = [0u8; 32].into();
 
         let res = ZstdDagCborSeq::single(&data, 10)?;
         let bytes = res.encrypt(&nonce, &key)?;
@@ -507,13 +506,13 @@ mod tests {
         if let Ipld::Bytes(bytes) = &items[1] {
             use std::ops::Deref;
             let len = bytes.len();
-            assert!(len >= 24);
+            assert!(len >= NONCE_LEN);
             // nonce should be stored last
-            let (encrypted, nonce1) = bytes.split_at(len - 24);
+            let (encrypted, nonce1) = bytes.split_at(len - NONCE_LEN);
             assert_eq!(nonce1, nonce.deref());
             // once decrypted, must be valid zstd
             let mut decrypted = encrypted.to_vec();
-            XSalsa20::new(&key, (&*nonce).into()).apply_keystream(&mut decrypted);
+            ChaCha20::new(&key, (&*nonce).into()).apply_keystream(&mut decrypted);
             let decompressed = zstd::decode_all(Cursor::new(decrypted))?;
             // finally, compare with the original data
             let data1: Vec<u32> = DagCborCodec.decode(&decompressed)?;
