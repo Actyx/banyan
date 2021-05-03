@@ -32,7 +32,7 @@ use std::{
 
 use crate::thread_local_zstd::decompress_and_transform;
 use chacha20::{
-    cipher::{NewCipher, StreamCipher, StreamCipherSeek},
+    cipher::{NewCipher, StreamCipher},
     XChaCha20,
 };
 use libipld::{
@@ -265,7 +265,6 @@ impl ZstdDagCborSeq {
         let Self { mut data, links } = self;
         // encrypt in place with the key and nonce
         let mut chacha20 = XChaCha20::new(key, nonce);
-        chacha20.seek(0u64);
         chacha20.apply_keystream(&mut data);
         // add the nonce
         data.extend(nonce.as_slice());
