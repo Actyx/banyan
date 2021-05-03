@@ -392,8 +392,8 @@ impl<T: TreeTypes> Display for NodeInfo<'_, T> {
 }
 
 pub(crate) fn serialize_compressed<T: TreeTypes>(
-    key: &salsa20::Key,
-    nonce: &salsa20::XNonce,
+    key: &chacha20::Key,
+    nonce: &chacha20::XNonce,
     items: &[Index<T>],
     level: i32,
 ) -> Result<Vec<u8>> {
@@ -402,7 +402,7 @@ pub(crate) fn serialize_compressed<T: TreeTypes>(
 }
 
 pub(crate) fn deserialize_compressed<T: TreeTypes>(
-    key: &salsa20::Key,
+    key: &chacha20::Key,
     ipld: &[u8],
 ) -> Result<Vec<Index<T>>> {
     let seq = ZstdDagCborSeq::decrypt(ipld, key)?;

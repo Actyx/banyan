@@ -286,11 +286,11 @@ where
         &self.0.config
     }
 
-    pub(crate) fn value_key(&self) -> salsa20::Key {
+    pub(crate) fn value_key(&self) -> chacha20::Key {
         self.crypto_config().value_key
     }
 
-    pub(crate) fn index_key(&self) -> salsa20::Key {
+    pub(crate) fn index_key(&self) -> chacha20::Key {
         self.crypto_config().index_key
     }
 

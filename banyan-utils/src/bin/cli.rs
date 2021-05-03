@@ -14,7 +14,7 @@ use banyan::{
     tree::*,
 };
 use banyan_utils::{
-    create_salsa_key, dump,
+    create_chacha_key, dump,
     ipfs::{pubsub_pub, pubsub_sub, IpfsStore},
     sqlite::SqliteStore,
     tag_index::{Tag, TagSet},
@@ -345,8 +345,8 @@ async fn main() -> Result<()> {
     };
 
     let store = Arc::new(opts.storage);
-    let index_key: salsa20::Key = opts.index_pass.map(create_salsa_key).unwrap_or_default();
-    let value_key: salsa20::Key = opts.value_pass.map(create_salsa_key).unwrap_or_default();
+    let index_key: chacha20::Key = opts.index_pass.map(create_chacha_key).unwrap_or_default();
+    let value_key: chacha20::Key = opts.value_pass.map(create_chacha_key).unwrap_or_default();
     let config = Config::debug_fast();
     let crypto_config = CryptoConfig {
         index_key,

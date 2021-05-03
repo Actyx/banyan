@@ -206,14 +206,14 @@ impl<T: TreeTypes, V, R, W> std::ops::Deref for Transaction<T, V, R, W> {
 
 #[derive(Debug, Copy, Clone)]
 pub struct CryptoConfig {
-    /// salsa20 key to decrypt index nodes
-    pub index_key: salsa20::Key,
-    /// salsa20 key to decrypt value nodes
-    pub value_key: salsa20::Key,
+    /// chacha20 key to decrypt index nodes
+    pub index_key: chacha20::Key,
+    /// chacha20 key to decrypt value nodes
+    pub value_key: chacha20::Key,
 }
 
 impl CryptoConfig {
-    pub fn random_key() -> salsa20::Key {
+    pub fn random_key() -> chacha20::Key {
         let mut key = [0u8; 32];
         rand::thread_rng().fill_bytes(&mut key);
         key.into()
