@@ -31,13 +31,16 @@ use std::{
 };
 
 use crate::thread_local_zstd::decompress_and_transform;
+use chacha20::{
+    cipher::{NewStreamCipher, SyncStreamCipher, SyncStreamCipherSeek},
+    XChaCha20,
+};
 use libipld::{
     cbor::DagCborCodec,
     codec::{Codec, Decode, Encode, References},
     raw_value::IgnoredAny,
     Cid, DagCbor, Ipld,
 };
-use chacha20::{XChaCha20, cipher::{NewStreamCipher, SyncStreamCipher, SyncStreamCipherSeek}};
 
 const EXTRA_LEN: usize = 24;
 
@@ -245,7 +248,11 @@ impl ZstdDagCborSeq {
     }
 
     /// encrypt using the given key and nonce
-    pub fn encrypt(&self, nonce: &chacha20::XNonce, key: &chacha20::Key) -> anyhow::Result<Vec<u8>> {
+    pub fn encrypt(
+        &self,
+        nonce: &chacha20::XNonce,
+        key: &chacha20::Key,
+    ) -> anyhow::Result<Vec<u8>> {
         self.clone().into_encrypted(nonce, key)
     }
 
@@ -256,7 +263,7 @@ impl ZstdDagCborSeq {
         key: &chacha20::Key,
     ) -> anyhow::Result<Vec<u8>> {
         let Self { mut data, links } = self;
-        // encrypt in place with the key and nonce    
+        // encrypt in place with the key and nonce
         let mut chacha20 = XChaCha20::new(key, nonce);
         chacha20.seek(0u64);
         chacha20.apply_keystream(&mut data);
