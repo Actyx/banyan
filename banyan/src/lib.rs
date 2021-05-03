@@ -14,7 +14,7 @@
 //! ## Persistence
 //!
 //! Banyan trees are persistent, using a content-addressed storage system such as [ipfs] or a key value store.
-//! Data is [CBOR] encoded and [zstd] compressed for space efficient persistent storage and replication. It is also encrypted using the [salsa20] stream cipher.
+//! Data is [CBOR] encoded and [zstd] compressed for space efficient persistent storage and replication. It is also encrypted using the [chacha20] stream cipher.
 //!
 //! # Indexing
 //!
@@ -53,7 +53,7 @@
 //!
 //! [CBOR]: https://en.wikipedia.org/wiki/CBOR
 //! [zstd]: https://en.wikipedia.org/wiki/Zstandard
-//! [salsa20]: https://en.wikipedia.org/wiki/Salsa20
+//! [chacha20]: https://en.wikipedia.org/wiki/Salsa20#ChaCha_variant
 //! [ipfs]: https://ipfs.io/
 //! [B-Trees]: https://en.wikipedia.org/wiki/B-tree
 pub mod forest;

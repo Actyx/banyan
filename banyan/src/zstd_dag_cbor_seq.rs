@@ -16,7 +16,7 @@
 //! marks them as links. However, be aware that this will prevent sync mechanisms that do not have the
 //! decompression keys from properly syncing the data.
 //!
-//! The blob is encrypted with the salsa20 symmetric cipher, with a 24 byte nonce that is
+//! The blob is encrypted with the chacha20 symmetric cipher, with a 24 byte nonce that is
 //! appended to the blob.
 //!
 //! https://github.com/ipld/specs/blob/master/block-layer/codecs/dag-cbor.md
@@ -32,7 +32,7 @@ use std::{
 
 use crate::thread_local_zstd::decompress_and_transform;
 use chacha20::{
-    cipher::{NewStreamCipher, SyncStreamCipher, SyncStreamCipherSeek},
+    cipher::{NewCipher, StreamCipher, StreamCipherSeek},
     XChaCha20,
 };
 use libipld::{

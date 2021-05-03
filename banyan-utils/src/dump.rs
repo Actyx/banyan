@@ -139,7 +139,7 @@ where
 pub fn dump_json<Link>(
     store: ArcReadOnlyStore<Link>,
     hash: Link,
-    value_key: salsa20::Key,
+    value_key: chacha20::Key,
     mut writer: impl std::io::Write,
 ) -> anyhow::Result<()> {
     let bytes = store.get(&hash)?;

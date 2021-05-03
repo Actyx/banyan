@@ -208,7 +208,7 @@ impl<T: TreeTypes, V, R, W> std::ops::Deref for Transaction<T, V, R, W> {
 pub struct CryptoConfig {
     /// chacha20 key to decrypt index nodes
     pub index_key: chacha20::Key,
-    /// salsa20 key to decrypt value nodes
+    /// chacha20 key to decrypt value nodes
     pub value_key: chacha20::Key,
 }
 
