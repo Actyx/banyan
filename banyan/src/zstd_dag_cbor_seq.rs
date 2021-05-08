@@ -268,7 +268,7 @@ impl ZstdDagCborSeq {
     }
 
     /// decrypt using the given key
-    pub fn decrypt(data: &[u8], key: &chacha20::Key) -> anyhow::Result<Self> {
+    pub fn decrypt(data: &[u8], key: &chacha20::Key) -> anyhow::Result<(Self, u64)> {
         let (links, mut encrypted) = DagCborCodec.decode::<IpldNode>(data)?.into_data()?;
         let len = encrypted.len();
         anyhow::ensure!(len >= EXTRA_LEN);
@@ -280,7 +280,7 @@ impl ZstdDagCborSeq {
         // just remove the nonce, but don't use a new vec.
         let mut decrypted = encrypted;
         decrypted.drain(len - EXTRA_LEN..);
-        Ok(Self::new(decrypted, links))
+        Ok((Self::new(decrypted, links), offset))
     }
 }
 
@@ -462,7 +462,7 @@ mod tests {
         let offset = 1234u64;
         let key: chacha20::Key = rng.gen::<[u8; 32]>().into();
         let encrypted = za.encrypt(&key, offset)?;
-        let za2 = ZstdDagCborSeq::decrypt(&encrypted, &key)?;
+        let (za2, offset) = ZstdDagCborSeq::decrypt(&encrypted, &key)?;
         if za != za2 {
             return Ok(false);
         }
