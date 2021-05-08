@@ -404,9 +404,10 @@ pub(crate) fn serialize_compressed<T: TreeTypes>(
 pub(crate) fn deserialize_compressed<T: TreeTypes>(
     key: &chacha20::Key,
     ipld: &[u8],
-) -> Result<Vec<Index<T>>> {
-    let seq = ZstdDagCborSeq::decrypt(ipld, key)?;
-    seq.items::<Index<T>>()
+) -> Result<(Vec<Index<T>>, u64)> {
+    let (seq, offset) = ZstdDagCborSeq::decrypt(ipld, key)?;
+    let seq = seq.items::<Index<T>>()?;
+    Ok((seq, offset))
 }
 
 /// Utility method to zip a number of indices with an offset that is increased by each index value
