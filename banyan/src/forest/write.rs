@@ -63,8 +63,8 @@ where
             self.config().max_leaf_count as usize,
         )?;
         let value_bytes = data.compressed().len() as u64;
-        let nonce = self.random_nonce();
-        let encrypted = data.into_encrypted(&nonce, &self.value_key())?;
+        let offset = self.random_offset();
+        let encrypted = data.into_encrypted(&self.value_key(), offset)?;
         let keys = keys.into_iter().collect::<T::KeySeq>();
         let encrypted_len = encrypted.len();
         // store leaf
@@ -309,17 +309,15 @@ where
         Ok(())
     }
 
-    fn random_nonce(&self) -> chacha20::XNonce {
-        let mut nonce = [0u8; 24];
-        rand::thread_rng().fill_bytes(&mut nonce);
-        nonce.into()
+    fn random_offset(&self) -> u64 {
+        rand::thread_rng().next_u32() as u64
     }
 
     fn persist_branch(&self, children: &[Index<T>]) -> Result<(T::Link, u64)> {
         let t0 = Instant::now();
         let cbor = serialize_compressed(
             &self.index_key(),
-            &self.random_nonce(),
+            self.random_offset(),
             &children,
             self.config().zstd_level,
         )?;
