@@ -249,19 +249,21 @@ impl ZstdDagCborSeq {
     }
 
     /// encrypt using the given key and nonce
-    pub fn encrypt(&self, key: &chacha20::Key, offset: u64) -> anyhow::Result<Vec<u8>> {
-        self.clone().into_encrypted(key, offset)
+    pub fn encrypt(&self, key: &chacha20::Key, mut offset: u64) -> anyhow::Result<Vec<u8>> {
+        self.clone().into_encrypted(key, &mut offset)
     }
 
     /// convert into an encrypted blob, using the given key and nonce
-    pub fn into_encrypted(self, key: &chacha20::Key, offset: u64) -> anyhow::Result<Vec<u8>> {
+    pub fn into_encrypted(self, key: &chacha20::Key, offset: &mut u64) -> anyhow::Result<Vec<u8>> {
         let Self { mut data, links } = self;
         // encrypt in place with the key and nonce
         let mut chacha20 = XChaCha20::new(key, &NONCE.into());
-        chacha20.seek(offset);
+        let len = data.len();
+        chacha20.seek(*offset);
         chacha20.apply_keystream(&mut data);
         // add the nonce
         data.extend(&offset.to_be_bytes());
+        *offset += len as u64;
         // encode via IpldNode
         let result = DagCborCodec.encode(&IpldNode::new(links, data))?;
         Ok(result)
@@ -462,8 +464,11 @@ mod tests {
         let offset = rng.next_u64();
         let key: chacha20::Key = rng.gen::<[u8; 32]>().into();
         let encrypted = za.encrypt(&key, offset)?;
-        let (za2, offset) = ZstdDagCborSeq::decrypt(&encrypted, &key)?;
+        let (za2, offset2) = ZstdDagCborSeq::decrypt(&encrypted, &key)?;
         if za != za2 {
+            return Ok(false);
+        }
+        if offset != offset2 {
             return Ok(false);
         }
         // println!("compressed={} n={} bytes={}", za.compressed().len(), data.len(), bytes);

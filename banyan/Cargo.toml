@@ -18,7 +18,6 @@ futures = { version = "0.3.14", features = ["thread-pool"] }
 libipld = { version = "0.11.0", features = ["unleashed"] }
 maplit = "1.0.2"
 parking_lot = "0.11.1"
-rand = "0.8.3"
 smallvec = "1.6.1"
 tracing = "0.1.25"
 weight-cache = "0.2.3"
@@ -37,3 +36,4 @@ rand_chacha = "0.3.0"
 sha2 = "0.9.3"
 tokio = { version = "1.5.0", features = ["full"] }
 tracing-subscriber = "0.2.17"
+rand = "0.8.3"

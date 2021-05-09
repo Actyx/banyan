@@ -418,13 +418,13 @@ impl<
         W: BlockWriter<T::Link> + 'static,
     > Transaction<T, V, R, W>
 {
-    pub fn tree_from_roots(&self, mut roots: Vec<Index<T>>) -> Result<Tree<T>> {
+    pub fn tree_from_roots(&self, mut roots: Vec<Index<T>>, offset: &mut u64) -> Result<Tree<T>> {
         assert!(roots.iter().all(|x| x.sealed()));
         assert!(is_sorted(roots.iter().map(|x| x.level()).rev()));
         while roots.len() > 1 {
-            self.simplify_roots(&mut roots, 0)?;
+            self.simplify_roots(&mut roots, 0, offset)?;
         }
-        Ok(Tree::new(roots.pop()))
+        Ok(Tree::new_with_offset(roots.pop().map(|x| (x, *offset))))
     }
 
     /// Packs the tree to the left.
@@ -436,7 +436,8 @@ impl<
     /// ![packing illustration](https://ipfs.io/ipfs/QmaEDTjHSdCKyGQ3cFMCf73kE67NvffLA5agquLW5qSEVn/packing.jpg)
     pub fn pack(&self, tree: &Tree<T>) -> Result<Tree<T>> {
         let roots = self.roots(tree)?;
-        let filled = self.tree_from_roots(roots)?;
+        let mut offset = tree.offset();
+        let filled = self.tree_from_roots(roots, &mut offset)?;
         let remainder: Vec<_> = self
             .collect_from(tree, filled.count())?
             .into_iter()
@@ -464,7 +465,6 @@ impl<
             // nothing to do
             return Ok(tree.clone());
         }
-        let node = tree.as_index_ref();
         let mut offset = tree.offset();
         let index = self.extend_above(
             tree.as_index_ref(),
@@ -509,10 +509,11 @@ impl<
         tree: &Tree<T>,
         query: &'a Q,
     ) -> Result<Tree<T>> {
-        Ok(if let Some((index, _)) = &tree.root {
+        Ok(if let Some((index, offset)) = &tree.root {
             let mut level: i32 = i32::max_value();
-            let res = self.retain0(0, query, index, &mut level)?;
-            Tree::new(Some(res))
+            let mut offset = *offset;
+            let res = self.retain0(0, query, index, &mut level, &mut offset)?;
+            Tree::new_with_offset(Some((res, offset)))
         } else {
             Tree::empty()
         })
@@ -527,12 +528,11 @@ impl<
     /// especially if there are repaired blocks in the non-packed part.
     pub fn repair(&self, tree: &Tree<T>) -> Result<(Tree<T>, Vec<String>)> {
         let mut report = Vec::new();
-        Ok(if let Some((index, _)) = &tree.root {
+        Ok(if let Some((index, offset)) = &tree.root {
             let mut level: i32 = i32::max_value();
-            (
-                Tree::new(Some(self.repair0(index, &mut report, &mut level)?)),
-                report,
-            )
+            let mut offset = *offset;
+            let repaired = self.repair0(index, &mut report, &mut level, &mut offset)?;
+            (Tree::new_with_offset(Some((repaired, offset))), report)
         } else {
             (Tree::empty(), report)
         })
