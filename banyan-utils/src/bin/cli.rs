@@ -402,8 +402,9 @@ async fn main() -> Result<()> {
             let tree = build_tree(&forest, base, batches, count, unbalanced, 1000).await?;
             forest.dump(&tree)?;
             let roots = forest.roots(&tree)?;
+            let mut offset = tree.offset();
             let levels = roots.iter().map(|x| x.level()).collect::<Vec<_>>();
-            let _tree2 = forest.tree_from_roots(roots)?;
+            let _tree2 = forest.tree_from_roots(roots, &mut offset)?;
             println!("{:?}", tree);
             println!("{}", tree);
             println!("{:?}", levels);

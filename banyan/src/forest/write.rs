@@ -17,7 +17,6 @@ use crate::{
 use anyhow::{ensure, Result};
 use core::fmt::Debug;
 use libipld::cbor::DagCbor;
-use rand::RngCore;
 use std::{iter, time::Instant};
 
 /// basic random access append only tree
@@ -65,8 +64,7 @@ where
             self.config().max_leaf_count as usize,
         )?;
         let value_bytes = data.compressed().len() as u64;
-        let encrypted = data.into_encrypted(&self.value_key(), *offset)?;
-        *offset += value_bytes;
+        let encrypted = data.into_encrypted(&self.value_key(), offset)?;
         let keys = keys.into_iter().collect::<T::KeySeq>();
         let encrypted_len = encrypted.len();
         // store leaf
@@ -129,7 +127,7 @@ where
             summaries.push(summary);
             children.push(child);
         }
-        let index = self.new_branch(&children, mode)?;
+        let index = self.new_branch(&children, offset, mode)?;
         tracing::debug!(
             "branch created count={} value_bytes={} key_bytes={} sealed={}",
             index.summaries.count(),
@@ -169,7 +167,12 @@ where
     /// creates a new branch from the given children and returns the branch index as a result.
     ///
     /// The level will be the max level of the children + 1. We do not want to support branches that are artificially high.
-    fn new_branch(&self, children: &[Index<T>], mode: CreateMode) -> Result<BranchIndex<T>> {
+    fn new_branch(
+        &self,
+        children: &[Index<T>],
+        offset: &mut u64,
+        mode: CreateMode,
+    ) -> Result<BranchIndex<T>> {
         assert!(!children.is_empty());
         if mode == CreateMode::Packed {
             assert!(is_sorted(children.iter().map(|x| x.level()).rev()));
@@ -183,7 +186,7 @@ where
         let value_bytes = children.iter().map(|x| x.value_bytes()).sum();
         let sealed = self.config.branch_sealed(&children, level);
         let summaries: T::SummarySeq = summaries.into_iter().collect();
-        let (link, encoded_children_len) = self.persist_branch(&children)?;
+        let (link, encoded_children_len) = self.persist_branch(&children, offset)?;
         let key_bytes = children.iter().map(|x| x.key_bytes()).sum::<u64>() + encoded_children_len;
         Ok(BranchIndex {
             level,
@@ -307,31 +310,32 @@ where
     }
 
     /// Performs a single step of simplification on a sequence of sealed roots of descending level
-    pub(crate) fn simplify_roots(&self, roots: &mut Vec<Index<T>>, from: usize) -> Result<()> {
+    pub(crate) fn simplify_roots(
+        &self,
+        roots: &mut Vec<Index<T>>,
+        from: usize,
+        offset: &mut u64,
+    ) -> Result<()> {
         assert!(roots.len() > 1);
         assert!(is_sorted(roots.iter().map(|x| x.level()).rev()));
         match find_valid_branch(&self.config, &roots[from..]) {
             BranchResult::Sealed(count) | BranchResult::Unsealed(count) => {
                 let range = from..from + count;
-                let node = self.new_branch(&roots[range.clone()], CreateMode::Packed)?;
+                let node = self.new_branch(&roots[range.clone()], offset, CreateMode::Packed)?;
                 roots.splice(range, Some(node.into()));
             }
             BranchResult::Skip(count) => {
-                self.simplify_roots(roots, from + count)?;
+                self.simplify_roots(roots, from + count, offset)?;
             }
         }
         Ok(())
     }
 
-    fn random_offset(&self) -> u64 {
-        rand::thread_rng().next_u64()
-    }
-
-    fn persist_branch(&self, children: &[Index<T>]) -> Result<(T::Link, u64)> {
+    fn persist_branch(&self, children: &[Index<T>], offset: &mut u64) -> Result<(T::Link, u64)> {
         let t0 = Instant::now();
         let cbor = serialize_compressed(
             &self.index_key(),
-            self.random_offset(),
+            offset,
             &children,
             self.config().zstd_level,
         )?;
@@ -347,6 +351,7 @@ where
         query: &Q,
         index: &Index<T>,
         level: &mut i32,
+        so: &mut u64,
     ) -> Result<Index<T>> {
         if index.sealed() && index.level() as i32 <= *level {
             // this node is sealed and below the level, so we can proceed.
@@ -377,7 +382,7 @@ where
                     let offsets = zip_with_offset_ref(node.children.iter(), offset);
                     for (i, (child, offset)) in offsets.enumerate() {
                         // TODO: ensure we only purge children that are in the packed part!
-                        let child1 = self.retain0(offset, query, child, level)?;
+                        let child1 = self.retain0(offset, query, child, level, so)?;
                         if child1.link() != child.link() {
                             children[i] = child1;
                             changed = true;
@@ -385,7 +390,7 @@ where
                     }
                     // rewrite the node and update the link if children have changed
                     if changed {
-                        let (link, _) = self.persist_branch(&children)?;
+                        let (link, _) = self.persist_branch(&children, so)?;
                         // todo: update size data
                         index.link = Some(link);
                     }
@@ -412,6 +417,7 @@ where
         index: &Index<T>,
         report: &mut Vec<String>,
         level: &mut i32,
+        so: &mut u64,
     ) -> Result<Index<T>> {
         if !index.sealed() {
             *level = (*level).min((index.level() as i32) - 1);
@@ -426,7 +432,7 @@ where
                         let mut children = node.children.to_vec();
                         let mut changed = false;
                         for (i, child) in node.children.iter().enumerate() {
-                            let child1 = self.repair0(child, report, level)?;
+                            let child1 = self.repair0(child, report, level, so)?;
                             if child1.link() != child.link() {
                                 children[i] = child1;
                                 changed = true;
@@ -434,7 +440,7 @@ where
                         }
                         // rewrite the node and update the link if children have changed
                         if changed {
-                            let (link, _) = self.persist_branch(&children)?;
+                            let (link, _) = self.persist_branch(&children, so)?;
                             index.link = Some(link);
                         }
                     }

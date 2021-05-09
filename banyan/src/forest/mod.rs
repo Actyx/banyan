@@ -6,7 +6,6 @@ use core::{fmt::Debug, hash::Hash, iter::FromIterator, marker::PhantomData, ops:
 use futures::future::BoxFuture;
 use libipld::cbor::DagCbor;
 use parking_lot::Mutex;
-use rand::RngCore;
 use std::{fmt::Display, num::NonZeroUsize, sync::Arc};
 use weight_cache::{Weighable, WeightCache};
 mod index_iter;
@@ -210,14 +209,6 @@ pub struct CryptoConfig {
     pub index_key: chacha20::Key,
     /// chacha20 key to decrypt value nodes
     pub value_key: chacha20::Key,
-}
-
-impl CryptoConfig {
-    pub fn random_key() -> chacha20::Key {
-        let mut key = [0u8; 32];
-        rand::thread_rng().fill_bytes(&mut key);
-        key.into()
-    }
 }
 
 impl Default for CryptoConfig {
