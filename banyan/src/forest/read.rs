@@ -313,7 +313,7 @@ where
         })
     }
 
-    pub(crate) fn load_branch_from_link(&self, link: T::Link) -> Result<Index<T>> {
+    pub(crate) fn load_branch_from_link(&self, link: T::Link) -> Result<(Index<T>, u64)> {
         let store = self.store.clone();
         let index_key = self.index_key();
         let bytes = store.get(&link)?;
@@ -333,7 +333,7 @@ where
             key_bytes,
         }
         .into();
-        Ok(result)
+        Ok((result, offset))
     }
 
     /// load a branch given a branch index, from the cache

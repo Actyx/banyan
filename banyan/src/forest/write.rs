@@ -36,9 +36,10 @@ where
     fn leaf_from_iter(
         &self,
         from: &mut iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
+        offset: &mut u64,
     ) -> Result<LeafIndex<T>> {
         assert!(from.peek().is_some());
-        self.extend_leaf(&[], None, from)
+        self.extend_leaf(&[], None, from, offset)
     }
 
     /// Creates a leaf from a sequence that either contains all items from the sequence, or is full
@@ -49,6 +50,7 @@ where
         compressed: &[u8],
         keys: Option<T::KeySeq>,
         from: &mut iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
+        offset: &mut u64,
     ) -> Result<LeafIndex<T>> {
         let t0 = Instant::now();
         assert!(from.peek().is_some());
@@ -63,8 +65,8 @@ where
             self.config().max_leaf_count as usize,
         )?;
         let value_bytes = data.compressed().len() as u64;
-        let offset = self.random_offset();
-        let encrypted = data.into_encrypted(&self.value_key(), offset)?;
+        let encrypted = data.into_encrypted(&self.value_key(), *offset)?;
+        *offset += value_bytes;
         let keys = keys.into_iter().collect::<T::KeySeq>();
         let encrypted_len = encrypted.len();
         // store leaf
@@ -96,6 +98,7 @@ where
         mut children: Vec<Index<T>>,
         level: u32,
         from: &mut iter::Peekable<impl Iterator<Item = (T::Key, V)> + Send>,
+        offset: &mut u64,
         mode: CreateMode,
     ) -> Result<BranchIndex<T>> {
         assert!(
@@ -121,7 +124,7 @@ where
             .map(|child| child.summarize())
             .collect::<Vec<_>>();
         while from.peek().is_some() && ((children.len() as u64) < self.config().max_branch_count) {
-            let child = self.fill_node(level - 1, from)?;
+            let child = self.fill_node(level - 1, from, offset)?;
             let summary = child.summarize();
             summaries.push(summary);
             children.push(child);
@@ -152,12 +155,13 @@ where
         &self,
         level: u32,
         from: &mut iter::Peekable<impl Iterator<Item = (T::Key, V)> + Send>,
+        offset: &mut u64,
     ) -> Result<Index<T>> {
         assert!(from.peek().is_some());
         Ok(if level == 0 {
-            self.leaf_from_iter(from)?.into()
+            self.leaf_from_iter(from, offset)?.into()
         } else {
-            self.extend_branch(Vec::new(), level, from, CreateMode::Packed)?
+            self.extend_branch(Vec::new(), level, from, offset, CreateMode::Packed)?
                 .into()
         })
     }
@@ -200,6 +204,7 @@ where
         node: Option<&Index<T>>,
         level: u32,
         from: &mut iter::Peekable<impl Iterator<Item = (T::Key, V)> + Send>,
+        offset: &mut u64,
     ) -> Result<Index<T>> {
         ensure!(
             from.peek().is_some(),
@@ -207,14 +212,14 @@ where
         );
         assert!(node.map(|node| level >= node.level()).unwrap_or(true));
         let mut node = if let Some(node) = node {
-            self.extend0(node, from)?
+            self.extend0(node, from, offset)?
         } else {
-            self.leaf_from_iter(from)?.into()
+            self.leaf_from_iter(from, offset)?.into()
         };
         while (from.peek().is_some() || node.level() == 0) && node.level() < level {
             let level = node.level() + 1;
             node = self
-                .extend_branch(vec![node], level, from, CreateMode::Packed)?
+                .extend_branch(vec![node], level, from, offset, CreateMode::Packed)?
                 .into();
         }
         if from.peek().is_some() {
@@ -230,6 +235,7 @@ where
         &self,
         index: Option<&Index<T>>,
         from: I,
+        offset: &mut u64,
     ) -> Result<Option<Index<T>>>
     where
         I: IntoIterator<Item = (T::Key, V)>,
@@ -240,12 +246,18 @@ where
             return Ok(index.cloned());
         }
         // create a completely new tree
-        let b = self.extend_above(None, u32::max_value(), &mut from)?;
+        let b = self.extend_above(None, u32::max_value(), &mut from, offset)?;
         Ok(Some(match index.cloned() {
             Some(a) => {
                 let level = a.level().max(b.level()) + 1;
-                self.extend_branch(vec![a, b], level, from.by_ref(), CreateMode::Unpacked)?
-                    .into()
+                self.extend_branch(
+                    vec![a, b],
+                    level,
+                    from.by_ref(),
+                    offset,
+                    CreateMode::Unpacked,
+                )?
+                .into()
             }
             None => b,
         }))
@@ -258,6 +270,7 @@ where
         &self,
         index: &Index<T>,
         from: &mut iter::Peekable<impl Iterator<Item = (T::Key, V)> + Send>,
+        offset: &mut u64,
     ) -> Result<Index<T>> {
         tracing::debug!(
             "extend {} {} {} {}",
@@ -273,16 +286,17 @@ where
             NodeInfo::Leaf(index, leaf) => {
                 tracing::debug!("extending existing leaf");
                 let keys = index.keys.clone();
-                self.extend_leaf(leaf.as_ref().compressed(), Some(keys), from)?
+                self.extend_leaf(leaf.as_ref().compressed(), Some(keys), from, offset)?
                     .into()
             }
             NodeInfo::Branch(index, branch) => {
                 tracing::debug!("extending existing branch");
                 let mut children = branch.children.to_vec();
                 if let Some(last_child) = children.last_mut() {
-                    *last_child = self.extend_above(Some(last_child), index.level - 1, from)?;
+                    *last_child =
+                        self.extend_above(Some(last_child), index.level - 1, from, offset)?;
                 }
-                self.extend_branch(children, index.level, from, CreateMode::Packed)?
+                self.extend_branch(children, index.level, from, offset, CreateMode::Packed)?
                     .into()
             }
             NodeInfo::PurgedBranch(_) | NodeInfo::PurgedLeaf(_) => {
@@ -310,7 +324,7 @@ where
     }
 
     fn random_offset(&self) -> u64 {
-        rand::thread_rng().next_u32() as u64
+        rand::thread_rng().next_u64()
     }
 
     fn persist_branch(&self, children: &[Index<T>]) -> Result<(T::Link, u64)> {

@@ -348,7 +348,7 @@ mod tests {
 
     use super::*;
     use quickcheck::quickcheck;
-    use rand::{Rng, SeedableRng};
+    use rand::{Rng, RngCore, SeedableRng};
     use rand_chacha::ChaCha8Rng;
 
     #[test]
@@ -459,7 +459,7 @@ mod tests {
             usize::max_value(),
         )?;
         let mut rng = ChaCha8Rng::seed_from_u64(seed);
-        let offset = 1234u64;
+        let offset = rng.next_u64();
         let key: chacha20::Key = rng.gen::<[u8; 32]>().into();
         let encrypted = za.encrypt(&key, offset)?;
         let (za2, offset) = ZstdDagCborSeq::decrypt(&encrypted, &key)?;
