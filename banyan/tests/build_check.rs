@@ -1,7 +1,7 @@
 use banyan::{
     index::{BranchIndex, Index, LeafIndex},
     memstore::MemStore,
-    query::{AllQuery, OffsetRangeQuery},
+    query::{AllQuery, EmptyQuery, OffsetRangeQuery},
     tree::Tree,
 };
 use common::{create_test_tree, txn, IterExt, Key, KeySeq, Sha256Digest, TT};
@@ -305,6 +305,23 @@ async fn stream_test_simple() -> anyhow::Result<()> {
     let res = res.collect::<Vec<_>>().await;
     println!("{:?}", res);
     Ok(())
+}
+
+#[tokio::test]
+async fn stream_trees_chunked_reverse_should_complete() {
+    let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
+    let forest = txn(store, 1000);
+    let mut tree = Tree::<TT>::empty();
+    tree = forest.extend_unpacked(&tree, vec![(Key(0), 0)]).unwrap();
+    let trees = stream::once(async move { tree }).chain(stream::pending());
+    let _ = forest
+        .stream_trees_chunked_reverse(EmptyQuery, trees, 0u64..=0, &|_| ())
+        .map_ok(move |chunk| stream::iter(chunk.data))
+        .take_while(|x| future::ready(x.is_ok()))
+        .filter_map(|x| future::ready(x.ok()))
+        .flatten()
+        .collect::<Vec<_>>()
+        .await;
 }
 
 // parses hex from cbor.me format

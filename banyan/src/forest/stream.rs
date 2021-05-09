@@ -148,9 +148,11 @@ impl<
         S: Stream<Item = Tree<T>> + Send + 'static,
     {
         let end_offset_ref = Arc::new(AtomicU64::new(*range.end()));
+        let end_offset_ref2 = end_offset_ref.clone();
         let forest = self.clone();
         trees
             .filter_map(move |tree| future::ready(tree.into_inner()))
+            .take_while(move |_| future::ready(end_offset_ref2.load(Ordering::SeqCst) > 0))
             .flat_map(move |index| {
                 let end_offset = end_offset_ref.load(Ordering::SeqCst);
                 // create an intersection of a range query and the main query
