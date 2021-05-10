@@ -1,6 +1,6 @@
 [package]
 name = "banyan-utils"
-version = "0.4.0"
+version = "0.5.0"
 authors = ["Rüdiger Klaehn <rklaehn@protonmail.com>", "Actyx AG"]
 edition = "2018"
 license = "MIT OR Apache-2.0"
@@ -18,7 +18,7 @@ path = "src/bin/cli.rs"
 
 [dependencies]
 anyhow = "1.0.40"
-banyan = { version = "0.11.0", path = "../banyan" }
+banyan = { version = "0.12.0", path = "../banyan" }
 base64 = "0.13.0"
 chacha20 = "0.7.1"
 derive_more = "0.99.13"
