@@ -1,7 +1,9 @@
 //! creation and traversal of banyan trees
 use super::index::*;
 use crate::{
-    forest::{FilteredChunk, Forest, ForestIter, IndexIter, Transaction, TreeTypes},
+    forest::{
+        Config, CryptoConfig, FilteredChunk, Forest, ForestIter, IndexIter, Transaction, TreeTypes,
+    },
     store::BlockWriter,
     util::BoxedIter,
 };
@@ -11,6 +13,31 @@ use futures::prelude::*;
 use libipld::cbor::DagCbor;
 use std::{collections::BTreeMap, fmt, fmt::Debug, iter, sync::Arc};
 use tracing::*;
+
+type ReadConfig = Arc<CryptoConfig>;
+pub(crate) struct StreamBuilderState {
+    read_config: ReadConfig,
+    write_config: Config,
+    offset: u64,
+}
+
+pub struct StreamBuilder<T: TreeTypes> {
+    state: StreamBuilderState,
+    current: Option<Arc<Index<T>>>,
+}
+
+pub struct Tree2<T: TreeTypes> {
+    read_config: ReadConfig,
+    root: Option<Arc<Index<T>>>,
+}
+
+impl StreamBuilderState {
+    pub fn allocate_offsets(&mut self, n: u64) -> u64 {
+        let result = self.offset;
+        self.offset = self.offset.checked_add(n).expect("ran out of offsets");
+        result
+    }
+}
 
 /// A tree. This is mostly an user friendly handle.
 ///
