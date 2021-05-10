@@ -1,5 +1,10 @@
 //! helper methods to stream trees
-use crate::{index::IndexRef, store::ReadOnlyStore, tree::Tree, util::ToStreamExt};
+use crate::{
+    index::IndexRef,
+    store::ReadOnlyStore,
+    tree::Tree,
+    util::{take_until_condition, ToStreamExt},
+};
 
 use super::{FilteredChunk, Forest, TreeTypes};
 use crate::query::*;
@@ -147,12 +152,11 @@ impl<
         F: Send + Sync + 'static + Fn(IndexRef<T>) -> E,
         S: Stream<Item = Tree<T>> + Send + 'static,
     {
+        let start = *range.start();
         let end_offset_ref = Arc::new(AtomicU64::new(*range.end()));
-        let end_offset_ref2 = end_offset_ref.clone();
         let forest = self.clone();
-        trees
+        let result = trees
             .filter_map(move |tree| future::ready(tree.into_inner()))
-            .take_while(move |_| future::ready(end_offset_ref2.load(Ordering::SeqCst) > 0))
             .flat_map(move |index| {
                 let end_offset = end_offset_ref.load(Ordering::SeqCst);
                 // create an intersection of a range query and the main query
@@ -173,6 +177,11 @@ impl<
                         // abort at the first non-ok offset
                         future::ready(result.is_ok())
                     })
-            })
+            });
+        // make sure we terminate
+        take_until_condition(result, move |chunk| match chunk {
+            Ok(chunk) => chunk.range.start <= start,
+            Err(_) => true,
+        })
     }
 }
