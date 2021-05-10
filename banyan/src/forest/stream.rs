@@ -1,5 +1,10 @@
 //! helper methods to stream trees
-use crate::{index::IndexRef, store::ReadOnlyStore, tree::Tree, util::ToStreamExt};
+use crate::{
+    index::IndexRef,
+    store::ReadOnlyStore,
+    tree::Tree,
+    util::{take_until_condition, ToStreamExt},
+};
 
 use super::{FilteredChunk, Forest, TreeTypes};
 use crate::query::*;
@@ -179,20 +184,4 @@ impl<
             Err(_) => true,
         })
     }
-}
-
-fn take_until_condition<T: Sized + Stream>(
-    stream: T,
-    condition: impl Fn(&T::Item) -> bool + 'static,
-) -> impl Stream<Item = T::Item> {
-    stream
-        .flat_map(move |item| {
-            if condition(&item) {
-                stream::iter(vec![Some(item), None]).left_stream()
-            } else {
-                stream::iter(Some(Some(item))).right_stream()
-            }
-        })
-        .take_while(|x| future::ready(x.is_some()))
-        .filter_map(future::ready)
 }

@@ -1,4 +1,5 @@
-use futures::{channel::mpsc, executor::ThreadPool, SinkExt};
+use futures::{channel::mpsc, executor::ThreadPool, prelude::*, SinkExt};
+use smallvec::{smallvec, SmallVec};
 use std::ops::{Bound, RangeBounds};
 
 fn lt<T: Ord>(end: Bound<T>, start: Bound<T>) -> bool {
@@ -125,6 +126,23 @@ where
             Self::Right(r) => r.next(),
         }
     }
+}
+
+pub(crate) fn take_until_condition<T: Sized + Stream>(
+    stream: T,
+    condition: impl Fn(&T::Item) -> bool + 'static,
+) -> impl Stream<Item = T::Item> {
+    stream
+        .flat_map(move |item| {
+            let items: SmallVec<[_; 2]> = if condition(&item) {
+                smallvec![Some(item), None]
+            } else {
+                smallvec![Some(item)]
+            };
+            stream::iter(items)
+        })
+        .take_while(|x| future::ready(x.is_some()))
+        .filter_map(future::ready)
 }
 
 #[cfg(test)]
