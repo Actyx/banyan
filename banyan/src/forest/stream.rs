@@ -37,10 +37,7 @@ impl<
             .try_flatten()
     }
 
-    /// Given a sequence of roots, will stream chunks in ascending order indefinitely.
-    ///
-    /// Note that this method has no way to know when the query is done. So ending this stream,
-    /// if desired, will have to be done by the caller using e.g. `take_while(...)`.
+    /// Given a sequence of roots, will stream chunks in ascending order until it arrives at `range.end()`.
     /// - query: the query
     /// - roots: the stream of roots. It is assumed that trees later in this stream will be bigger
     /// - range: the range which to stream. It is up to the caller to ensure that we have events for this range.
@@ -59,27 +56,33 @@ impl<
         F: Send + Sync + 'static + Fn(IndexRef<T>) -> E,
         S: Stream<Item = Tree<T>> + Send + 'static,
     {
-        let offset = Arc::new(AtomicU64::new(*range.start()));
+        let end = *range.end();
+        let start_offset_ref = Arc::new(AtomicU64::new(*range.start()));
         let forest = self.clone();
-        trees
+        let result = trees
             .filter_map(move |link| future::ready(link.into_inner()))
             .flat_map(move |index| {
                 // create an intersection of a range query and the main query
                 // and wrap it in an arc so it is cheap to clone
-                let range = offset.load(Ordering::SeqCst)..=*range.end();
+                let range = start_offset_ref.load(Ordering::SeqCst)..=*range.end();
                 let query = AndQuery(OffsetRangeQuery::from(range), query.clone()).boxed();
-                let offset = offset.clone();
+                let start_offset_ref = start_offset_ref.clone();
                 forest
                     .stream_filtered_chunked0(query, index, mk_extra)
                     .take_while(move |result| {
                         if let Ok(chunk) = result {
                             // update the offset
-                            offset.store(chunk.range.end, Ordering::SeqCst)
+                            start_offset_ref.store(chunk.range.end, Ordering::SeqCst)
                         }
                         // abort at the first non-ok offset
                         future::ready(result.is_ok())
                     })
-            })
+            });
+        // make sure we terminate when `end` is reached
+        take_until_condition(result, move |chunk| match chunk {
+            Ok(chunk) => chunk.range.end >= end,
+            Err(_) => true,
+        })
     }
 
     /// Given a sequence of roots, will stream chunks in ascending order indefinitely.
@@ -131,7 +134,7 @@ impl<
             })
     }
 
-    /// Given a sequence of roots, will stream chunks in reverse order until it arrives at offset 0.
+    /// Given a sequence of roots, will stream chunks in reverse order until it arrives at `range.start()`.
     ///
     /// Values within chunks are in ascending offset order, so if you flatten them you have to reverse them first.
     /// - query: the query
@@ -178,7 +181,7 @@ impl<
                         future::ready(result.is_ok())
                     })
             });
-        // make sure we terminate
+        // make sure we terminate when `start` is reached
         take_until_condition(result, move |chunk| match chunk {
             Ok(chunk) => chunk.range.start <= start,
             Err(_) => true,

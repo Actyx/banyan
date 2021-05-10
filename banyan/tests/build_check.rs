@@ -324,6 +324,23 @@ async fn stream_trees_chunked_reverse_should_complete() {
         .await;
 }
 
+#[tokio::test]
+async fn stream_trees_chunked_should_complete() {
+    let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
+    let forest = txn(store, 1000);
+    let mut tree = Tree::<TT>::empty();
+    tree = forest.extend_unpacked(&tree, vec![(Key(0), 0)]).unwrap();
+    let trees = stream::once(async move { tree }).chain(stream::pending());
+    let _ = forest
+        .stream_trees_chunked(EmptyQuery, trees, 0u64..=0, &|_| ())
+        .map_ok(move |chunk| stream::iter(chunk.data))
+        .take_while(|x| future::ready(x.is_ok()))
+        .filter_map(|x| future::ready(x.ok()))
+        .flatten()
+        .collect::<Vec<_>>()
+        .await;
+}
+
 // parses hex from cbor.me format
 fn from_cbor_me(text: &str) -> anyhow::Result<Vec<u8>> {
     let parts = text
