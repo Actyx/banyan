@@ -194,5 +194,5 @@ fn take_until_condition<T: Sized + Stream>(
             }
         })
         .take_while(|x| future::ready(x.is_some()))
-        .filter_map(|x| future::ready(x))
+        .filter_map(future::ready)
 }
