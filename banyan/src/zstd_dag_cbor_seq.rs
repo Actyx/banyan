@@ -30,7 +30,7 @@ use std::{
     time::Instant,
 };
 
-use crate::thread_local_zstd::decompress_and_transform;
+use crate::{thread_local_zstd::decompress_and_transform, tree::StreamBuilderState};
 use chacha20::{
     cipher::{NewCipher, StreamCipher, StreamCipherSeek},
     XChaCha20,
@@ -249,21 +249,21 @@ impl ZstdDagCborSeq {
     }
 
     /// encrypt using the given key and nonce
-    pub fn encrypt(&self, key: &chacha20::Key, mut offset: u64) -> anyhow::Result<Vec<u8>> {
-        self.clone().into_encrypted(key, &mut offset)
+    pub fn encrypt(&self, key: &chacha20::Key, offset: u64) -> anyhow::Result<Vec<u8>> {
+        let mut state = StreamBuilderState::new(offset);
+        self.clone().into_encrypted(key, &mut state)
     }
 
     /// convert into an encrypted blob, using the given key and nonce
-    pub fn into_encrypted(self, key: &chacha20::Key, offset: &mut u64) -> anyhow::Result<Vec<u8>> {
+    pub fn into_encrypted(self, key: &chacha20::Key, offset: &mut StreamBuilderState) -> anyhow::Result<Vec<u8>> {
         let Self { mut data, links } = self;
         // encrypt in place with the key and nonce
         let mut chacha20 = XChaCha20::new(key, &NONCE.into());
-        let len = data.len();
-        chacha20.seek(*offset);
+        let offset = offset.allocate_offsets(data.len());
+        chacha20.seek(offset);
         chacha20.apply_keystream(&mut data);
         // add the nonce
         data.extend(&offset.to_be_bytes());
-        *offset += len as u64;
         // encode via IpldNode
         let result = DagCborCodec.encode(&IpldNode::new(links, data))?;
         Ok(result)

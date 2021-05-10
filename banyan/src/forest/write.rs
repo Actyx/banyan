@@ -1,8 +1,4 @@
-use crate::{
-    forest::{BranchResult, Config, CreateMode, Forest, Transaction, TreeTypes},
-    index::zip_with_offset_ref,
-    store::{BlockWriter, ReadOnlyStore},
-};
+use crate::{forest::{BranchResult, Config, CreateMode, Forest, Transaction, TreeTypes}, index::zip_with_offset_ref, store::{BlockWriter, ReadOnlyStore}, tree::StreamBuilderState};
 use crate::{
     index::serialize_compressed,
     index::BranchIndex,
@@ -35,7 +31,7 @@ where
     fn leaf_from_iter(
         &self,
         from: &mut iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
-        offset: &mut u64,
+        offset: &mut StreamBuilderState,
     ) -> Result<LeafIndex<T>> {
         assert!(from.peek().is_some());
         self.extend_leaf(&[], None, from, offset)
@@ -49,7 +45,7 @@ where
         compressed: &[u8],
         keys: Option<T::KeySeq>,
         from: &mut iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
-        offset: &mut u64,
+        offset: &mut StreamBuilderState,
     ) -> Result<LeafIndex<T>> {
         let t0 = Instant::now();
         assert!(from.peek().is_some());
@@ -96,7 +92,7 @@ where
         mut children: Vec<Index<T>>,
         level: u32,
         from: &mut iter::Peekable<impl Iterator<Item = (T::Key, V)> + Send>,
-        offset: &mut u64,
+        offset: &mut StreamBuilderState,
         mode: CreateMode,
     ) -> Result<BranchIndex<T>> {
         assert!(
@@ -153,7 +149,7 @@ where
         &self,
         level: u32,
         from: &mut iter::Peekable<impl Iterator<Item = (T::Key, V)> + Send>,
-        offset: &mut u64,
+        offset: &mut StreamBuilderState,
     ) -> Result<Index<T>> {
         assert!(from.peek().is_some());
         Ok(if level == 0 {
@@ -170,7 +166,7 @@ where
     fn new_branch(
         &self,
         children: &[Index<T>],
-        offset: &mut u64,
+        offset: &mut StreamBuilderState,
         mode: CreateMode,
     ) -> Result<BranchIndex<T>> {
         assert!(!children.is_empty());
@@ -207,7 +203,7 @@ where
         node: Option<&Index<T>>,
         level: u32,
         from: &mut iter::Peekable<impl Iterator<Item = (T::Key, V)> + Send>,
-        offset: &mut u64,
+        offset: &mut StreamBuilderState,
     ) -> Result<Index<T>> {
         ensure!(
             from.peek().is_some(),
@@ -238,7 +234,7 @@ where
         &self,
         index: Option<&Index<T>>,
         from: I,
-        offset: &mut u64,
+        offset: &mut StreamBuilderState,
     ) -> Result<Option<Index<T>>>
     where
         I: IntoIterator<Item = (T::Key, V)>,
@@ -273,7 +269,7 @@ where
         &self,
         index: &Index<T>,
         from: &mut iter::Peekable<impl Iterator<Item = (T::Key, V)> + Send>,
-        offset: &mut u64,
+        offset: &mut StreamBuilderState,
     ) -> Result<Index<T>> {
         tracing::debug!(
             "extend {} {} {} {}",
@@ -314,7 +310,7 @@ where
         &self,
         roots: &mut Vec<Index<T>>,
         from: usize,
-        offset: &mut u64,
+        offset: &mut StreamBuilderState,
     ) -> Result<()> {
         assert!(roots.len() > 1);
         assert!(is_sorted(roots.iter().map(|x| x.level()).rev()));
@@ -331,7 +327,7 @@ where
         Ok(())
     }
 
-    fn persist_branch(&self, children: &[Index<T>], offset: &mut u64) -> Result<(T::Link, u64)> {
+    fn persist_branch(&self, children: &[Index<T>], offset: &mut StreamBuilderState) -> Result<(T::Link, u64)> {
         let t0 = Instant::now();
         let cbor = serialize_compressed(
             &self.index_key(),
@@ -351,7 +347,7 @@ where
         query: &Q,
         index: &Index<T>,
         level: &mut i32,
-        so: &mut u64,
+        so: &mut StreamBuilderState,
     ) -> Result<Index<T>> {
         if index.sealed() && index.level() as i32 <= *level {
             // this node is sealed and below the level, so we can proceed.
@@ -417,7 +413,7 @@ where
         index: &Index<T>,
         report: &mut Vec<String>,
         level: &mut i32,
-        so: &mut u64,
+        so: &mut StreamBuilderState,
     ) -> Result<Index<T>> {
         if !index.sealed() {
             *level = (*level).min((index.level() as i32) - 1);

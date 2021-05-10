@@ -2,7 +2,7 @@
 use super::index::*;
 use crate::{
     forest::{
-        Config, CryptoConfig, FilteredChunk, Forest, ForestIter, IndexIter, Transaction, TreeTypes,
+        FilteredChunk, Forest, ForestIter, IndexIter, Transaction, TreeTypes,
     },
     store::BlockWriter,
     util::BoxedIter,
@@ -11,30 +11,44 @@ use crate::{query::Query, store::ReadOnlyStore, util::IterExt};
 use anyhow::Result;
 use futures::prelude::*;
 use libipld::cbor::DagCbor;
-use std::{collections::BTreeMap, fmt, fmt::Debug, iter, sync::Arc};
+use std::{collections::BTreeMap, fmt, fmt::Debug, iter, sync::Arc, usize};
 use tracing::*;
 
-type ReadConfig = Arc<CryptoConfig>;
-pub(crate) struct StreamBuilderState {
-    read_config: ReadConfig,
-    write_config: Config,
+// type ReadConfig = Arc<CryptoConfig>;
+
+#[derive(Debug, Clone, Default)]
+pub struct StreamBuilderState {
+    // read_config: ReadConfig,
+    // write_config: Config,
     offset: u64,
 }
 
-pub struct StreamBuilder<T: TreeTypes> {
-    state: StreamBuilderState,
-    current: Option<Arc<Index<T>>>,
+impl StreamBuilderState {
+    /// there will be more!
+    pub fn new(offset: u64) -> Self {
+        Self { offset }
+    }
 }
 
-pub struct Tree2<T: TreeTypes> {
-    read_config: ReadConfig,
-    root: Option<Arc<Index<T>>>,
-}
+// pub struct StreamBuilder<T: TreeTypes> {
+//     state: StreamBuilderState,
+//     current: Option<Arc<Index<T>>>,
+// }
+
+// pub struct Tree2<T: TreeTypes> {
+//     read_config: ReadConfig,
+//     root: Option<Arc<Index<T>>>,
+// }
 
 impl StreamBuilderState {
-    pub fn allocate_offsets(&mut self, n: u64) -> u64 {
+
+    // pub fn offset(&self) -> u64 {
+    //     self.offset
+    // }
+
+    pub fn allocate_offsets(&mut self, n: usize) -> u64 {
         let result = self.offset;
-        self.offset = self.offset.checked_add(n).expect("ran out of offsets");
+        self.offset = self.offset.checked_add(n as u64).expect("ran out of offsets");
         result
     }
 }
@@ -43,7 +57,7 @@ impl StreamBuilderState {
 ///
 /// Most of the logic except for handling the empty case is implemented in the forest
 pub struct Tree<T: TreeTypes> {
-    root: Option<(Arc<Index<T>>, u64)>,
+    root: Option<(Arc<Index<T>>, StreamBuilderState)>,
 }
 
 impl<T: TreeTypes> Default for Tree<T> {
@@ -98,6 +112,7 @@ impl<
 {
     pub fn load_tree(&self, link: T::Link) -> Result<Tree<T>> {
         let (index, offset) = self.load_branch_from_link(link)?;
+        let offset = StreamBuilderState::new(offset);
         Ok(Tree::new_with_offset(Some((index, offset))))
     }
 
@@ -445,13 +460,13 @@ impl<
         W: BlockWriter<T::Link> + 'static,
     > Transaction<T, V, R, W>
 {
-    pub fn tree_from_roots(&self, mut roots: Vec<Index<T>>, offset: &mut u64) -> Result<Tree<T>> {
+    pub fn tree_from_roots(&self, mut roots: Vec<Index<T>>, offset: &mut StreamBuilderState) -> Result<Tree<T>> {
         assert!(roots.iter().all(|x| x.sealed()));
         assert!(is_sorted(roots.iter().map(|x| x.level()).rev()));
         while roots.len() > 1 {
             self.simplify_roots(&mut roots, 0, offset)?;
         }
-        Ok(Tree::new_with_offset(roots.pop().map(|x| (x, *offset))))
+        Ok(Tree::new_with_offset(roots.pop().map(|x| (x, offset.clone()))))
     }
 
     /// Packs the tree to the left.
@@ -538,7 +553,7 @@ impl<
     ) -> Result<Tree<T>> {
         Ok(if let Some((index, offset)) = &tree.root {
             let mut level: i32 = i32::max_value();
-            let mut offset = *offset;
+            let mut offset = offset.clone();
             let res = self.retain0(0, query, index, &mut level, &mut offset)?;
             Tree::new_with_offset(Some((res, offset)))
         } else {
@@ -557,7 +572,7 @@ impl<
         let mut report = Vec::new();
         Ok(if let Some((index, offset)) = &tree.root {
             let mut level: i32 = i32::max_value();
-            let mut offset = *offset;
+            let mut offset = offset.clone();
             let repaired = self.repair0(index, &mut report, &mut level, &mut offset)?;
             (Tree::new_with_offset(Some((repaired, offset))), report)
         } else {
@@ -569,11 +584,11 @@ impl<
 impl<T: TreeTypes> Tree<T> {
     pub(crate) fn new(root: Option<Index<T>>) -> Self {
         Self {
-            root: root.map(|x| (Arc::new(x), 0)),
+            root: root.map(|x| (Arc::new(x), StreamBuilderState::default())),
         }
     }
 
-    pub(crate) fn new_with_offset(root: Option<(Index<T>, u64)>) -> Self {
+    pub(crate) fn new_with_offset(root: Option<(Index<T>, StreamBuilderState)>) -> Self {
         Self {
             root: root.map(|(root, offset)| (Arc::new(root), offset)),
         }
@@ -591,8 +606,8 @@ impl<T: TreeTypes> Tree<T> {
         self.root.as_ref().map(|(arc, _)| arc.as_ref())
     }
 
-    pub fn offset(&self) -> u64 {
-        self.root.as_ref().map(|x| x.1).unwrap_or_default()
+    pub fn offset(&self) -> StreamBuilderState {
+        self.root.as_ref().map(|x| x.1.clone()).unwrap_or_default()
     }
 
     pub fn level(&self) -> i32 {
