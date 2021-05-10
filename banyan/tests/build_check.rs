@@ -1,9 +1,4 @@
-use banyan::{
-    index::{BranchIndex, Index, LeafIndex},
-    memstore::MemStore,
-    query::{AllQuery, EmptyQuery, OffsetRangeQuery},
-    tree::Tree,
-};
+use banyan::{index::{BranchIndex, Index, LeafIndex}, memstore::MemStore, query::{AllQuery, EmptyQuery, OffsetRangeQuery}, tree::{StreamBuilderState, Tree}};
 use common::{create_test_tree, txn, IterExt, Key, KeySeq, Sha256Digest, TT};
 use futures::prelude::*;
 use libipld::{cbor::DagCborCodec, codec::Codec, Cid};
@@ -291,6 +286,7 @@ fn filter_test_simple() -> anyhow::Result<()> {
 async fn stream_test_simple() -> anyhow::Result<()> {
     let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
     let forest = txn(store, 1000);
+    let stream = StreamBuilderState::new(0);
     let mut trees = Vec::new();
     for n in 1..=10u64 {
         let mut tree = Tree::<TT>::empty();
@@ -301,7 +297,7 @@ async fn stream_test_simple() -> anyhow::Result<()> {
     println!("{:?}", trees);
     let res = forest
         .read()
-        .stream_trees(AllQuery, stream::iter(trees).boxed());
+        .stream_trees(stream, AllQuery, stream::iter(trees).boxed());
     let res = res.collect::<Vec<_>>().await;
     println!("{:?}", res);
     Ok(())
@@ -311,11 +307,12 @@ async fn stream_test_simple() -> anyhow::Result<()> {
 async fn stream_trees_chunked_reverse_should_complete() {
     let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
     let forest = txn(store, 1000);
+    let stream = StreamBuilderState::new(0);
     let mut tree = Tree::<TT>::empty();
     tree = forest.extend_unpacked(&tree, vec![(Key(0), 0)]).unwrap();
     let trees = stream::once(async move { tree }).chain(stream::pending());
     let _ = forest
-        .stream_trees_chunked_reverse(EmptyQuery, trees, 0u64..=0, &|_| ())
+        .stream_trees_chunked_reverse(stream, EmptyQuery, trees, 0u64..=0, &|_| ())
         .map_ok(move |chunk| stream::iter(chunk.data))
         .take_while(|x| future::ready(x.is_ok()))
         .filter_map(|x| future::ready(x.ok()))
@@ -328,11 +325,12 @@ async fn stream_trees_chunked_reverse_should_complete() {
 async fn stream_trees_chunked_should_complete() {
     let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
     let forest = txn(store, 1000);
+    let stream = StreamBuilderState::new(0);
     let mut tree = Tree::<TT>::empty();
     tree = forest.extend_unpacked(&tree, vec![(Key(0), 0)]).unwrap();
     let trees = stream::once(async move { tree }).chain(stream::pending());
     let _ = forest
-        .stream_trees_chunked(EmptyQuery, trees, 0u64..=0, &|_| ())
+        .stream_trees_chunked(stream, EmptyQuery, trees, 0u64..=0, &|_| ())
         .map_ok(move |chunk| stream::iter(chunk.data))
         .take_while(|x| future::ready(x.is_ok()))
         .filter_map(|x| future::ready(x.ok()))

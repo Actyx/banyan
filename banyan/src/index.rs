@@ -393,12 +393,12 @@ impl<T: TreeTypes> Display for NodeInfo<'_, T> {
 
 pub(crate) fn serialize_compressed<T: TreeTypes>(
     key: &chacha20::Key,
-    offset: &mut StreamBuilderState,
+    stream: &mut StreamBuilderState,
     items: &[Index<T>],
     level: i32,
 ) -> Result<Vec<u8>> {
     let zs = ZstdDagCborSeq::from_iter(items, level)?;
-    zs.into_encrypted(key, offset)
+    zs.into_encrypted(key, stream)
 }
 
 pub(crate) fn deserialize_compressed<T: TreeTypes>(

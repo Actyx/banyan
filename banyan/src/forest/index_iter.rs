@@ -1,9 +1,5 @@
 use super::{Forest, TreeTypes};
-use crate::{
-    index::{CompactSeq, Index, NodeInfo},
-    query::Query,
-    store::ReadOnlyStore,
-};
+use crate::{index::{CompactSeq, Index, NodeInfo}, query::Query, store::ReadOnlyStore, tree::StreamBuilderState};
 use anyhow::Result;
 use core::fmt::Debug;
 use libipld::cbor::DagCbor;
@@ -18,6 +14,7 @@ enum Mode {
 
 pub(crate) struct IndexIter<T: TreeTypes, V, R, Q: Query<T>> {
     forest: Forest<T, V, R>,
+    stream: StreamBuilderState,
     offset: u64,
     query: Q,
     stack: SmallVec<[TraverseState<T>; 5]>,
@@ -65,25 +62,27 @@ where
     R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static,
     Q: Query<T> + Clone + Send + 'static,
 {
-    pub(crate) fn new(forest: Forest<T, V, R>, query: Q, index: Arc<Index<T>>) -> Self {
+    pub(crate) fn new(forest: Forest<T, V, R>, stream: StreamBuilderState, query: Q, index: Arc<Index<T>>) -> Self {
         let mode = Mode::Forward;
         let stack = smallvec![TraverseState::new(index)];
 
         Self {
             forest,
+            stream,
             offset: 0,
             query,
             stack,
             mode,
         }
     }
-    pub(crate) fn new_rev(forest: Forest<T, V, R>, query: Q, index: Arc<Index<T>>) -> Self {
+    pub(crate) fn new_rev(forest: Forest<T, V, R>, stream: StreamBuilderState, query: Q, index: Arc<Index<T>>) -> Self {
         let offset = index.count();
         let mode = Mode::Backward;
         let stack = smallvec![TraverseState::new(index)];
 
         Self {
             forest,
+            stream,
             offset,
             query,
             stack,
@@ -122,7 +121,7 @@ where
                 continue;
             }
 
-            match self.forest.load_node(&head.index) {
+            match self.forest.load_node(&self.stream, &head.index) {
                 Ok(NodeInfo::Branch(index, branch)) => {
                     if head.filter.is_empty() {
                         // we hit this branch node for the first time. Apply the

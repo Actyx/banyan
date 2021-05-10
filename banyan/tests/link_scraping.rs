@@ -69,8 +69,6 @@ fn txn(store: MemStore<Sha256Digest>) -> Txn {
         Forest::new(
             store.clone(),
             branch_cache,
-            CryptoConfig::default(),
-            Config::debug(),
         ),
         store,
     )

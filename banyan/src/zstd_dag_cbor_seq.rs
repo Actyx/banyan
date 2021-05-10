@@ -255,11 +255,11 @@ impl ZstdDagCborSeq {
     }
 
     /// convert into an encrypted blob, using the given key and nonce
-    pub fn into_encrypted(self, key: &chacha20::Key, offset: &mut StreamBuilderState) -> anyhow::Result<Vec<u8>> {
+    pub fn into_encrypted(self, key: &chacha20::Key, stream: &mut StreamBuilderState) -> anyhow::Result<Vec<u8>> {
         let Self { mut data, links } = self;
         // encrypt in place with the key and nonce
         let mut chacha20 = XChaCha20::new(key, &NONCE.into());
-        let offset = offset.allocate_offsets(data.len());
+        let offset = stream.allocate_offsets(data.len());
         chacha20.seek(offset);
         chacha20.apply_keystream(&mut data);
         // add the nonce

@@ -1,10 +1,5 @@
 //! helper methods to stream trees
-use crate::{
-    index::IndexRef,
-    store::ReadOnlyStore,
-    tree::Tree,
-    util::{take_until_condition, ToStreamExt},
-};
+use crate::{index::IndexRef, store::ReadOnlyStore, tree::{StreamBuilderState, Tree}, util::{take_until_condition, ToStreamExt}};
 
 use super::{FilteredChunk, Forest, TreeTypes};
 use crate::query::*;
@@ -25,6 +20,7 @@ impl<
     /// This is implemented by calling [stream_trees_chunked] and just flattening the chunks.
     pub fn stream_trees<Q, S>(
         &self,
+        stream: StreamBuilderState,
         query: Q,
         trees: S,
     ) -> impl Stream<Item = anyhow::Result<(u64, T::Key, V)>> + Send
@@ -32,7 +28,7 @@ impl<
         Q: Query<T> + Clone + 'static,
         S: Stream<Item = Tree<T>> + Send + 'static,
     {
-        self.stream_trees_chunked(query, trees, 0..=u64::max_value(), &|_| ())
+        self.stream_trees_chunked(stream, query, trees, 0..=u64::max_value(), &|_| ())
             .map_ok(|chunk| stream::iter(chunk.data.into_iter().map(Ok)))
             .try_flatten()
     }
@@ -45,6 +41,7 @@ impl<
     ///     this can be useful to get progress info even if the query does not match any events
     pub fn stream_trees_chunked<S, Q, E, F>(
         &self,
+        stream: StreamBuilderState,
         query: Q,
         trees: S,
         range: RangeInclusive<u64>,
@@ -68,7 +65,7 @@ impl<
                 let query = AndQuery(OffsetRangeQuery::from(range), query.clone()).boxed();
                 let start_offset_ref = start_offset_ref.clone();
                 forest
-                    .stream_filtered_chunked0(query, index, mk_extra)
+                    .stream_filtered_chunked0(stream.clone(), query, index, mk_extra)
                     .take_while(move |result| {
                         if let Ok(chunk) = result {
                             // update the offset
@@ -96,6 +93,7 @@ impl<
     ///     this can be useful to get progress info even if the query does not match any events
     pub fn stream_trees_chunked_threaded<S, Q, E, F>(
         &self,
+        stream: StreamBuilderState,
         query: Q,
         trees: S,
         range: RangeInclusive<u64>,
@@ -121,7 +119,7 @@ impl<
                 let iter =
                     forest
                         .clone()
-                        .traverse0(query, index, mk_extra)
+                        .traverse0(stream.clone(), query, index, mk_extra)
                         .take_while(move |result| {
                             if let Ok(chunk) = result {
                                 // update the offset
@@ -144,6 +142,7 @@ impl<
     ///     this can be useful to get progress info even if the query does not match any events
     pub fn stream_trees_chunked_reverse<S, Q, E, F>(
         &self,
+        stream: StreamBuilderState,
         query: Q,
         trees: S,
         range: RangeInclusive<u64>,
@@ -171,7 +170,7 @@ impl<
                 .boxed();
                 let end_offset_ref = end_offset_ref.clone();
                 forest
-                    .stream_filtered_chunked_reverse0(query, index, mk_extra)
+                    .stream_filtered_chunked_reverse0(&stream, query, index, mk_extra)
                     .take_while(move |result| {
                         if let Ok(chunk) = result {
                             // update the end offset from the start of what we got

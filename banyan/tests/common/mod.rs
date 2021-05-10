@@ -88,8 +88,6 @@ pub fn txn(store: MemStore<Sha256Digest>, cache_cap: usize) -> Txn {
         Forest::new(
             store.clone(),
             branch_cache,
-            CryptoConfig::default(),
-            Config::debug(),
         ),
         store,
     )

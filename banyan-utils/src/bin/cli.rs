@@ -225,6 +225,7 @@ async fn build_tree(
     unbalanced: bool,
     print_every: u64,
 ) -> anyhow::Result<Tree<TT>> {
+    let stream = StreamBuilderState::new(0);
     let mut tagger = Tagger::new();
     // function to add some arbitrary tags to test out tag querying and compression
     let mut tags_from_offset = |i: u64| -> TagSet {
@@ -241,7 +242,7 @@ async fn build_tree(
         }
     };
     let mut tree = match base {
-        Some(root) => forest.load_tree(root)?,
+        Some(root) => forest.load_tree(&stream, root)?,
         None => Tree::<TT>::empty(),
     };
     let mut offset: u64 = 0;
@@ -292,8 +293,9 @@ async fn bench_build(
             tagger.tags(&["we.like.long.identifiers.because.they.seem.professional"])
         }
     };
+    let stream = StreamBuilderState::new(0);
     let mut tree = match base {
-        Some(root) => forest.load_tree(root)?,
+        Some(root) => forest.load_tree(&stream, root)?,
         None => Tree::<TT>::empty(),
     };
     let mut offset: u64 = 0;
@@ -354,23 +356,24 @@ async fn main() -> Result<()> {
     };
     let txn = || {
         Txn::new(
-            Forest::new(store.clone(), BranchCache::default(), crypto_config, config),
+            Forest::new(store.clone(), BranchCache::default()),
             store.clone(),
         )
     };
     let forest = txn();
+    let stream = StreamBuilderState::new(0);
     match opts.cmd {
         Command::Graph { root } => {
-            let tree = forest.load_tree(root)?;
+            let tree = forest.load_tree(&stream, root)?;
             let mut stdout = std::io::stdout();
             dump::graph(&forest, &tree, &mut stdout)?;
         }
         Command::Dump { root } => {
-            let tree = forest.load_tree(root)?;
+            let tree = forest.load_tree(&stream, root)?;
             forest.dump(&tree)?;
         }
         Command::DumpValues { root } => {
-            let tree = forest.load_tree(root)?;
+            let tree = forest.load_tree(&stream, root)?;
             let iter = forest.iter_from(&tree);
             for res in iter {
                 let (i, k, v) = res?;
@@ -381,7 +384,7 @@ async fn main() -> Result<()> {
             dump::dump_json(store, hash, value_key, &mut std::io::stdout())?;
         }
         Command::Stream { root } => {
-            let tree = forest.load_tree(root)?;
+            let tree = forest.load_tree(&stream, root)?;
             let mut stream = forest.stream_filtered(&tree, AllQuery).enumerate();
             while let Some((i, Ok(v))) = stream.next().await {
                 if i % 1000 == 0 {
@@ -402,7 +405,7 @@ async fn main() -> Result<()> {
             let tree = build_tree(&forest, base, batches, count, unbalanced, 1000).await?;
             forest.dump(&tree)?;
             let roots = forest.roots(&tree)?;
-            let mut offset = tree.offset();
+            let mut offset = tree.stream();
             let levels = roots.iter().map(|x| x.level()).collect::<Vec<_>>();
             let _tree2 = forest.tree_from_roots(roots, &mut offset)?;
             println!("{:?}", tree);
@@ -418,7 +421,7 @@ async fn main() -> Result<()> {
             };
             let branch_cache = BranchCache::default();
             let forest = Txn::new(
-                Forest::new(store.clone(), branch_cache, crypto_config, config),
+                Forest::new(store.clone(), branch_cache),
                 store,
             );
             let _t0 = std::time::Instant::now();
@@ -477,7 +480,8 @@ async fn main() -> Result<()> {
                 .map(|tag| Key::filter_tags(TagSet::single(Tag::from(tag))))
                 .collect::<Vec<_>>();
             let query = DnfQuery(tags).boxed();
-            let tree = forest.load_tree(root)?;
+            let stream = StreamBuilderState::new(0);
+            let tree = forest.load_tree(&stream, root)?;
             forest.dump(&tree)?;
             let mut stream = forest.stream_filtered(&tree, query).enumerate();
             while let Some((i, Ok(v))) = stream.next().await {
@@ -487,13 +491,13 @@ async fn main() -> Result<()> {
             }
         }
         Command::Forget { root, before } => {
-            let mut tree = forest.load_tree(root)?;
+            let mut tree = forest.load_tree(&stream, root)?;
             tree = forest.retain(&tree, &OffsetRangeQuery::from(before..))?;
             forest.dump(&tree)?;
             println!("{:?}", tree);
         }
         Command::Pack { root } => {
-            let mut tree = forest.load_tree(root)?;
+            let mut tree = forest.load_tree(&stream, root)?;
             forest.dump(&tree)?;
             tree = forest.pack(&tree)?;
             forest.assert_invariants(&tree)?;
@@ -502,22 +506,25 @@ async fn main() -> Result<()> {
             println!("{:?}", tree);
         }
         Command::RecvStream { topic } => {
-            let stream = pubsub_sub(&*topic)?
+            let stream = stream.clone();
+            let stream2 = stream.clone();
+            let s = pubsub_sub(&*topic)?
                 .map_err(anyhow::Error::new)
                 .and_then(|data| future::ready(String::from_utf8(data).map_err(anyhow::Error::new)))
                 .and_then(|data| future::ready(Sha256Digest::from_str(&data)));
             let forest2 = forest.clone();
-            let trees = stream.filter_map(move |x| {
+            let trees = s.filter_map(move |x| {
                 let forest = forest2.clone();
-                future::ready(x.and_then(move |link| forest.load_tree(link)).ok())
+                let stream = stream.clone();
+                future::ready(x.and_then(move |link| forest.load_tree(&stream, link)).ok())
             });
-            let mut stream = forest.read().stream_trees(AllQuery, trees).boxed_local();
-            while let Some(ev) = stream.next().await {
+            let mut s = forest.read().stream_trees(stream2.clone(), AllQuery, trees).boxed_local();
+            while let Some(ev) = s.next().await {
                 println!("{:?}", ev);
             }
         }
         Command::Repair { root } => {
-            let tree = forest.load_tree(root)?;
+            let tree = forest.load_tree(&stream, root)?;
             let (tree, _) = forest.repair(&tree)?;
             forest.dump(&tree)?;
             println!("{:?}", tree);

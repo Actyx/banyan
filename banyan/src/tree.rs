@@ -1,12 +1,6 @@
 //! creation and traversal of banyan trees
 use super::index::*;
-use crate::{
-    forest::{
-        FilteredChunk, Forest, ForestIter, IndexIter, Transaction, TreeTypes,
-    },
-    store::BlockWriter,
-    util::BoxedIter,
-};
+use crate::{forest::{Config, CryptoConfig, FilteredChunk, Forest, ForestIter, IndexIter, Transaction, TreeTypes}, store::BlockWriter, util::BoxedIter};
 use crate::{query::Query, store::ReadOnlyStore, util::IterExt};
 use anyhow::Result;
 use futures::prelude::*;
@@ -14,19 +8,39 @@ use libipld::cbor::DagCbor;
 use std::{collections::BTreeMap, fmt, fmt::Debug, iter, sync::Arc, usize};
 use tracing::*;
 
-// type ReadConfig = Arc<CryptoConfig>;
+type ReadConfig = Arc<CryptoConfig>;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct StreamBuilderState {
-    // read_config: ReadConfig,
-    // write_config: Config,
+    read_config: ReadConfig,
+    write_config: Config,
     offset: u64,
 }
 
 impl StreamBuilderState {
     /// there will be more!
-    pub fn new(offset: u64) -> Self {
-        Self { offset }
+    pub fn new(offset: u64, read_config: ReadConfig, write_config: Config) -> Self {
+        Self { offset, read_config, write_config }
+    }
+
+    pub fn zstd_level(&self) -> i32 {
+        self.config().zstd_level
+    }
+
+    pub fn config(&self) -> &Config {
+        &self.write_config
+    }
+
+    pub fn crypto_config(&self) -> &CryptoConfig{
+        &self.read_config
+    }
+
+    pub fn value_key(&self) -> &chacha20::Key {
+        &self.read_config.value_key
+    }
+
+    pub fn index_key(&self) -> &chacha20::Key {
+        &self.read_config.index_key
     }
 }
 
@@ -110,8 +124,8 @@ impl<
         R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static,
     > Forest<T, V, R>
 {
-    pub fn load_tree(&self, link: T::Link) -> Result<Tree<T>> {
-        let (index, offset) = self.load_branch_from_link(link)?;
+    pub fn load_tree(&self, stream: &StreamBuilderState, link: T::Link) -> Result<Tree<T>> {
+        let (index, offset) = self.load_branch_from_link(stream, link)?;
         let offset = StreamBuilderState::new(offset);
         Ok(Tree::new_with_offset(Some((index, offset))))
     }
@@ -119,7 +133,7 @@ impl<
     /// dumps the tree structure
     pub fn dump(&self, tree: &Tree<T>) -> Result<()> {
         match &tree.root {
-            Some((index, _)) => self.dump0(index, ""),
+            Some((index, stream)) => self.dump0(stream, index, ""),
             None => Ok(()),
         }
     }
@@ -131,7 +145,7 @@ impl<
         f: impl Fn((usize, &NodeInfo<T>)) -> S + Clone,
     ) -> Result<(GraphEdges, GraphNodes<S>)> {
         match &tree.root {
-            Some((index, _)) => self.dump_graph0(None, 0, index, f),
+            Some((index, stream)) => self.dump_graph0(stream, None, 0, index, f),
             None => anyhow::bail!("Tree must not be empty"),
         }
     }
@@ -142,11 +156,12 @@ impl<
         F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
     >(
         &self,
+        stream: StreamBuilderState,
         query: Q,
         index: Arc<Index<T>>,
         mk_extra: &'static F,
     ) -> BoxedIter<'static, Result<FilteredChunk<T, V, E>>> {
-        ForestIter::new(self.clone(), query, index, mk_extra).boxed()
+        ForestIter::new(self.clone(), stream, query, index, mk_extra).boxed()
     }
 
     pub(crate) fn traverse_rev0<
@@ -155,31 +170,35 @@ impl<
         F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
     >(
         &self,
+        stream: StreamBuilderState,
         query: Q,
         index: Arc<Index<T>>,
         mk_extra: &'static F,
     ) -> BoxedIter<'static, Result<FilteredChunk<T, V, E>>> {
-        ForestIter::new_rev(self.clone(), query, index, mk_extra).boxed()
+        ForestIter::new_rev(self.clone(), stream, query, index, mk_extra).boxed()
     }
 
     fn index_iter0<Q: Query<T> + Clone + Send + 'static>(
         &self,
+        stream: StreamBuilderState,
         query: Q,
         index: Arc<Index<T>>,
     ) -> BoxedIter<'static, Result<Arc<Index<T>>>> {
-        IndexIter::new(self.clone(), query, index).boxed()
+        IndexIter::new(self.clone(), stream, query, index).boxed()
     }
 
     fn index_iter_rev0<Q: Query<T> + Clone + Send + 'static>(
         &self,
+        stream: StreamBuilderState,
         query: Q,
         index: Arc<Index<T>>,
     ) -> BoxedIter<'static, Result<Arc<Index<T>>>> {
-        IndexIter::new_rev(self.clone(), query, index).boxed()
+        IndexIter::new_rev(self.clone(), stream, query, index).boxed()
     }
 
     pub(crate) fn dump_graph0<S>(
         &self,
+        stream: &StreamBuilderState,
         parent_id: Option<usize>,
         next_id: usize,
         index: &Index<T>,
@@ -188,7 +207,7 @@ impl<
         let mut edges = vec![];
         let mut nodes: BTreeMap<usize, S> = Default::default();
 
-        let node = self.load_node(index)?;
+        let node = self.load_node(stream, index)?;
         if let Some(p) = parent_id {
             edges.push((p, next_id));
         }
@@ -196,7 +215,7 @@ impl<
         if let NodeInfo::Branch(_, branch) = node {
             let mut cur = next_id;
             for x in branch.children.iter() {
-                let (mut e, mut n) = self.dump_graph0(Some(next_id), cur + 1, &x, f.clone())?;
+                let (mut e, mut n) = self.dump_graph0(stream, Some(next_id), cur + 1, &x, f.clone())?;
                 cur += n.len();
                 edges.append(&mut e);
                 nodes.append(&mut n);
@@ -209,7 +228,7 @@ impl<
     /// sealed roots of the tree
     pub fn roots(&self, tree: &Tree<T>) -> Result<Vec<Index<T>>> {
         match &tree.root {
-            Some((index, _)) => self.roots_impl(index),
+            Some((index, stream)) => self.roots_impl(stream, index),
             None => Ok(Vec::new()),
         }
     }
@@ -217,7 +236,7 @@ impl<
     /// leftmost branches of the tree as separate trees
     pub fn left_roots(&self, tree: &Tree<T>) -> Result<Vec<Tree<T>>> {
         Ok(if let Some(index) = tree.as_index_ref() {
-            self.left_roots0(index)?
+            self.left_roots0(&tree.stream(), index)?
                 .into_iter()
                 .map(|x| Tree::new(Some(x)))
                 .collect()
@@ -227,10 +246,10 @@ impl<
     }
 
     /// leftmost branches of the tree as separate trees
-    fn left_roots0(&self, index: &Index<T>) -> Result<Vec<Index<T>>> {
+    fn left_roots0(&self, stream: &StreamBuilderState, index: &Index<T>) -> Result<Vec<Index<T>>> {
         let mut result = if let Index::Branch(branch) = index {
-            if let Some(branch) = self.load_branch_cached(branch)? {
-                self.left_roots0(branch.first_child())?
+            if let Some(branch) = self.load_branch_cached(stream, branch)? {
+                self.left_roots0(stream, branch.first_child())?
             } else {
                 Vec::new()
             }
@@ -243,16 +262,16 @@ impl<
 
     pub fn check_invariants(&self, tree: &Tree<T>) -> Result<Vec<String>> {
         let mut msgs = Vec::new();
-        if let Some((root, _)) = &tree.root {
+        if let Some((root, stream)) = &tree.root {
             let mut level = i32::max_value();
-            self.check_invariants0(root, &mut level, &mut msgs)?;
+            self.check_invariants0(stream, root, &mut level, &mut msgs)?;
         }
         Ok(msgs)
     }
 
     pub fn is_packed(&self, tree: &Tree<T>) -> Result<bool> {
-        if let Some((root, _)) = &tree.root {
-            self.is_packed0(&root)
+        if let Some((root, stream)) = &tree.root {
+            self.is_packed0(stream, &root)
         } else {
             Ok(true)
         }
@@ -276,7 +295,7 @@ impl<
         query: impl Query<T> + Clone + 'static,
     ) -> impl Stream<Item = Result<(u64, T::Key, V)>> + 'static {
         match &tree.root {
-            Some((index, _)) => self.stream_filtered0(query, index.clone()).left_stream(),
+            Some((index, stream)) => self.stream_filtered0(stream.clone(), query, index.clone()).left_stream(),
             None => stream::empty().right_stream(),
         }
     }
@@ -289,7 +308,7 @@ impl<
         query: impl Query<T> + Clone + 'static,
     ) -> impl Iterator<Item = Result<Arc<Index<T>>>> + 'static {
         match &tree.root {
-            Some((index, _)) => self.index_iter0(query, index.clone()).boxed().left_iter(),
+            Some((index, stream)) => self.index_iter0(stream.clone(), query, index.clone()).boxed().left_iter(),
             None => iter::empty().right_iter(),
         }
     }
@@ -302,8 +321,8 @@ impl<
         query: impl Query<T> + Clone + 'static,
     ) -> impl Iterator<Item = Result<Arc<Index<T>>>> + 'static {
         match &tree.root {
-            Some((index, _)) => self
-                .index_iter_rev0(query, index.clone())
+            Some((index, stream)) => self
+                .index_iter_rev0(stream.clone(), query, index.clone())
                 .boxed()
                 .left_iter(),
             None => iter::empty().right_iter(),
@@ -316,8 +335,8 @@ impl<
         query: impl Query<T> + Clone + 'static,
     ) -> impl Iterator<Item = Result<(u64, T::Key, V)>> + 'static {
         match &tree.root {
-            Some((index, _)) => self
-                .iter_filtered0(query, index.clone())
+            Some((index, stream)) => self
+                .iter_filtered0(stream.clone(), query, index.clone())
                 .boxed()
                 .left_iter(),
             None => iter::empty().right_iter(),
@@ -330,8 +349,8 @@ impl<
         query: impl Query<T> + Clone + 'static,
     ) -> impl Iterator<Item = Result<(u64, T::Key, V)>> + 'static {
         match &tree.root {
-            Some((index, _)) => self
-                .iter_filtered_reverse0(query, index.clone())
+            Some((index, stream)) => self
+                .iter_filtered_reverse0(stream.clone(), query, index.clone())
                 .boxed()
                 .left_iter(),
             None => iter::empty().right_iter(),
@@ -343,8 +362,8 @@ impl<
         tree: &Tree<T>,
     ) -> impl Iterator<Item = Result<(u64, T::Key, V)>> + 'static {
         match &tree.root {
-            Some((index, _)) => self
-                .iter_filtered0(crate::query::AllQuery, index.clone())
+            Some((index, stream)) => self
+                .iter_filtered0(stream.clone(), crate::query::AllQuery, index.clone())
                 .left_iter(),
             None => iter::empty().right_iter(),
         }
@@ -362,7 +381,7 @@ impl<
         F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
     {
         match &tree.root {
-            Some((index, _)) => self.traverse0(query, index.clone(), mk_extra).left_iter(),
+            Some((index, _)) => self.traverse0(tree.stream(), query, index.clone(), mk_extra).left_iter(),
             None => iter::empty().right_iter(),
         }
     }
@@ -380,7 +399,7 @@ impl<
     {
         match &tree.root {
             Some((index, _)) => self
-                .traverse_rev0(query, index.clone(), mk_extra)
+                .traverse_rev0(tree.stream(), query, index.clone(), mk_extra)
                 .left_iter(),
             None => iter::empty().right_iter(),
         }
@@ -398,8 +417,8 @@ impl<
         F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
     {
         match &tree.root {
-            Some((index, _)) => self
-                .stream_filtered_chunked0(query, index.clone(), mk_extra)
+            Some((index, stream)) => self
+                .stream_filtered_chunked0(stream.clone(), query, index.clone(), mk_extra)
                 .left_stream(),
             None => stream::empty().right_stream(),
         }
@@ -417,8 +436,8 @@ impl<
         F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
     {
         match &tree.root {
-            Some((index, _)) => self
-                .stream_filtered_chunked_reverse0(query, index.clone(), mk_extra)
+            Some((index, stream)) => self
+                .stream_filtered_chunked_reverse0(stream, query, index.clone(), mk_extra)
                 .left_stream(),
             None => stream::empty().right_stream(),
         }
@@ -431,7 +450,7 @@ impl<
     /// not be read.
     pub fn get(&self, tree: &Tree<T>, offset: u64) -> Result<Option<(T::Key, V)>> {
         Ok(match &tree.root {
-            Some((index, _)) => self.get0(index, offset)?,
+            Some((index, stream)) => self.get0(stream, index, offset)?,
             None => None,
         })
     }
@@ -446,8 +465,8 @@ impl<
     #[allow(clippy::type_complexity)]
     pub fn collect_from(&self, tree: &Tree<T>, offset: u64) -> Result<Vec<Option<(T::Key, V)>>> {
         let mut res = Vec::new();
-        if let Some((index, _)) = &tree.root {
-            self.collect0(index, offset, &mut res)?;
+        if let Some((index, stream)) = &tree.root {
+            self.collect0(stream, index, offset, &mut res)?;
         }
         Ok(res)
     }
@@ -460,13 +479,13 @@ impl<
         W: BlockWriter<T::Link> + 'static,
     > Transaction<T, V, R, W>
 {
-    pub fn tree_from_roots(&self, mut roots: Vec<Index<T>>, offset: &mut StreamBuilderState) -> Result<Tree<T>> {
+    pub fn tree_from_roots(&self, mut roots: Vec<Index<T>>, stream: &mut StreamBuilderState) -> Result<Tree<T>> {
         assert!(roots.iter().all(|x| x.sealed()));
         assert!(is_sorted(roots.iter().map(|x| x.level()).rev()));
         while roots.len() > 1 {
-            self.simplify_roots(&mut roots, 0, offset)?;
+            self.simplify_roots(&mut roots, 0, stream)?;
         }
-        Ok(Tree::new_with_offset(roots.pop().map(|x| (x, offset.clone()))))
+        Ok(Tree::new_with_offset(roots.pop().map(|x| (x, stream.clone()))))
     }
 
     /// Packs the tree to the left.
@@ -478,7 +497,7 @@ impl<
     /// ![packing illustration](https://ipfs.io/ipfs/QmaEDTjHSdCKyGQ3cFMCf73kE67NvffLA5agquLW5qSEVn/packing.jpg)
     pub fn pack(&self, tree: &Tree<T>) -> Result<Tree<T>> {
         let roots = self.roots(tree)?;
-        let mut offset = tree.offset();
+        let mut offset = tree.stream();
         let filled = self.tree_from_roots(roots, &mut offset)?;
         let remainder: Vec<_> = self
             .collect_from(tree, filled.count())?
@@ -507,7 +526,7 @@ impl<
             // nothing to do
             return Ok(tree.clone());
         }
-        let mut offset = tree.offset();
+        let mut offset = tree.stream();
         let index = self.extend_above(
             tree.as_index_ref(),
             u32::max_value(),
@@ -531,7 +550,7 @@ impl<
         I: IntoIterator<Item = (T::Key, V)>,
         I::IntoIter: Send,
     {
-        let mut offset = tree.offset();
+        let mut offset = tree.stream();
         let index = self.extend_unpacked0(tree.as_index_ref(), from, &mut offset)?;
         Ok(Tree::new_with_offset(index.map(|index| (index, offset))))
     }
@@ -606,7 +625,7 @@ impl<T: TreeTypes> Tree<T> {
         self.root.as_ref().map(|(arc, _)| arc.as_ref())
     }
 
-    pub fn offset(&self) -> StreamBuilderState {
+    pub fn stream(&self) -> StreamBuilderState {
         self.root.as_ref().map(|x| x.1.clone()).unwrap_or_default()
     }
 

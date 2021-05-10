@@ -107,8 +107,6 @@ pub trait TreeTypes: Debug + Send + Sync + Clone + 'static {
 pub struct ForestInner<T: TreeTypes, V, R> {
     pub(crate) store: R,
     pub(crate) branch_cache: BranchCache<T>,
-    pub(crate) crypto_config: CryptoConfig,
-    pub(crate) config: Config,
     pub(crate) _tt: PhantomData<(T, V, R)>,
 }
 
@@ -125,14 +123,10 @@ impl<TT: TreeTypes, V, R: Clone> Forest<TT, V, R> {
     pub fn new(
         store: R,
         branch_cache: BranchCache<TT>,
-        crypto_config: CryptoConfig,
-        config: Config,
     ) -> Self {
         Self(Arc::new(ForestInner {
             store,
             branch_cache,
-            crypto_config,
-            config,
             _tt: PhantomData,
         }))
     }
@@ -146,8 +140,6 @@ impl<TT: TreeTypes, V, R: Clone> Forest<TT, V, R> {
             read: Self::new(
                 reader,
                 self.branch_cache.clone(),
-                self.crypto_config,
-                self.config,
             ),
             writer,
         }

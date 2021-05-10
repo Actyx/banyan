@@ -1,14 +1,8 @@
 use super::{BranchCache, Config, CryptoConfig, FilteredChunk, Forest, TreeTypes};
-use crate::{
-    index::{
+use crate::{index::{
         deserialize_compressed, Branch, BranchIndex, CompactSeq, Index, IndexRef, Leaf, LeafIndex,
         NodeInfo,
-    },
-    query::Query,
-    store::ReadOnlyStore,
-    util::{BoxedIter, IterExt},
-    zstd_dag_cbor_seq::ZstdDagCborSeq,
-};
+    }, query::Query, store::ReadOnlyStore, tree::StreamBuilderState, util::{BoxedIter, IterExt}, zstd_dag_cbor_seq::ZstdDagCborSeq};
 use anyhow::{anyhow, Result};
 use core::fmt::Debug;
 use futures::{prelude::*, stream::BoxStream};
@@ -23,6 +17,7 @@ enum Mode {
 }
 pub(crate) struct ForestIter<T: TreeTypes, V, R, Q: Query<T>, F> {
     forest: Forest<T, V, R>,
+    stream: StreamBuilderState,
     offset: u64,
     query: Q,
     mk_extra: F,
@@ -75,6 +70,7 @@ where
 {
     pub(crate) fn new(
         forest: Forest<T, V, R>,
+        stream: StreamBuilderState,
         query: Q,
         index: Arc<Index<T>>,
         mk_extra: F,
@@ -84,6 +80,7 @@ where
 
         Self {
             forest,
+            stream,
             offset: 0,
             query,
             mk_extra,
@@ -93,6 +90,7 @@ where
     }
     pub(crate) fn new_rev(
         forest: Forest<T, V, R>,
+        stream: StreamBuilderState,
         query: Q,
         index: Arc<Index<T>>,
         mk_extra: F,
@@ -103,6 +101,7 @@ where
 
         Self {
             forest,
+            stream,
             offset,
             query,
             mk_extra,
@@ -144,7 +143,7 @@ where
                 continue;
             }
 
-            match self.forest.load_node(&head.index) {
+            match self.forest.load_node(&self.stream, &head.index) {
                 Ok(NodeInfo::Branch(index, branch)) => {
                     if head.filter.is_empty() {
                         // we hit this branch node for the first time. Apply the
@@ -278,22 +277,6 @@ where
     V: DagCbor + Clone + Send + Sync + Debug + 'static,
     R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static,
 {
-    pub(crate) fn crypto_config(&self) -> &CryptoConfig {
-        &self.0.crypto_config
-    }
-
-    pub(crate) fn config(&self) -> &Config {
-        &self.0.config
-    }
-
-    pub(crate) fn value_key(&self) -> chacha20::Key {
-        self.crypto_config().value_key
-    }
-
-    pub(crate) fn index_key(&self) -> chacha20::Key {
-        self.crypto_config().index_key
-    }
-
     pub fn store(&self) -> &R {
         &self.0.store
     }
@@ -303,21 +286,21 @@ where
     }
 
     /// load a leaf given a leaf index
-    pub(crate) fn load_leaf(&self, index: &LeafIndex<T>) -> Result<Option<Leaf>> {
+    pub(crate) fn load_leaf(&self, stream: &StreamBuilderState, index: &LeafIndex<T>) -> Result<Option<Leaf>> {
         Ok(if let Some(link) = &index.link {
             let data = &self.store().get(link)?;
-            let (items, _) = ZstdDagCborSeq::decrypt(data, &self.value_key())?;
+            let (items, _) = ZstdDagCborSeq::decrypt(data, stream.value_key())?;
             Some(Leaf::new(items))
         } else {
             None
         })
     }
 
-    pub(crate) fn load_branch_from_link(&self, link: T::Link) -> Result<(Index<T>, u64)> {
+    pub(crate) fn load_branch_from_link(&self, stream: &StreamBuilderState, link: T::Link) -> Result<(Index<T>, u64)> {
         let store = self.store.clone();
-        let index_key = self.index_key();
+        let index_key = stream.index_key();
         let bytes = store.get(&link)?;
-        let (children, offset) = deserialize_compressed::<T>(&index_key, &bytes)?;
+        let (children, offset) = deserialize_compressed::<T>(index_key, &bytes)?;
         let level = children.iter().map(|x| x.level()).max().unwrap() + 1;
         let count = children.iter().map(|x| x.count()).sum();
         let value_bytes = children.iter().map(|x| x.value_bytes()).sum();
@@ -328,7 +311,7 @@ where
             level,
             count,
             summaries,
-            sealed: self.config.branch_sealed(&children, level),
+            sealed: stream.config().branch_sealed(&children, level),
             value_bytes,
             key_bytes,
         }
@@ -337,13 +320,13 @@ where
     }
 
     /// load a branch given a branch index, from the cache
-    pub(crate) fn load_branch_cached(&self, index: &BranchIndex<T>) -> Result<Option<Branch<T>>> {
+    pub(crate) fn load_branch_cached(&self, stream: &StreamBuilderState, index: &BranchIndex<T>) -> Result<Option<Branch<T>>> {
         if let Some(link) = &index.link {
             let res = self.branch_cache().get(link);
             match res {
                 Some(branch) => Ok(Some(branch)),
                 None => {
-                    let branch = self.load_branch(index)?;
+                    let branch = self.load_branch(stream, index)?;
                     if let Some(branch) = &branch {
                         self.branch_cache().put(*link, branch.clone());
                     }
@@ -357,18 +340,18 @@ where
 
     /// load a node, returning a structure containing the index and value for convenient matching
     #[allow(clippy::needless_lifetimes)]
-    pub(crate) fn load_node<'a>(&self, index: &'a Index<T>) -> Result<NodeInfo<'a, T>> {
+    pub(crate) fn load_node<'a>(&self, stream: &StreamBuilderState, index: &'a Index<T>) -> Result<NodeInfo<'a, T>> {
         let t0 = Instant::now();
         let result = Ok(match index {
             Index::Branch(index) => {
-                if let Some(branch) = self.load_branch_cached(index)? {
+                if let Some(branch) = self.load_branch_cached(stream, index)? {
                     NodeInfo::Branch(index, branch)
                 } else {
                     NodeInfo::PurgedBranch(index)
                 }
             }
             Index::Leaf(index) => {
-                if let Some(leaf) = self.load_leaf(index)? {
+                if let Some(leaf) = self.load_leaf(stream, index)? {
                     NodeInfo::Leaf(index, leaf)
                 } else {
                     NodeInfo::PurgedLeaf(index)
@@ -380,11 +363,11 @@ where
     }
 
     /// load a branch given a branch index
-    pub(crate) fn load_branch(&self, index: &BranchIndex<T>) -> Result<Option<Branch<T>>> {
+    pub(crate) fn load_branch(&self, stream: &StreamBuilderState, index: &BranchIndex<T>) -> Result<Option<Branch<T>>> {
         let t0 = Instant::now();
         let result = Ok(if let Some(link) = &index.link {
             let bytes = self.store.get(&link)?;
-            let (children, _) = deserialize_compressed(&self.index_key(), &bytes)?;
+            let (children, _) = deserialize_compressed(stream.index_key(), &bytes)?;
             Some(Branch::<T>::new(children))
         } else {
             None
@@ -393,15 +376,15 @@ where
         result
     }
 
-    pub(crate) fn get0(&self, index: &Index<T>, mut offset: u64) -> Result<Option<(T::Key, V)>> {
+    pub(crate) fn get0(&self, stream: &StreamBuilderState, index: &Index<T>, mut offset: u64) -> Result<Option<(T::Key, V)>> {
         if offset >= index.count() {
             return Ok(None);
         }
-        match self.load_node(index)? {
+        match self.load_node(stream, index)? {
             NodeInfo::Branch(_, node) => {
                 for child in node.children.iter() {
                     if offset < child.count() {
-                        return self.get0(child, offset);
+                        return self.get0(stream, child, offset);
                     } else {
                         offset -= child.count();
                     }
@@ -419,6 +402,7 @@ where
 
     pub(crate) fn collect0(
         &self,
+        stream: &StreamBuilderState,
         index: &Index<T>,
         mut offset: u64,
         into: &mut Vec<Option<(T::Key, V)>>,
@@ -426,11 +410,11 @@ where
         if offset >= index.count() {
             return Ok(());
         }
-        match self.load_node(index)? {
+        match self.load_node(stream, index)? {
             NodeInfo::Branch(_, node) => {
                 for child in node.children.iter() {
                     if offset < child.count() {
-                        self.collect0(child, offset, into)?;
+                        self.collect0(stream, child, offset, into)?;
                     }
                     offset = offset.saturating_sub(child.count());
                 }
@@ -461,10 +445,11 @@ where
     /// Implemented in terms of stream_filtered_chunked
     pub(crate) fn stream_filtered0<Q: Query<T> + Clone + 'static>(
         &self,
+        stream: StreamBuilderState,
         query: Q,
         index: Arc<Index<T>>,
     ) -> BoxStream<'static, Result<(u64, T::Key, V)>> {
-        self.stream_filtered_chunked0(query, index, &|_| {})
+        self.stream_filtered_chunked0(stream, query, index, &|_| {})
             .map_ok(|chunk| stream::iter(chunk.data).map(Ok))
             .try_flatten()
             .boxed()
@@ -476,11 +461,12 @@ where
         F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
     >(
         &self,
+        stream: StreamBuilderState,
         query: Q,
         index: Arc<Index<T>>,
         mk_extra: &'static F,
     ) -> BoxStream<'static, Result<FilteredChunk<T, V, E>>> {
-        let iter = self.traverse0(query, index, mk_extra);
+        let iter = self.traverse0(stream, query, index, mk_extra);
         stream::unfold(iter, |mut iter| async move {
             iter.next().map(|res| (res, iter))
         })
@@ -490,10 +476,11 @@ where
     /// Convenience method to iterate filtered.
     pub(crate) fn iter_filtered0<Q: Query<T> + Clone + Send + 'static>(
         &self,
+        stream: StreamBuilderState,
         query: Q,
         index: Arc<Index<T>>,
     ) -> BoxedIter<'static, Result<(u64, T::Key, V)>> {
-        self.traverse0(query, index, &|_| {})
+        self.traverse0(stream, query, index, &|_| {})
             .map(|res| match res {
                 Ok(chunk) => chunk.data.into_iter().map(Ok).left_iter(),
                 Err(cause) => iter::once(Err(cause)).right_iter(),
@@ -503,10 +490,11 @@ where
     }
     pub(crate) fn iter_filtered_reverse0<Q: Query<T> + Clone + Send + 'static>(
         &self,
+        stream: StreamBuilderState,
         query: Q,
         index: Arc<Index<T>>,
     ) -> BoxedIter<'static, Result<(u64, T::Key, V)>> {
-        self.traverse_rev0(query, index, &|_| {})
+        self.traverse_rev0(stream, query, index, &|_| {})
             .map(|res| match res {
                 Ok(chunk) => chunk.data.into_iter().map(Ok).left_iter(),
                 Err(cause) => iter::once(Err(cause)).right_iter(),
@@ -521,19 +509,20 @@ where
         F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
     >(
         &self,
+        stream: &StreamBuilderState,
         query: Q,
         index: Arc<Index<T>>,
         mk_extra: &'static F,
     ) -> BoxStream<'static, Result<FilteredChunk<T, V, E>>> {
-        let iter = self.traverse_rev0(query, index, mk_extra);
+        let iter = self.traverse_rev0(stream.clone(), query, index, mk_extra);
         stream::unfold(iter, |mut iter| async move {
             iter.next().map(|res| (res, iter))
         })
         .boxed()
     }
 
-    pub(crate) fn dump0(&self, index: &Index<T>, prefix: &str) -> Result<()> {
-        match self.load_node(index)? {
+    pub(crate) fn dump0(&self, stream: &StreamBuilderState, index: &Index<T>, prefix: &str) -> Result<()> {
+        match self.load_node(stream, index)? {
             NodeInfo::Branch(index, branch) => {
                 println!(
                     "Branch(count={}, key_bytes={}, value_bytes={}, sealed={}, link={}, children={})",
@@ -549,7 +538,7 @@ where
             );
                 let prefix = prefix.to_string() + "  ";
                 for x in branch.children.iter() {
-                    self.dump0(x, &prefix)?;
+                    self.dump0(stream, x, &prefix)?;
                 }
             }
             x => println!("{}{}", prefix, x),
@@ -557,23 +546,23 @@ where
         Ok(())
     }
 
-    pub(crate) fn roots_impl(&self, index: &Index<T>) -> Result<Vec<Index<T>>> {
+    pub(crate) fn roots_impl(&self, stream: &StreamBuilderState, index: &Index<T>) -> Result<Vec<Index<T>>> {
         let mut res = Vec::new();
         let mut level: i32 = i32::max_value();
-        self.roots0(index, &mut level, &mut res)?;
+        self.roots0(stream, index, &mut level, &mut res)?;
         Ok(res)
     }
 
-    fn roots0(&self, index: &Index<T>, level: &mut i32, res: &mut Vec<Index<T>>) -> Result<()> {
+    fn roots0(&self, stream: &StreamBuilderState, index: &Index<T>, level: &mut i32, res: &mut Vec<Index<T>>) -> Result<()> {
         if index.sealed() && index.level() as i32 <= *level {
             *level = index.level() as i32;
             res.push(index.clone());
         } else {
             *level = (*level).min(index.level() as i32 - 1);
             if let Index::Branch(b) = index {
-                if let Some(branch) = self.load_branch(b)? {
+                if let Some(branch) = self.load_branch(stream, b)? {
                     for child in branch.children.iter() {
-                        self.roots0(child, level, res)?;
+                        self.roots0(stream, child, level, res)?;
                     }
                 }
             }
@@ -583,6 +572,7 @@ where
 
     pub(crate) fn check_invariants0(
         &self,
+        stream: &StreamBuilderState,
         index: &Index<T>,
         level: &mut i32,
         msgs: &mut Vec<String>,
@@ -598,7 +588,7 @@ where
         if !index.sealed() {
             *level = (*level).min((index.level() as i32) - 1);
         }
-        match self.load_node(index)? {
+        match self.load_node(stream, index)? {
             NodeInfo::Leaf(index, leaf) => {
                 let value_count = leaf.as_ref().count()?;
                 let key_count = index.keys.count();
@@ -617,10 +607,10 @@ where
                     let child_summary = child.summarize();
                     check!(child_summary == summary);
                 }
-                let branch_sealed = self.config.branch_sealed(&branch.children, index.level);
+                let branch_sealed = stream.config().branch_sealed(&branch.children, index.level);
                 check!(index.sealed == branch_sealed);
                 for child in &branch.children.to_vec() {
-                    self.check_invariants0(child, level, msgs)?;
+                    self.check_invariants0(stream, child, level, msgs)?;
                 }
             }
             NodeInfo::PurgedBranch(_) => {
@@ -634,9 +624,9 @@ where
     }
 
     /// Checks if a node is packed to the left
-    pub(crate) fn is_packed0(&self, index: &Index<T>) -> Result<bool> {
+    pub(crate) fn is_packed0(&self, stream: &StreamBuilderState, index: &Index<T>) -> Result<bool> {
         Ok(
-            if let NodeInfo::Branch(index, branch) = self.load_node(index)? {
+            if let NodeInfo::Branch(index, branch) = self.load_node(stream, index)? {
                 if index.sealed {
                     // sealed nodes, for themselves, are packed
                     true
@@ -648,7 +638,7 @@ where
                     // for the last child, it can be at any level below, and does not have to be sealed,
                     let last_ok = last.level() < index.level;
                     // but it must itself be packed
-                    let rec_ok = self.is_packed0(last)?;
+                    let rec_ok = self.is_packed0(stream, last)?;
                     first_ok && last_ok && rec_ok
                 } else {
                     // this should not happen, but a branch with no children can be considered packed
