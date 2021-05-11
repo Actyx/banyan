@@ -12,6 +12,7 @@ use banyan::{
     query::{AllQuery, OffsetRangeQuery, QueryExt},
     store::{ArcBlockWriter, ArcReadOnlyStore, BlockWriter, ReadOnlyStore},
     tree::*,
+    StreamBuilder,
 };
 use banyan_utils::{
     create_chacha_key, dump,
@@ -401,14 +402,6 @@ async fn main() -> Result<()> {
                 batches, count, unbalanced
             );
             let tree = build_tree(&forest, base, batches, count, unbalanced, 1000).await?;
-            forest.dump(&tree.snapshot())?;
-            let roots = forest.roots(&tree)?;
-            let mut state = tree.state();
-            let levels = roots.iter().map(|x| x.level()).collect::<Vec<_>>();
-            let _tree2 = forest.tree_from_roots(roots, &mut state)?;
-            println!("{:?}", tree);
-            println!("{}", tree);
-            println!("{:?}", levels);
             forest.dump(&tree.snapshot())?;
         }
         Command::Bench { count } => {

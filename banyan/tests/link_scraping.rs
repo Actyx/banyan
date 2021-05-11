@@ -3,7 +3,8 @@ use banyan::{
     forest::{BranchCache, Forest, Transaction, TreeTypes},
     index::{UnitSeq, VecSeq},
     memstore::MemStore,
-    tree::{StreamBuilder, Tree},
+    tree::Tree,
+    StreamBuilder,
 };
 use common::Sha256Digest;
 use fnv::FnvHashSet;

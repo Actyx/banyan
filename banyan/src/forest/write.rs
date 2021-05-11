@@ -2,7 +2,7 @@ use crate::{
     forest::{BranchResult, Config, CreateMode, Forest, Transaction, TreeTypes},
     index::zip_with_offset_ref,
     store::{BlockWriter, ReadOnlyStore},
-    tree::StreamBuilderState,
+    StreamBuilderState,
 };
 use crate::{
     index::serialize_compressed,
@@ -335,16 +335,13 @@ where
 
     fn persist_branch(
         &self,
-        children: &[Index<T>],
+        items: &[Index<T>],
         stream: &mut StreamBuilderState,
     ) -> Result<(T::Link, u64)> {
         let t0 = Instant::now();
-        let cbor = serialize_compressed(
-            &stream.index_key().clone(),
-            &mut stream.offset,
-            &children,
-            stream.config.zstd_level,
-        )?;
+        let level = stream.config().zstd_level;
+        let key = stream.index_key().clone();
+        let cbor = serialize_compressed(&key, &mut stream.offset, &items, level)?;
         let len = cbor.len() as u64;
         let result = Ok((self.writer.put(cbor)?, len));
         tracing::debug!("persist_branch {}", t0.elapsed().as_secs_f64());

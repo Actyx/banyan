@@ -61,6 +61,7 @@ pub mod index;
 pub mod memstore;
 pub mod query;
 pub mod store;
+mod stream_builder;
 mod thread_local_zstd;
 pub mod tree;
 mod util;
@@ -68,6 +69,9 @@ mod zstd_dag_cbor_seq;
 
 pub use chacha20;
 pub use zstd_dag_cbor_seq::ZstdDagCborSeq;
+
+pub use stream_builder::StreamBuilder;
+use stream_builder::{Offset, StreamBuilderState};
 
 #[cfg(test)]
 extern crate quickcheck;

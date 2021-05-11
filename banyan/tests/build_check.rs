@@ -3,7 +3,7 @@ use banyan::{
     index::{BranchIndex, Index, LeafIndex},
     memstore::MemStore,
     query::{AllQuery, EmptyQuery, OffsetRangeQuery},
-    tree::{StreamBuilder, StreamBuilderState},
+    StreamBuilder,
 };
 use common::{create_test_tree, txn, IterExt, Key, KeySeq, Sha256Digest, TT};
 use futures::prelude::*;
@@ -332,10 +332,11 @@ async fn stream_trees_chunked_reverse_should_complete() {
 async fn stream_trees_chunked_should_complete() {
     let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
     let forest = txn(store, 1000);
-    let stream = StreamBuilderState::new(0, Secrets::default(), Config::debug());
-    let mut tree = StreamBuilder::<TT>::new(stream.config().clone(), stream.secrets().clone());
-    tree = forest.extend_unpacked(&tree, vec![(Key(0), 0)]).unwrap();
-    let trees = stream::once(async move { tree.snapshot() }).chain(stream::pending());
+    let secrets = Secrets::default();
+    let config = Config::debug();
+    let mut builder = StreamBuilder::<TT>::new(config, secrets);
+    builder = forest.extend_unpacked(&builder, vec![(Key(0), 0)]).unwrap();
+    let trees = stream::once(async move { builder.snapshot() }).chain(stream::pending());
     let _ = forest
         .stream_trees_chunked(EmptyQuery, trees, 0u64..=0, &|_| ())
         .map_ok(move |chunk| stream::iter(chunk.data))

@@ -38,7 +38,7 @@
 //! [CompactSeq]: trait.CompactSeq.html
 //! [Semigroup]: trait.Semigroup.html
 //! [SimpleCompactSeq]: struct.SimpleCompactSeq.html
-use crate::{forest::TreeTypes, tree::Offset, zstd_dag_cbor_seq::ZstdDagCborSeq};
+use crate::{forest::TreeTypes, zstd_dag_cbor_seq::ZstdDagCborSeq, Offset};
 use anyhow::{anyhow, Result};
 use derive_more::From;
 use libipld::{

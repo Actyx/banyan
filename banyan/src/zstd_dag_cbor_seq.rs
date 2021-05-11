@@ -30,7 +30,7 @@ use std::{
     time::Instant,
 };
 
-use crate::{thread_local_zstd::decompress_and_transform, tree::Offset};
+use crate::{thread_local_zstd::decompress_and_transform, Offset};
 use chacha20::{
     cipher::{NewCipher, StreamCipher, StreamCipherSeek},
     XChaCha20,
@@ -255,7 +255,7 @@ impl ZstdDagCborSeq {
     }
 
     /// convert into an encrypted blob, using the given key and nonce
-    pub fn into_encrypted(
+    pub(crate) fn into_encrypted(
         self,
         key: &chacha20::Key,
         state: &mut Offset,

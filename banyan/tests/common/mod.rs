@@ -4,7 +4,8 @@ use banyan::{
     forest::{BranchCache, Forest, Transaction, TreeTypes},
     index::{CompactSeq, Summarizable},
     memstore::MemStore,
-    tree::{StreamBuilder, Tree},
+    tree::Tree,
+    StreamBuilder,
 };
 use futures::Future;
 use libipld::{
