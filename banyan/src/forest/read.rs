@@ -295,8 +295,8 @@ where
     pub(crate) fn load_leaf(&self, stream: &Secrets, index: &LeafIndex<T>) -> Result<Option<Leaf>> {
         Ok(if let Some(link) = &index.link {
             let data = &self.store().get(link)?;
-            let (items, _) = ZstdDagCborSeq::decrypt(data, stream.value_key())?;
-            Some(Leaf::new(items))
+            let (items, offset) = ZstdDagCborSeq::decrypt(data, stream.value_key())?;
+            Some(Leaf::new(items, offset))
         } else {
             None
         })
@@ -390,8 +390,8 @@ where
         let t0 = Instant::now();
         let result = Ok(if let Some(link) = &index.link {
             let bytes = self.store.get(&link)?;
-            let (children, _) = deserialize_compressed(secrets.index_key(), &bytes)?;
-            Some(Branch::<T>::new(children))
+            let (children, offset) = deserialize_compressed(secrets.index_key(), &bytes)?;
+            Some(Branch::<T>::new(children, offset))
         } else {
             None
         });

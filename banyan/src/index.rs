@@ -268,21 +268,25 @@ impl<T: TreeTypes> Index<T> {
 pub struct Branch<T: TreeTypes> {
     // index data for the children
     pub children: Arc<[Index<T>]>,
+    // offset of the branch
+    offset: u64,
 }
 
 impl<T: TreeTypes> Clone for Branch<T> {
     fn clone(&self) -> Self {
         Self {
             children: self.children.clone(),
+            offset: self.offset,
         }
     }
 }
 
 impl<T: TreeTypes> Branch<T> {
-    pub fn new(children: Vec<Index<T>>) -> Self {
+    pub fn new(children: Vec<Index<T>>, offset: u64) -> Self {
         assert!(!children.is_empty());
         Self {
             children: children.into(),
+            offset,
         }
     }
     pub fn last_child(&self) -> &Index<T> {
@@ -306,11 +310,14 @@ impl<T: TreeTypes> Branch<T> {
 ///
 /// This is a wrapper around a cbor encoded and zstd compressed sequence of values
 #[derive(Debug)]
-pub struct Leaf(ZstdDagCborSeq);
+pub struct Leaf {
+    items: ZstdDagCborSeq,
+    offset: u64,
+}
 
 impl Leaf {
-    pub fn new(value: ZstdDagCborSeq) -> Self {
-        Self(value)
+    pub fn new(items: ZstdDagCborSeq, offset: u64) -> Self {
+        Self { items, offset }
     }
 
     pub fn child_at<T: DagCbor>(&self, offset: u64) -> Result<T> {
@@ -322,7 +329,7 @@ impl Leaf {
 
 impl AsRef<ZstdDagCborSeq> for Leaf {
     fn as_ref(&self) -> &ZstdDagCborSeq {
-        &self.0
+        &self.items
     }
 }
 

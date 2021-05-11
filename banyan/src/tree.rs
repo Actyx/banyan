@@ -103,6 +103,10 @@ impl<T: TreeTypes> Tree<T> {
         let secrets = self.secrets.clone();
         self.root.map(|x| (x, secrets))
     }
+
+    pub(crate) fn as_index_ref(&self) -> Option<&Index<T>> {
+        self.root.as_ref().map(|arc| arc.as_ref())
+    }
 }
 
 impl<T: TreeTypes> fmt::Debug for StreamBuilder<T> {
@@ -277,11 +281,11 @@ impl<
     }
 
     /// leftmost branches of the tree as separate trees
-    pub fn left_roots(&self, tree: &StreamBuilder<T>) -> Result<Vec<StreamBuilder<T>>> {
+    pub fn left_roots(&self, tree: &Tree<T>) -> Result<Vec<Tree<T>>> {
         Ok(if let Some(index) = tree.as_index_ref() {
-            self.left_roots0(tree.state.secrets(), index)?
+            self.left_roots0(&tree.secrets, index)?
                 .into_iter()
-                .map(|x| StreamBuilder::new_from_index(Some(x), tree.state.clone()))
+                .map(|x| Tree::new(Some(Arc::new(x)), tree.secrets.clone(), u64::max_value()))
                 .collect()
         } else {
             Vec::new()
