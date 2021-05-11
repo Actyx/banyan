@@ -2,7 +2,7 @@
 use crate::{
     index::IndexRef,
     store::ReadOnlyStore,
-    tree::Snapshot,
+    tree::Tree,
     util::{take_until_condition, ToStreamExt},
 };
 
@@ -30,7 +30,7 @@ impl<
     ) -> impl Stream<Item = anyhow::Result<(u64, T::Key, V)>> + Send
     where
         Q: Query<T> + Clone + 'static,
-        S: Stream<Item = Snapshot<T>> + Send + 'static,
+        S: Stream<Item = Tree<T>> + Send + 'static,
     {
         self.stream_trees_chunked(query, trees, 0..=u64::max_value(), &|_| ())
             .map_ok(|chunk| stream::iter(chunk.data.into_iter().map(Ok)))
@@ -54,13 +54,13 @@ impl<
         Q: Query<T> + Clone + Send + 'static,
         E: Send + 'static,
         F: Send + Sync + 'static + Fn(IndexRef<T>) -> E,
-        S: Stream<Item = Snapshot<T>> + Send + 'static,
+        S: Stream<Item = Tree<T>> + Send + 'static,
     {
         let end = *range.end();
         let start_offset_ref = Arc::new(AtomicU64::new(*range.start()));
         let forest = self.clone();
         let result = trees
-            .filter_map(move |tree| future::ready(tree.current()))
+            .filter_map(move |tree| future::ready(tree.into_inner()))
             .flat_map(move |(index, secrets)| {
                 // create an intersection of a range query and the main query
                 // and wrap it in an arc so it is cheap to clone
@@ -106,12 +106,12 @@ impl<
         Q: Query<T> + Clone + Send + 'static,
         E: Send + 'static,
         F: Send + Sync + 'static + Fn(IndexRef<T>) -> E,
-        S: Stream<Item = Snapshot<T>> + Send + 'static,
+        S: Stream<Item = Tree<T>> + Send + 'static,
     {
         let offset = Arc::new(AtomicU64::new(*range.start()));
         let forest = self.clone();
         trees
-            .filter_map(move |tree| future::ready(tree.current()))
+            .filter_map(move |tree| future::ready(tree.into_inner()))
             .flat_map(move |(index, secrets)| {
                 // create an intersection of a range query and the main query
                 // and wrap it in an arc so it is cheap to clone
@@ -152,13 +152,13 @@ impl<
         Q: Query<T> + Clone + Send + 'static,
         E: Send + 'static,
         F: Send + Sync + 'static + Fn(IndexRef<T>) -> E,
-        S: Stream<Item = Snapshot<T>> + Send + 'static,
+        S: Stream<Item = Tree<T>> + Send + 'static,
     {
         let start = *range.start();
         let end_offset_ref = Arc::new(AtomicU64::new(*range.end()));
         let forest = self.clone();
         let result = trees
-            .filter_map(move |tree| future::ready(tree.current()))
+            .filter_map(move |tree| future::ready(tree.into_inner()))
             .flat_map(move |(index, secrets)| {
                 let end_offset = end_offset_ref.load(Ordering::SeqCst);
                 // create an intersection of a range query and the main query

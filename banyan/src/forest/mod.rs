@@ -189,7 +189,7 @@ impl<T: TreeTypes, V, R, W> std::ops::Deref for Transaction<T, V, R, W> {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Clone)]
 pub struct Secrets {
     /// chacha20 key to decrypt index nodes
     index_key: chacha20::Key,
@@ -223,7 +223,7 @@ impl Default for Secrets {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Clone)]
 /// Configuration for a forest. Includes settings for when a node is considered full
 pub struct Config {
     /// maximum number of values in a leaf

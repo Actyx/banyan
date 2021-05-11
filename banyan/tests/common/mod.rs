@@ -4,7 +4,7 @@ use banyan::{
     forest::{BranchCache, Forest, Transaction, TreeTypes},
     index::{CompactSeq, Summarizable},
     memstore::MemStore,
-    tree::Tree,
+    tree::{StreamBuilder, Tree},
 };
 use futures::Future;
 use libipld::{
@@ -95,10 +95,10 @@ where
 {
     let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
     let forest = txn(store, 1000);
-    let mut tree = Tree::<TT>::debug();
+    let mut tree = StreamBuilder::<TT>::debug();
     tree = forest.extend(&tree, xs)?;
     forest.assert_invariants(&tree)?;
-    Ok((tree, forest))
+    Ok((tree.snapshot(), forest))
 }
 
 #[allow(dead_code)]

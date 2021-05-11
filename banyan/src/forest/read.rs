@@ -1,4 +1,4 @@
-use super::{BranchCache, FilteredChunk, Forest, Secrets, TreeTypes};
+use super::{BranchCache, Config, FilteredChunk, Forest, Secrets, TreeTypes};
 use crate::{
     index::{
         deserialize_compressed, Branch, BranchIndex, CompactSeq, Index, IndexRef, Leaf, LeafIndex,
@@ -6,7 +6,6 @@ use crate::{
     },
     query::Query,
     store::ReadOnlyStore,
-    tree::StreamBuilderState,
     util::{BoxedIter, IterExt},
     zstd_dag_cbor_seq::ZstdDagCborSeq,
 };
@@ -334,7 +333,7 @@ where
     /// load a branch given a branch index, from the cache
     pub(crate) fn load_branch_cached(
         &self,
-        stream: &Secrets,
+        secrets: &Secrets,
         index: &BranchIndex<T>,
     ) -> Result<Option<Branch<T>>> {
         if let Some(link) = &index.link {
@@ -342,7 +341,7 @@ where
             match res {
                 Some(branch) => Ok(Some(branch)),
                 None => {
-                    let branch = self.load_branch(stream, index)?;
+                    let branch = self.load_branch(secrets, index)?;
                     if let Some(branch) = &branch {
                         self.branch_cache().put(*link, branch.clone());
                     }
@@ -358,20 +357,20 @@ where
     #[allow(clippy::needless_lifetimes)]
     pub(crate) fn load_node<'a>(
         &self,
-        stream: &Secrets,
+        secrets: &Secrets,
         index: &'a Index<T>,
     ) -> Result<NodeInfo<'a, T>> {
         let t0 = Instant::now();
         let result = Ok(match index {
             Index::Branch(index) => {
-                if let Some(branch) = self.load_branch_cached(stream, index)? {
+                if let Some(branch) = self.load_branch_cached(secrets, index)? {
                     NodeInfo::Branch(index, branch)
                 } else {
                     NodeInfo::PurgedBranch(index)
                 }
             }
             Index::Leaf(index) => {
-                if let Some(leaf) = self.load_leaf(stream, index)? {
+                if let Some(leaf) = self.load_leaf(secrets, index)? {
                     NodeInfo::Leaf(index, leaf)
                 } else {
                     NodeInfo::PurgedLeaf(index)
@@ -385,13 +384,13 @@ where
     /// load a branch given a branch index
     pub(crate) fn load_branch(
         &self,
-        stream: &Secrets,
+        secrets: &Secrets,
         index: &BranchIndex<T>,
     ) -> Result<Option<Branch<T>>> {
         let t0 = Instant::now();
         let result = Ok(if let Some(link) = &index.link {
             let bytes = self.store.get(&link)?;
-            let (children, _) = deserialize_compressed(stream.index_key(), &bytes)?;
+            let (children, _) = deserialize_compressed(secrets.index_key(), &bytes)?;
             Some(Branch::<T>::new(children))
         } else {
             None
@@ -538,20 +537,20 @@ where
         F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
     >(
         &self,
-        stream: &Secrets,
+        secrets: &Secrets,
         query: Q,
         index: Arc<Index<T>>,
         mk_extra: &'static F,
     ) -> BoxStream<'static, Result<FilteredChunk<T, V, E>>> {
-        let iter = self.traverse_rev0(stream.clone(), query, index, mk_extra);
+        let iter = self.traverse_rev0(secrets.clone(), query, index, mk_extra);
         stream::unfold(iter, |mut iter| async move {
             iter.next().map(|res| (res, iter))
         })
         .boxed()
     }
 
-    pub(crate) fn dump0(&self, stream: &Secrets, index: &Index<T>, prefix: &str) -> Result<()> {
-        match self.load_node(stream, index)? {
+    pub(crate) fn dump0(&self, secrets: &Secrets, index: &Index<T>, prefix: &str) -> Result<()> {
+        match self.load_node(secrets, index)? {
             NodeInfo::Branch(index, branch) => {
                 println!(
                     "Branch(count={}, key_bytes={}, value_bytes={}, sealed={}, link={}, children={})",
@@ -567,7 +566,7 @@ where
             );
                 let prefix = prefix.to_string() + "  ";
                 for x in branch.children.iter() {
-                    self.dump0(stream, x, &prefix)?;
+                    self.dump0(secrets, x, &prefix)?;
                 }
             }
             x => println!("{}{}", prefix, x),
@@ -607,7 +606,8 @@ where
 
     pub(crate) fn check_invariants0(
         &self,
-        stream: &StreamBuilderState,
+        secrets: &Secrets,
+        config: &Config,
         index: &Index<T>,
         level: &mut i32,
         msgs: &mut Vec<String>,
@@ -623,7 +623,7 @@ where
         if !index.sealed() {
             *level = (*level).min((index.level() as i32) - 1);
         }
-        match self.load_node(stream.secrets(), index)? {
+        match self.load_node(secrets, index)? {
             NodeInfo::Leaf(index, leaf) => {
                 let value_count = leaf.as_ref().count()?;
                 let key_count = index.keys.count();
@@ -642,10 +642,10 @@ where
                     let child_summary = child.summarize();
                     check!(child_summary == summary);
                 }
-                let branch_sealed = stream.config().branch_sealed(&branch.children, index.level);
+                let branch_sealed = config.branch_sealed(&branch.children, index.level);
                 check!(index.sealed == branch_sealed);
                 for child in &branch.children.to_vec() {
-                    self.check_invariants0(stream, child, level, msgs)?;
+                    self.check_invariants0(secrets, config, child, level, msgs)?;
                 }
             }
             NodeInfo::PurgedBranch(_) => {
@@ -659,9 +659,9 @@ where
     }
 
     /// Checks if a node is packed to the left
-    pub(crate) fn is_packed0(&self, stream: &Secrets, index: &Index<T>) -> Result<bool> {
+    pub(crate) fn is_packed0(&self, secrets: &Secrets, index: &Index<T>) -> Result<bool> {
         Ok(
-            if let NodeInfo::Branch(index, branch) = self.load_node(stream, index)? {
+            if let NodeInfo::Branch(index, branch) = self.load_node(secrets, index)? {
                 if index.sealed {
                     // sealed nodes, for themselves, are packed
                     true
@@ -673,7 +673,7 @@ where
                     // for the last child, it can be at any level below, and does not have to be sealed,
                     let last_ok = last.level() < index.level;
                     // but it must itself be packed
-                    let rec_ok = self.is_packed0(stream, last)?;
+                    let rec_ok = self.is_packed0(secrets, last)?;
                     first_ok && last_ok && rec_ok
                 } else {
                     // this should not happen, but a branch with no children can be considered packed
