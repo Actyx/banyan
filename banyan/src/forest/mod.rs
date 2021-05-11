@@ -120,10 +120,7 @@ impl<TT: TreeTypes, V, R> Clone for Forest<TT, V, R> {
 }
 
 impl<TT: TreeTypes, V, R: Clone> Forest<TT, V, R> {
-    pub fn new(
-        store: R,
-        branch_cache: BranchCache<TT>,
-    ) -> Self {
+    pub fn new(store: R, branch_cache: BranchCache<TT>) -> Self {
         Self(Arc::new(ForestInner {
             store,
             branch_cache,
@@ -137,10 +134,7 @@ impl<TT: TreeTypes, V, R: Clone> Forest<TT, V, R> {
     ) -> Transaction<TT, V, R, W> {
         let (reader, writer) = f(self.0.as_ref().store.clone());
         Transaction {
-            read: Self::new(
-                reader,
-                self.branch_cache.clone(),
-            ),
+            read: Self::new(reader, self.branch_cache.clone()),
             writer,
         }
     }
@@ -196,14 +190,31 @@ impl<T: TreeTypes, V, R, W> std::ops::Deref for Transaction<T, V, R, W> {
 }
 
 #[derive(Debug, Copy, Clone)]
-pub struct CryptoConfig {
+pub struct Secrets {
     /// chacha20 key to decrypt index nodes
-    pub index_key: chacha20::Key,
+    index_key: chacha20::Key,
     /// chacha20 key to decrypt value nodes
-    pub value_key: chacha20::Key,
+    value_key: chacha20::Key,
 }
 
-impl Default for CryptoConfig {
+impl Secrets {
+    pub fn new(index_key: chacha20::Key, value_key: chacha20::Key) -> Self {
+        Self {
+            index_key,
+            value_key,
+        }
+    }
+
+    pub fn index_key(&self) -> &chacha20::Key {
+        &self.index_key
+    }
+
+    pub fn value_key(&self) -> &chacha20::Key {
+        &self.value_key
+    }
+}
+
+impl Default for Secrets {
     fn default() -> Self {
         Self {
             index_key: [0; 32].into(),

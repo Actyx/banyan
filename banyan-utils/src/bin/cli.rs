@@ -225,7 +225,7 @@ async fn build_tree(
     unbalanced: bool,
     print_every: u64,
 ) -> anyhow::Result<Tree<TT>> {
-    let stream = StreamBuilderState::new(0, CryptoConfig::default(), Config::debug());
+    let stream = StreamBuilderState::new(0, Secrets::default(), Config::debug());
     let mut tagger = Tagger::new();
     // function to add some arbitrary tags to test out tag querying and compression
     let mut tags_from_offset = |i: u64| -> TagSet {
@@ -243,7 +243,7 @@ async fn build_tree(
     };
     let mut tree = match base {
         Some(root) => forest.load_tree(&stream, root)?,
-        None => Tree::<TT>::empty(stream.config().clone(), stream.crypto_config().clone()),
+        None => Tree::<TT>::empty(stream.config().clone(), stream.secrets().clone()),
     };
     let mut offset: u64 = 0;
     for _ in 0..batches {
@@ -293,10 +293,10 @@ async fn bench_build(
             tagger.tags(&["we.like.long.identifiers.because.they.seem.professional"])
         }
     };
-    let stream = StreamBuilderState::new(0, CryptoConfig::default(), Config::debug());
+    let stream = StreamBuilderState::new(0, Secrets::default(), Config::debug());
     let mut tree = match base {
         Some(root) => forest.load_tree(&stream, root)?,
-        None => Tree::<TT>::empty(stream.config().clone(), stream.crypto_config().clone()),
+        None => Tree::<TT>::empty(stream.config().clone(), stream.secrets().clone()),
     };
     let mut offset: u64 = 0;
     let data = (0..batches)
@@ -350,10 +350,7 @@ async fn main() -> Result<()> {
     let index_key: chacha20::Key = opts.index_pass.map(create_chacha_key).unwrap_or_default();
     let value_key: chacha20::Key = opts.value_pass.map(create_chacha_key).unwrap_or_default();
     let config = Config::debug_fast();
-    let crypto_config = CryptoConfig {
-        index_key,
-        value_key,
-    };
+    let crypto_config = Secrets::new(index_key, value_key);
     let txn = || {
         Txn::new(
             Forest::new(store.clone(), BranchCache::default()),
@@ -415,15 +412,9 @@ async fn main() -> Result<()> {
         }
         Command::Bench { count } => {
             let config = Config::debug_fast();
-            let crypto_config = CryptoConfig {
-                index_key,
-                value_key,
-            };
+            let crypto_config = Secrets::new(index_key, value_key);
             let branch_cache = BranchCache::default();
-            let forest = Txn::new(
-                Forest::new(store.clone(), branch_cache),
-                store,
-            );
+            let forest = Txn::new(Forest::new(store.clone(), branch_cache), store);
             let _t0 = std::time::Instant::now();
             let base = None;
             let batches = 1;
@@ -480,7 +471,7 @@ async fn main() -> Result<()> {
                 .map(|tag| Key::filter_tags(TagSet::single(Tag::from(tag))))
                 .collect::<Vec<_>>();
             let query = DnfQuery(tags).boxed();
-            let stream = StreamBuilderState::new(0, CryptoConfig::default(), Config::debug());
+            let stream = StreamBuilderState::new(0, Secrets::default(), Config::debug());
             let tree = forest.load_tree(&stream, root)?;
             forest.dump(&tree)?;
             let mut stream = forest.stream_filtered(&tree, query).enumerate();
@@ -518,7 +509,10 @@ async fn main() -> Result<()> {
                 let stream = stream.clone();
                 future::ready(x.and_then(move |link| forest.load_tree(&stream, link)).ok())
             });
-            let mut s = forest.read().stream_trees(stream2.clone(), AllQuery, trees).boxed_local();
+            let mut s = forest
+                .read()
+                .stream_trees(stream2.secrets().clone(), AllQuery, trees)
+                .boxed_local();
             while let Some(ev) = s.next().await {
                 println!("{:?}", ev);
             }
@@ -531,7 +525,8 @@ async fn main() -> Result<()> {
         }
         Command::SendStream { topic } => {
             let mut ticks = tokio::time::interval(Duration::from_secs(1));
-            let mut tree = Tree::<TT>::empty(stream.config().clone(), stream.crypto_config().clone());
+            let mut tree =
+                Tree::<TT>::empty(stream.config().clone(), stream.secrets().clone());
             let mut offset = 0;
             loop {
                 poll_fn(|cx| ticks.poll_tick(cx)).await;

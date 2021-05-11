@@ -1,4 +1,9 @@
-use crate::{forest::{BranchResult, Config, CreateMode, Forest, Transaction, TreeTypes}, index::zip_with_offset_ref, store::{BlockWriter, ReadOnlyStore}, tree::StreamBuilderState};
+use crate::{
+    forest::{BranchResult, Config, CreateMode, Forest, Transaction, TreeTypes},
+    index::zip_with_offset_ref,
+    store::{BlockWriter, ReadOnlyStore},
+    tree::StreamBuilderState,
+};
 use crate::{
     index::serialize_compressed,
     index::BranchIndex,
@@ -117,7 +122,8 @@ where
             .iter()
             .map(|child| child.summarize())
             .collect::<Vec<_>>();
-        while from.peek().is_some() && ((children.len() as u64) < stream.config().max_branch_count) {
+        while from.peek().is_some() && ((children.len() as u64) < stream.config().max_branch_count)
+        {
             let child = self.fill_node(level - 1, from, stream)?;
             let summary = child.summarize();
             summaries.push(summary);
@@ -281,7 +287,7 @@ where
         if index.sealed() || from.peek().is_none() {
             return Ok(index.clone());
         }
-        Ok(match self.load_node(stream, index)? {
+        Ok(match self.load_node(stream.secrets(), index)? {
             NodeInfo::Leaf(index, leaf) => {
                 tracing::debug!("extending existing leaf");
                 let keys = index.keys.clone();
@@ -327,7 +333,11 @@ where
         Ok(())
     }
 
-    fn persist_branch(&self, children: &[Index<T>], stream: &mut StreamBuilderState) -> Result<(T::Link, u64)> {
+    fn persist_branch(
+        &self,
+        children: &[Index<T>],
+        stream: &mut StreamBuilderState,
+    ) -> Result<(T::Link, u64)> {
         let t0 = Instant::now();
         let cbor = serialize_compressed(
             &stream.index_key().clone(),
@@ -372,7 +382,7 @@ where
                     index.link = None;
                 }
                 // this will only be executed unless we are already purged
-                if let Some(node) = self.load_branch(stream, &index)? {
+                if let Some(node) = self.load_branch(stream.secrets(), &index)? {
                     let mut children = node.children.to_vec();
                     let mut changed = false;
                     let offsets = zip_with_offset_ref(node.children.iter(), offset);
@@ -421,7 +431,7 @@ where
         match index {
             Index::Branch(index) => {
                 // important not to hit the cache here!
-                let branch = self.load_branch(stream, index);
+                let branch = self.load_branch(stream.secrets(), index);
                 let mut index = index.clone();
                 match branch {
                     Ok(Some(node)) => {
@@ -459,7 +469,7 @@ where
             Index::Leaf(index) => {
                 let mut index = index.clone();
                 // important not to hit the cache here!
-                if let Err(cause) = self.load_leaf(stream, &index) {
+                if let Err(cause) = self.load_leaf(stream.secrets(), &index) {
                     let link_txt = index.link.map(|x| x.to_string()).unwrap_or_default();
                     report.push(format!("forgetting leaf {} due to {}", link_txt, cause));
                     if !index.sealed {

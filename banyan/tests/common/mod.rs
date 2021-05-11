@@ -1,7 +1,7 @@
 #![allow(clippy::upper_case_acronyms)]
 //! helper methods for the tests
 use banyan::{
-    forest::{BranchCache, Config, CryptoConfig, Forest, Transaction, TreeTypes},
+    forest::{BranchCache, Config, Secrets, Forest, Transaction, TreeTypes},
     index::{CompactSeq, Summarizable},
     memstore::MemStore,
     tree::Tree,
@@ -84,13 +84,7 @@ impl Arbitrary for Key {
 #[allow(dead_code)]
 pub fn txn(store: MemStore<Sha256Digest>, cache_cap: usize) -> Txn {
     let branch_cache = BranchCache::new(cache_cap);
-    Txn::new(
-        Forest::new(
-            store.clone(),
-            branch_cache,
-        ),
-        store,
-    )
+    Txn::new(Forest::new(store.clone(), branch_cache), store)
 }
 
 #[allow(dead_code)]

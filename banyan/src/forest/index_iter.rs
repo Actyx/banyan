@@ -1,5 +1,9 @@
-use super::{Forest, TreeTypes};
-use crate::{index::{CompactSeq, Index, NodeInfo}, query::Query, store::ReadOnlyStore, tree::StreamBuilderState};
+use super::{Secrets, Forest, TreeTypes};
+use crate::{
+    index::{CompactSeq, Index, NodeInfo},
+    query::Query,
+    store::ReadOnlyStore,
+};
 use anyhow::Result;
 use core::fmt::Debug;
 use libipld::cbor::DagCbor;
@@ -14,7 +18,7 @@ enum Mode {
 
 pub(crate) struct IndexIter<T: TreeTypes, V, R, Q: Query<T>> {
     forest: Forest<T, V, R>,
-    stream: StreamBuilderState,
+    stream: Secrets,
     offset: u64,
     query: Q,
     stack: SmallVec<[TraverseState<T>; 5]>,
@@ -62,7 +66,12 @@ where
     R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static,
     Q: Query<T> + Clone + Send + 'static,
 {
-    pub(crate) fn new(forest: Forest<T, V, R>, stream: StreamBuilderState, query: Q, index: Arc<Index<T>>) -> Self {
+    pub(crate) fn new(
+        forest: Forest<T, V, R>,
+        stream: Secrets,
+        query: Q,
+        index: Arc<Index<T>>,
+    ) -> Self {
         let mode = Mode::Forward;
         let stack = smallvec![TraverseState::new(index)];
 
@@ -75,7 +84,12 @@ where
             mode,
         }
     }
-    pub(crate) fn new_rev(forest: Forest<T, V, R>, stream: StreamBuilderState, query: Q, index: Arc<Index<T>>) -> Self {
+    pub(crate) fn new_rev(
+        forest: Forest<T, V, R>,
+        stream: Secrets,
+        query: Q,
+        index: Arc<Index<T>>,
+    ) -> Self {
         let offset = index.count();
         let mode = Mode::Backward;
         let stack = smallvec![TraverseState::new(index)];

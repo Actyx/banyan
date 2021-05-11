@@ -1,6 +1,12 @@
 //! creation and traversal of banyan trees
 use super::index::*;
-use crate::{forest::{Config, CryptoConfig, FilteredChunk, Forest, ForestIter, IndexIter, Transaction, TreeTypes}, store::BlockWriter, util::BoxedIter};
+use crate::{
+    forest::{
+        Config, Secrets, FilteredChunk, Forest, ForestIter, IndexIter, Transaction, TreeTypes,
+    },
+    store::BlockWriter,
+    util::BoxedIter,
+};
 use crate::{query::Query, store::ReadOnlyStore, util::IterExt};
 use anyhow::Result;
 use futures::prelude::*;
@@ -8,7 +14,7 @@ use libipld::cbor::DagCbor;
 use std::{collections::BTreeMap, fmt, fmt::Debug, iter, sync::Arc, usize};
 use tracing::*;
 
-type ReadConfig = Arc<CryptoConfig>;
+type ReadConfig = Arc<Secrets>;
 
 #[derive(Debug, Clone)]
 pub struct Offset {
@@ -22,21 +28,28 @@ impl Offset {
 
     pub fn reserve(&mut self, n: usize) -> u64 {
         let result = self.value;
-        self.value = self.value.checked_add(n as u64).expect("ran out of offsets");
+        self.value = self
+            .value
+            .checked_add(n as u64)
+            .expect("ran out of offsets");
         result
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct StreamBuilderState {
-    read_config: CryptoConfig,
-    pub config: Config,
-    pub offset: Offset,
+    read_config: Secrets,
+    pub(crate) config: Config,
+    pub(crate) offset: Offset,
 }
 
 impl StreamBuilderState {
-    pub fn new(offset: u64, read_config: CryptoConfig, config: Config) -> Self {
-        Self { offset: Offset::new(offset), read_config, config }
+    pub fn new(offset: u64, read_config: Secrets, config: Config) -> Self {
+        Self {
+            offset: Offset::new(offset),
+            read_config,
+            config,
+        }
     }
 
     pub fn zstd_level(&self) -> i32 {
@@ -47,16 +60,16 @@ impl StreamBuilderState {
         &self.config
     }
 
-    pub fn crypto_config(&self) -> &CryptoConfig{
+    pub fn secrets(&self) -> &Secrets {
         &self.read_config
     }
 
     pub fn value_key(&self) -> &chacha20::Key {
-        &self.read_config.value_key
+        self.read_config.value_key()
     }
 
     pub fn index_key(&self) -> &chacha20::Key {
-        &self.read_config.index_key
+        self.read_config.index_key()
     }
 }
 
@@ -132,7 +145,7 @@ impl<
     /// dumps the tree structure
     pub fn dump(&self, tree: &Tree<T>) -> Result<()> {
         match &tree.root {
-            Some(index) => self.dump0(&tree.state, index, ""),
+            Some(index) => self.dump0(tree.state.secrets(), index, ""),
             None => Ok(()),
         }
     }
@@ -144,7 +157,7 @@ impl<
         f: impl Fn((usize, &NodeInfo<T>)) -> S + Clone,
     ) -> Result<(GraphEdges, GraphNodes<S>)> {
         match &tree.root {
-            Some(index) => self.dump_graph0(&tree.state, None, 0, index, f),
+            Some(index) => self.dump_graph0(tree.state.secrets(), None, 0, index, f),
             None => anyhow::bail!("Tree must not be empty"),
         }
     }
@@ -155,7 +168,7 @@ impl<
         F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
     >(
         &self,
-        stream: StreamBuilderState,
+        stream: Secrets,
         query: Q,
         index: Arc<Index<T>>,
         mk_extra: &'static F,
@@ -169,7 +182,7 @@ impl<
         F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
     >(
         &self,
-        stream: StreamBuilderState,
+        stream: Secrets,
         query: Q,
         index: Arc<Index<T>>,
         mk_extra: &'static F,
@@ -179,7 +192,7 @@ impl<
 
     fn index_iter0<Q: Query<T> + Clone + Send + 'static>(
         &self,
-        stream: StreamBuilderState,
+        stream: Secrets,
         query: Q,
         index: Arc<Index<T>>,
     ) -> BoxedIter<'static, Result<Arc<Index<T>>>> {
@@ -188,7 +201,7 @@ impl<
 
     fn index_iter_rev0<Q: Query<T> + Clone + Send + 'static>(
         &self,
-        stream: StreamBuilderState,
+        stream: Secrets,
         query: Q,
         index: Arc<Index<T>>,
     ) -> BoxedIter<'static, Result<Arc<Index<T>>>> {
@@ -197,7 +210,7 @@ impl<
 
     pub(crate) fn dump_graph0<S>(
         &self,
-        stream: &StreamBuilderState,
+        stream: &Secrets,
         parent_id: Option<usize>,
         next_id: usize,
         index: &Index<T>,
@@ -214,7 +227,8 @@ impl<
         if let NodeInfo::Branch(_, branch) = node {
             let mut cur = next_id;
             for x in branch.children.iter() {
-                let (mut e, mut n) = self.dump_graph0(stream, Some(next_id), cur + 1, &x, f.clone())?;
+                let (mut e, mut n) =
+                    self.dump_graph0(stream, Some(next_id), cur + 1, &x, f.clone())?;
                 cur += n.len();
                 edges.append(&mut e);
                 nodes.append(&mut n);
@@ -227,7 +241,7 @@ impl<
     /// sealed roots of the tree
     pub fn roots(&self, tree: &Tree<T>) -> Result<Vec<Index<T>>> {
         match &tree.root {
-            Some(index) => self.roots_impl(&tree.state, index),
+            Some(index) => self.roots_impl(tree.state.secrets(), index),
             None => Ok(Vec::new()),
         }
     }
@@ -235,7 +249,7 @@ impl<
     /// leftmost branches of the tree as separate trees
     pub fn left_roots(&self, tree: &Tree<T>) -> Result<Vec<Tree<T>>> {
         Ok(if let Some(index) = tree.as_index_ref() {
-            self.left_roots0(&tree.state, index)?
+            self.left_roots0(tree.state.secrets(), index)?
                 .into_iter()
                 .map(|x| Tree::new_with_offset(Some(x), tree.state.clone()))
                 .collect()
@@ -245,7 +259,7 @@ impl<
     }
 
     /// leftmost branches of the tree as separate trees
-    fn left_roots0(&self, stream: &StreamBuilderState, index: &Index<T>) -> Result<Vec<Index<T>>> {
+    fn left_roots0(&self, stream: &Secrets, index: &Index<T>) -> Result<Vec<Index<T>>> {
         let mut result = if let Index::Branch(branch) = index {
             if let Some(branch) = self.load_branch_cached(stream, branch)? {
                 self.left_roots0(stream, branch.first_child())?
@@ -270,7 +284,7 @@ impl<
 
     pub fn is_packed(&self, tree: &Tree<T>) -> Result<bool> {
         if let Some(root) = &tree.root {
-            self.is_packed0(&tree.state, &root)
+            self.is_packed0(tree.state.secrets(), &root)
         } else {
             Ok(true)
         }
@@ -294,7 +308,9 @@ impl<
         query: impl Query<T> + Clone + 'static,
     ) -> impl Stream<Item = Result<(u64, T::Key, V)>> + 'static {
         match &tree.root {
-            Some(index) => self.stream_filtered0(tree.state.clone(), query, index.clone()).left_stream(),
+            Some(index) => self
+                .stream_filtered0(tree.state.secrets().clone(), query, index.clone())
+                .left_stream(),
             None => stream::empty().right_stream(),
         }
     }
@@ -307,7 +323,10 @@ impl<
         query: impl Query<T> + Clone + 'static,
     ) -> impl Iterator<Item = Result<Arc<Index<T>>>> + 'static {
         match &tree.root {
-            Some(index) => self.index_iter0(tree.state.clone(), query, index.clone()).boxed().left_iter(),
+            Some(index) => self
+                .index_iter0(tree.state.secrets().clone(), query, index.clone())
+                .boxed()
+                .left_iter(),
             None => iter::empty().right_iter(),
         }
     }
@@ -321,7 +340,7 @@ impl<
     ) -> impl Iterator<Item = Result<Arc<Index<T>>>> + 'static {
         match &tree.root {
             Some(index) => self
-                .index_iter_rev0(tree.state.clone(), query, index.clone())
+                .index_iter_rev0(tree.state.secrets().clone(), query, index.clone())
                 .boxed()
                 .left_iter(),
             None => iter::empty().right_iter(),
@@ -335,7 +354,7 @@ impl<
     ) -> impl Iterator<Item = Result<(u64, T::Key, V)>> + 'static {
         match &tree.root {
             Some(index) => self
-                .iter_filtered0(tree.state.clone(), query, index.clone())
+                .iter_filtered0(tree.state.secrets().clone(), query, index.clone())
                 .boxed()
                 .left_iter(),
             None => iter::empty().right_iter(),
@@ -349,7 +368,7 @@ impl<
     ) -> impl Iterator<Item = Result<(u64, T::Key, V)>> + 'static {
         match &tree.root {
             Some(index) => self
-                .iter_filtered_reverse0(tree.state.clone(), query, index.clone())
+                .iter_filtered_reverse0(tree.state.secrets().clone(), query, index.clone())
                 .boxed()
                 .left_iter(),
             None => iter::empty().right_iter(),
@@ -362,7 +381,11 @@ impl<
     ) -> impl Iterator<Item = Result<(u64, T::Key, V)>> + 'static {
         match &tree.root {
             Some(index) => self
-                .iter_filtered0(tree.state.clone(), crate::query::AllQuery, index.clone())
+                .iter_filtered0(
+                    tree.state.secrets().clone(),
+                    crate::query::AllQuery,
+                    index.clone(),
+                )
                 .left_iter(),
             None => iter::empty().right_iter(),
         }
@@ -380,7 +403,14 @@ impl<
         F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
     {
         match &tree.root {
-            Some(index) => self.traverse0(tree.state.clone(), query, index.clone(), mk_extra).left_iter(),
+            Some(index) => self
+                .traverse0(
+                    tree.state.secrets().clone(),
+                    query,
+                    index.clone(),
+                    mk_extra,
+                )
+                .left_iter(),
             None => iter::empty().right_iter(),
         }
     }
@@ -398,7 +428,12 @@ impl<
     {
         match &tree.root {
             Some(index) => self
-                .traverse_rev0(tree.state.clone(), query, index.clone(), mk_extra)
+                .traverse_rev0(
+                    tree.state.secrets().clone(),
+                    query,
+                    index.clone(),
+                    mk_extra,
+                )
                 .left_iter(),
             None => iter::empty().right_iter(),
         }
@@ -417,7 +452,12 @@ impl<
     {
         match &tree.root {
             Some(index) => self
-                .stream_filtered_chunked0(tree.state.clone(), query, index.clone(), mk_extra)
+                .stream_filtered_chunked0(
+                    tree.state.secrets().clone(),
+                    query,
+                    index.clone(),
+                    mk_extra,
+                )
                 .left_stream(),
             None => stream::empty().right_stream(),
         }
@@ -436,7 +476,12 @@ impl<
     {
         match &tree.root {
             Some(index) => self
-                .stream_filtered_chunked_reverse0(&tree.state, query, index.clone(), mk_extra)
+                .stream_filtered_chunked_reverse0(
+                    tree.state.secrets(),
+                    query,
+                    index.clone(),
+                    mk_extra,
+                )
                 .left_stream(),
             None => stream::empty().right_stream(),
         }
@@ -449,7 +494,7 @@ impl<
     /// not be read.
     pub fn get(&self, tree: &Tree<T>, offset: u64) -> Result<Option<(T::Key, V)>> {
         Ok(match &tree.root {
-            Some(index) => self.get0(&tree.state, index, offset)?,
+            Some(index) => self.get0(tree.state.secrets(), index, offset)?,
             None => None,
         })
     }
@@ -465,7 +510,7 @@ impl<
     pub fn collect_from(&self, tree: &Tree<T>, offset: u64) -> Result<Vec<Option<(T::Key, V)>>> {
         let mut res = Vec::new();
         if let Some(index) = &tree.root {
-            self.collect0(&tree.state, index, offset, &mut res)?;
+            self.collect0(tree.state.secrets(), index, offset, &mut res)?;
         }
         Ok(res)
     }
@@ -478,7 +523,11 @@ impl<
         W: BlockWriter<T::Link> + 'static,
     > Transaction<T, V, R, W>
 {
-    pub fn tree_from_roots(&self, mut roots: Vec<Index<T>>, stream: &mut StreamBuilderState) -> Result<Tree<T>> {
+    pub fn tree_from_roots(
+        &self,
+        mut roots: Vec<Index<T>>,
+        stream: &mut StreamBuilderState,
+    ) -> Result<Tree<T>> {
         assert!(roots.iter().all(|x| x.sealed()));
         assert!(is_sorted(roots.iter().map(|x| x.level()).rev()));
         while roots.len() > 1 {
@@ -600,7 +649,6 @@ impl<
 }
 
 impl<T: TreeTypes> Tree<T> {
-
     pub fn state(&self) -> StreamBuilderState {
         self.state.clone()
     }
@@ -625,19 +673,16 @@ impl<T: TreeTypes> Tree<T> {
     }
 
     pub fn level(&self) -> i32 {
-        self.root
-            .as_ref()
-            .map(|x| x.level() as i32)
-            .unwrap_or(-1)
+        self.root.as_ref().map(|x| x.level() as i32).unwrap_or(-1)
     }
 
-    pub fn empty(config: Config, crypto_config: CryptoConfig) -> Self {
+    pub fn empty(config: Config, crypto_config: Secrets) -> Self {
         let state = StreamBuilderState::new(0, crypto_config, config);
         Self::new_with_offset(None, state)
     }
 
     pub fn debug() -> Self {
-        let state = StreamBuilderState::new(0, CryptoConfig::default(), Config::debug());
+        let state = StreamBuilderState::new(0, Secrets::default(), Config::debug());
         Self::new_with_offset(None, state)
     }
 
@@ -648,17 +693,12 @@ impl<T: TreeTypes> Tree<T> {
 
     /// number of elements in the tree
     pub fn count(&self) -> u64 {
-        self.root
-            .as_ref()
-            .map(|x| x.count())
-            .unwrap_or_default()
+        self.root.as_ref().map(|x| x.count()).unwrap_or_default()
     }
 
     /// root of a non-empty tree
     pub fn root(&self) -> Option<&T::Link> {
-        self.root
-            .as_ref()
-            .and_then(|index| index.link().as_ref())
+        self.root.as_ref().and_then(|index| index.link().as_ref())
     }
 }
 

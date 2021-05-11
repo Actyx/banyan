@@ -1,6 +1,6 @@
 #![allow(clippy::upper_case_acronyms)]
 use banyan::{
-    forest::{BranchCache, CryptoConfig, Forest},
+    forest::{BranchCache, Secrets, Forest},
     forest::{Config, Transaction, TreeTypes},
     index::{UnitSeq, VecSeq},
     memstore::MemStore,
@@ -65,13 +65,7 @@ impl TreeTypes for TT {
 
 fn txn(store: MemStore<Sha256Digest>) -> Txn {
     let branch_cache = BranchCache::default();
-    Txn::new(
-        Forest::new(
-            store.clone(),
-            branch_cache,
-        ),
-        store,
-    )
+    Txn::new(Forest::new(store.clone(), branch_cache), store)
 }
 
 fn create_test_tree<I>(xs: I) -> anyhow::Result<(Tree<TT>, Txn)>

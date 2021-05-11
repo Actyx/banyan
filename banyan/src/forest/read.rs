@@ -1,8 +1,15 @@
-use super::{BranchCache, Config, CryptoConfig, FilteredChunk, Forest, TreeTypes};
-use crate::{index::{
+use super::{BranchCache, Config, Secrets, FilteredChunk, Forest, TreeTypes};
+use crate::{
+    index::{
         deserialize_compressed, Branch, BranchIndex, CompactSeq, Index, IndexRef, Leaf, LeafIndex,
         NodeInfo,
-    }, query::Query, store::ReadOnlyStore, tree::StreamBuilderState, util::{BoxedIter, IterExt}, zstd_dag_cbor_seq::ZstdDagCborSeq};
+    },
+    query::Query,
+    store::ReadOnlyStore,
+    tree::StreamBuilderState,
+    util::{BoxedIter, IterExt},
+    zstd_dag_cbor_seq::ZstdDagCborSeq,
+};
 use anyhow::{anyhow, Result};
 use core::fmt::Debug;
 use futures::{prelude::*, stream::BoxStream};
@@ -17,7 +24,7 @@ enum Mode {
 }
 pub(crate) struct ForestIter<T: TreeTypes, V, R, Q: Query<T>, F> {
     forest: Forest<T, V, R>,
-    stream: StreamBuilderState,
+    stream: Secrets,
     offset: u64,
     query: Q,
     mk_extra: F,
@@ -70,7 +77,7 @@ where
 {
     pub(crate) fn new(
         forest: Forest<T, V, R>,
-        stream: StreamBuilderState,
+        stream: Secrets,
         query: Q,
         index: Arc<Index<T>>,
         mk_extra: F,
@@ -90,7 +97,7 @@ where
     }
     pub(crate) fn new_rev(
         forest: Forest<T, V, R>,
-        stream: StreamBuilderState,
+        stream: Secrets,
         query: Q,
         index: Arc<Index<T>>,
         mk_extra: F,
@@ -286,7 +293,11 @@ where
     }
 
     /// load a leaf given a leaf index
-    pub(crate) fn load_leaf(&self, stream: &StreamBuilderState, index: &LeafIndex<T>) -> Result<Option<Leaf>> {
+    pub(crate) fn load_leaf(
+        &self,
+        stream: &Secrets,
+        index: &LeafIndex<T>,
+    ) -> Result<Option<Leaf>> {
         Ok(if let Some(link) = &index.link {
             let data = &self.store().get(link)?;
             let (items, _) = ZstdDagCborSeq::decrypt(data, stream.value_key())?;
@@ -296,7 +307,11 @@ where
         })
     }
 
-    pub(crate) fn load_branch_from_link(&self, stream: &StreamBuilderState, link: T::Link) -> Result<(Index<T>, u64)> {
+    pub(crate) fn load_branch_from_link(
+        &self,
+        stream: &StreamBuilderState,
+        link: T::Link,
+    ) -> Result<(Index<T>, u64)> {
         let store = self.store.clone();
         let index_key = stream.index_key();
         let bytes = store.get(&link)?;
@@ -320,7 +335,11 @@ where
     }
 
     /// load a branch given a branch index, from the cache
-    pub(crate) fn load_branch_cached(&self, stream: &StreamBuilderState, index: &BranchIndex<T>) -> Result<Option<Branch<T>>> {
+    pub(crate) fn load_branch_cached(
+        &self,
+        stream: &Secrets,
+        index: &BranchIndex<T>,
+    ) -> Result<Option<Branch<T>>> {
         if let Some(link) = &index.link {
             let res = self.branch_cache().get(link);
             match res {
@@ -340,7 +359,11 @@ where
 
     /// load a node, returning a structure containing the index and value for convenient matching
     #[allow(clippy::needless_lifetimes)]
-    pub(crate) fn load_node<'a>(&self, stream: &StreamBuilderState, index: &'a Index<T>) -> Result<NodeInfo<'a, T>> {
+    pub(crate) fn load_node<'a>(
+        &self,
+        stream: &Secrets,
+        index: &'a Index<T>,
+    ) -> Result<NodeInfo<'a, T>> {
         let t0 = Instant::now();
         let result = Ok(match index {
             Index::Branch(index) => {
@@ -363,7 +386,11 @@ where
     }
 
     /// load a branch given a branch index
-    pub(crate) fn load_branch(&self, stream: &StreamBuilderState, index: &BranchIndex<T>) -> Result<Option<Branch<T>>> {
+    pub(crate) fn load_branch(
+        &self,
+        stream: &Secrets,
+        index: &BranchIndex<T>,
+    ) -> Result<Option<Branch<T>>> {
         let t0 = Instant::now();
         let result = Ok(if let Some(link) = &index.link {
             let bytes = self.store.get(&link)?;
@@ -376,7 +403,12 @@ where
         result
     }
 
-    pub(crate) fn get0(&self, stream: &StreamBuilderState, index: &Index<T>, mut offset: u64) -> Result<Option<(T::Key, V)>> {
+    pub(crate) fn get0(
+        &self,
+        stream: &Secrets,
+        index: &Index<T>,
+        mut offset: u64,
+    ) -> Result<Option<(T::Key, V)>> {
         if offset >= index.count() {
             return Ok(None);
         }
@@ -402,7 +434,7 @@ where
 
     pub(crate) fn collect0(
         &self,
-        stream: &StreamBuilderState,
+        stream: &Secrets,
         index: &Index<T>,
         mut offset: u64,
         into: &mut Vec<Option<(T::Key, V)>>,
@@ -445,7 +477,7 @@ where
     /// Implemented in terms of stream_filtered_chunked
     pub(crate) fn stream_filtered0<Q: Query<T> + Clone + 'static>(
         &self,
-        stream: StreamBuilderState,
+        stream: Secrets,
         query: Q,
         index: Arc<Index<T>>,
     ) -> BoxStream<'static, Result<(u64, T::Key, V)>> {
@@ -461,7 +493,7 @@ where
         F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
     >(
         &self,
-        stream: StreamBuilderState,
+        stream: Secrets,
         query: Q,
         index: Arc<Index<T>>,
         mk_extra: &'static F,
@@ -476,7 +508,7 @@ where
     /// Convenience method to iterate filtered.
     pub(crate) fn iter_filtered0<Q: Query<T> + Clone + Send + 'static>(
         &self,
-        stream: StreamBuilderState,
+        stream: Secrets,
         query: Q,
         index: Arc<Index<T>>,
     ) -> BoxedIter<'static, Result<(u64, T::Key, V)>> {
@@ -490,7 +522,7 @@ where
     }
     pub(crate) fn iter_filtered_reverse0<Q: Query<T> + Clone + Send + 'static>(
         &self,
-        stream: StreamBuilderState,
+        stream: Secrets,
         query: Q,
         index: Arc<Index<T>>,
     ) -> BoxedIter<'static, Result<(u64, T::Key, V)>> {
@@ -509,7 +541,7 @@ where
         F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
     >(
         &self,
-        stream: &StreamBuilderState,
+        stream: &Secrets,
         query: Q,
         index: Arc<Index<T>>,
         mk_extra: &'static F,
@@ -521,7 +553,12 @@ where
         .boxed()
     }
 
-    pub(crate) fn dump0(&self, stream: &StreamBuilderState, index: &Index<T>, prefix: &str) -> Result<()> {
+    pub(crate) fn dump0(
+        &self,
+        stream: &Secrets,
+        index: &Index<T>,
+        prefix: &str,
+    ) -> Result<()> {
         match self.load_node(stream, index)? {
             NodeInfo::Branch(index, branch) => {
                 println!(
@@ -546,14 +583,24 @@ where
         Ok(())
     }
 
-    pub(crate) fn roots_impl(&self, stream: &StreamBuilderState, index: &Index<T>) -> Result<Vec<Index<T>>> {
+    pub(crate) fn roots_impl(
+        &self,
+        stream: &Secrets,
+        index: &Index<T>,
+    ) -> Result<Vec<Index<T>>> {
         let mut res = Vec::new();
         let mut level: i32 = i32::max_value();
         self.roots0(stream, index, &mut level, &mut res)?;
         Ok(res)
     }
 
-    fn roots0(&self, stream: &StreamBuilderState, index: &Index<T>, level: &mut i32, res: &mut Vec<Index<T>>) -> Result<()> {
+    fn roots0(
+        &self,
+        stream: &Secrets,
+        index: &Index<T>,
+        level: &mut i32,
+        res: &mut Vec<Index<T>>,
+    ) -> Result<()> {
         if index.sealed() && index.level() as i32 <= *level {
             *level = index.level() as i32;
             res.push(index.clone());
@@ -588,7 +635,7 @@ where
         if !index.sealed() {
             *level = (*level).min((index.level() as i32) - 1);
         }
-        match self.load_node(stream, index)? {
+        match self.load_node(stream.secrets(), index)? {
             NodeInfo::Leaf(index, leaf) => {
                 let value_count = leaf.as_ref().count()?;
                 let key_count = index.keys.count();
@@ -624,7 +671,7 @@ where
     }
 
     /// Checks if a node is packed to the left
-    pub(crate) fn is_packed0(&self, stream: &StreamBuilderState, index: &Index<T>) -> Result<bool> {
+    pub(crate) fn is_packed0(&self, stream: &Secrets, index: &Index<T>) -> Result<bool> {
         Ok(
             if let NodeInfo::Branch(index, branch) = self.load_node(stream, index)? {
                 if index.sealed {
