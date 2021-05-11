@@ -60,7 +60,7 @@ where
             stream.config().max_leaf_count as usize,
         )?;
         let value_bytes = data.compressed().len() as u64;
-        let encrypted = data.into_encrypted(&stream.value_key().clone(), stream)?;
+        let encrypted = data.into_encrypted(&stream.value_key().clone(), &mut stream.offset)?;
         let keys = keys.into_iter().collect::<T::KeySeq>();
         let encrypted_len = encrypted.len();
         // store leaf
@@ -331,9 +331,9 @@ where
         let t0 = Instant::now();
         let cbor = serialize_compressed(
             &stream.index_key().clone(),
-            stream,
+            &mut stream.offset,
             &children,
-            stream.config().zstd_level,
+            stream.config.zstd_level,
         )?;
         let len = cbor.len() as u64;
         let result = Ok((self.writer.put(cbor)?, len));

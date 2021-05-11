@@ -225,7 +225,7 @@ async fn build_tree(
     unbalanced: bool,
     print_every: u64,
 ) -> anyhow::Result<Tree<TT>> {
-    let stream = StreamBuilderState::new(0);
+    let stream = StreamBuilderState::new(0, CryptoConfig::default(), Config::debug());
     let mut tagger = Tagger::new();
     // function to add some arbitrary tags to test out tag querying and compression
     let mut tags_from_offset = |i: u64| -> TagSet {
@@ -243,7 +243,7 @@ async fn build_tree(
     };
     let mut tree = match base {
         Some(root) => forest.load_tree(&stream, root)?,
-        None => Tree::<TT>::empty(),
+        None => Tree::<TT>::empty(stream.config().clone(), stream.crypto_config().clone()),
     };
     let mut offset: u64 = 0;
     for _ in 0..batches {
@@ -293,10 +293,10 @@ async fn bench_build(
             tagger.tags(&["we.like.long.identifiers.because.they.seem.professional"])
         }
     };
-    let stream = StreamBuilderState::new(0);
+    let stream = StreamBuilderState::new(0, CryptoConfig::default(), Config::debug());
     let mut tree = match base {
         Some(root) => forest.load_tree(&stream, root)?,
-        None => Tree::<TT>::empty(),
+        None => Tree::<TT>::empty(stream.config().clone(), stream.crypto_config().clone()),
     };
     let mut offset: u64 = 0;
     let data = (0..batches)
@@ -361,7 +361,7 @@ async fn main() -> Result<()> {
         )
     };
     let forest = txn();
-    let stream = StreamBuilderState::new(0);
+    let stream = StreamBuilderState::new(0, crypto_config, config);
     match opts.cmd {
         Command::Graph { root } => {
             let tree = forest.load_tree(&stream, root)?;
@@ -405,9 +405,9 @@ async fn main() -> Result<()> {
             let tree = build_tree(&forest, base, batches, count, unbalanced, 1000).await?;
             forest.dump(&tree)?;
             let roots = forest.roots(&tree)?;
-            let mut offset = tree.stream();
+            let mut state = tree.state();
             let levels = roots.iter().map(|x| x.level()).collect::<Vec<_>>();
-            let _tree2 = forest.tree_from_roots(roots, &mut offset)?;
+            let _tree2 = forest.tree_from_roots(roots, &mut state)?;
             println!("{:?}", tree);
             println!("{}", tree);
             println!("{:?}", levels);
@@ -480,7 +480,7 @@ async fn main() -> Result<()> {
                 .map(|tag| Key::filter_tags(TagSet::single(Tag::from(tag))))
                 .collect::<Vec<_>>();
             let query = DnfQuery(tags).boxed();
-            let stream = StreamBuilderState::new(0);
+            let stream = StreamBuilderState::new(0, CryptoConfig::default(), Config::debug());
             let tree = forest.load_tree(&stream, root)?;
             forest.dump(&tree)?;
             let mut stream = forest.stream_filtered(&tree, query).enumerate();
@@ -531,7 +531,7 @@ async fn main() -> Result<()> {
         }
         Command::SendStream { topic } => {
             let mut ticks = tokio::time::interval(Duration::from_secs(1));
-            let mut tree = Tree::<TT>::empty();
+            let mut tree = Tree::<TT>::empty(stream.config().clone(), stream.crypto_config().clone());
             let mut offset = 0;
             loop {
                 poll_fn(|cx| ticks.poll_tick(cx)).await;

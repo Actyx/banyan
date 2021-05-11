@@ -81,7 +81,7 @@ where
 {
     let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
     let forest = txn(store);
-    let mut tree = Tree::<TT>::empty();
+    let mut tree = Tree::<TT>::empty(Config::debug(), CryptoConfig::default());
     tree = forest.extend(&tree, xs)?;
     forest.assert_invariants(&tree)?;
     Ok((tree, forest))

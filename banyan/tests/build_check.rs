@@ -1,4 +1,4 @@
-use banyan::{index::{BranchIndex, Index, LeafIndex}, memstore::MemStore, query::{AllQuery, EmptyQuery, OffsetRangeQuery}, tree::{StreamBuilderState, Tree}};
+use banyan::{forest::{Config, CryptoConfig}, index::{BranchIndex, Index, LeafIndex}, memstore::MemStore, query::{AllQuery, EmptyQuery, OffsetRangeQuery}, tree::{StreamBuilderState, Tree}};
 use common::{create_test_tree, txn, IterExt, Key, KeySeq, Sha256Digest, TT};
 use futures::prelude::*;
 use libipld::{cbor::DagCborCodec, codec::Codec, Cid};
@@ -202,7 +202,8 @@ fn build_get(xs: Vec<(Key, u64)>) -> anyhow::Result<bool> {
 fn build_pack(xss: Vec<Vec<(Key, u64)>>) -> anyhow::Result<bool> {
     let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
     let forest = txn(store, 1000);
-    let mut tree = Tree::<TT>::empty();
+    let mut tree = Tree::<TT>::empty(Config::debug(), CryptoConfig::default());
+
     // flattened xss for reference
     let xs = xss.iter().cloned().flatten().collect::<Vec<_>>();
     // build complex unbalanced tree
@@ -232,7 +233,7 @@ fn build_pack(xss: Vec<Vec<(Key, u64)>>) -> anyhow::Result<bool> {
 fn do_retain(xss: Vec<Vec<(Key, u64)>>) -> anyhow::Result<bool> {
     let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
     let forest = txn(store, 1000);
-    let mut tree = Tree::<TT>::empty();
+    let mut tree = Tree::<TT>::empty(Config::debug(), CryptoConfig::default());
     // flattened xss for reference
     let xs = xss.iter().cloned().flatten().collect::<Vec<_>>();
     // build complex unbalanced tree
@@ -256,7 +257,7 @@ fn retain(xss: Vec<Vec<(Key, u64)>>) -> anyhow::Result<bool> {
 fn iter_from_should_return_all_items(xs: Vec<(Key, u64)>) -> anyhow::Result<bool> {
     let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
     let forest = txn(store, 1000);
-    let mut tree = Tree::<TT>::empty();
+    let mut tree = Tree::<TT>::empty(Config::debug(), CryptoConfig::default());
     tree = forest.extend(&tree, xs.clone().into_iter())?;
     forest.assert_invariants(&tree)?;
     let actual = forest
@@ -286,10 +287,10 @@ fn filter_test_simple() -> anyhow::Result<()> {
 async fn stream_test_simple() -> anyhow::Result<()> {
     let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
     let forest = txn(store, 1000);
-    let stream = StreamBuilderState::new(0);
+    let stream = StreamBuilderState::new(0, CryptoConfig::default(), Config::debug());
     let mut trees = Vec::new();
     for n in 1..=10u64 {
-        let mut tree = Tree::<TT>::empty();
+        let mut tree = Tree::<TT>::empty(Config::debug(), CryptoConfig::default());
         tree = forest.extend(&tree, (0..n).map(|t| (Key(t), n)))?;
         forest.assert_invariants(&tree)?;
         trees.push(tree);
@@ -307,8 +308,8 @@ async fn stream_test_simple() -> anyhow::Result<()> {
 async fn stream_trees_chunked_reverse_should_complete() {
     let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
     let forest = txn(store, 1000);
-    let stream = StreamBuilderState::new(0);
-    let mut tree = Tree::<TT>::empty();
+    let stream = StreamBuilderState::new(0, CryptoConfig::default(), Config::debug());
+    let mut tree = Tree::<TT>::empty(stream.config().clone(), stream.crypto_config().clone());
     tree = forest.extend_unpacked(&tree, vec![(Key(0), 0)]).unwrap();
     let trees = stream::once(async move { tree }).chain(stream::pending());
     let _ = forest
@@ -325,8 +326,8 @@ async fn stream_trees_chunked_reverse_should_complete() {
 async fn stream_trees_chunked_should_complete() {
     let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
     let forest = txn(store, 1000);
-    let stream = StreamBuilderState::new(0);
-    let mut tree = Tree::<TT>::empty();
+    let stream = StreamBuilderState::new(0, CryptoConfig::default(), Config::debug());
+    let mut tree = Tree::<TT>::empty(stream.config().clone(), stream.crypto_config().clone());
     tree = forest.extend_unpacked(&tree, vec![(Key(0), 0)]).unwrap();
     let trees = stream::once(async move { tree }).chain(stream::pending());
     let _ = forest
@@ -359,7 +360,7 @@ fn deep_tree_traversal_no_stack_overflow() -> anyhow::Result<()> {
         .spawn(|| {
             let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
             let forest = txn(store, 1000);
-            let mut tree = Tree::<TT>::empty();
+            let mut tree = Tree::<TT>::empty(Config::debug(), CryptoConfig::default());
             let elems = (0u64..100).map(|i| (i, Key(i), i)).collect::<Vec<_>>();
             for (_offset, k, v) in &elems {
                 tree = forest.extend_unpacked(&tree, vec![(*k, *v)]).unwrap();
@@ -550,7 +551,7 @@ fn build1() -> anyhow::Result<()> {
     let xs = (0..10).map(|i| (Key(i), i)).collect::<Vec<_>>();
     let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
     let forest = txn(store, 1000);
-    let tree = forest.extend(&Tree::empty(), xs)?;
+    let tree = forest.extend(&Tree::empty(Config::debug(), CryptoConfig::default()), xs)?;
     forest.dump(&tree)?;
     // let foo = Tree::empty()
     Ok(())
