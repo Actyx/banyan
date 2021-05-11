@@ -636,7 +636,6 @@ impl<T: TreeTypes> Tree<T> {
         Self::new_with_offset(None, state)
     }
 
-    #[cfg(test)]
     pub fn debug() -> Self {
         let state = StreamBuilderState::new(0, CryptoConfig::default(), Config::debug());
         Self::new_with_offset(None, state)
