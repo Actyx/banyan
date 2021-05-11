@@ -18,7 +18,7 @@ enum Mode {
 
 pub(crate) struct IndexIter<T: TreeTypes, V, R, Q: Query<T>> {
     forest: Forest<T, V, R>,
-    stream: Secrets,
+    secrets: Secrets,
     offset: u64,
     query: Q,
     stack: SmallVec<[TraverseState<T>; 5]>,
@@ -68,7 +68,7 @@ where
 {
     pub(crate) fn new(
         forest: Forest<T, V, R>,
-        stream: Secrets,
+        secrets: Secrets,
         query: Q,
         index: Arc<Index<T>>,
     ) -> Self {
@@ -77,7 +77,7 @@ where
 
         Self {
             forest,
-            stream,
+            secrets,
             offset: 0,
             query,
             stack,
@@ -86,7 +86,7 @@ where
     }
     pub(crate) fn new_rev(
         forest: Forest<T, V, R>,
-        stream: Secrets,
+        secrets: Secrets,
         query: Q,
         index: Arc<Index<T>>,
     ) -> Self {
@@ -96,7 +96,7 @@ where
 
         Self {
             forest,
-            stream,
+            secrets,
             offset,
             query,
             stack,
@@ -135,7 +135,7 @@ where
                 continue;
             }
 
-            match self.forest.load_node(&self.stream, &head.index) {
+            match self.forest.load_node(&self.secrets, &head.index) {
                 Ok(NodeInfo::Branch(index, branch)) => {
                     if head.filter.is_empty() {
                         // we hit this branch node for the first time. Apply the

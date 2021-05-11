@@ -1,4 +1,4 @@
-use super::{BranchCache, Config, FilteredChunk, Forest, Secrets, TreeTypes};
+use super::{BranchCache, FilteredChunk, Forest, Secrets, TreeTypes};
 use crate::{
     index::{
         deserialize_compressed, Branch, BranchIndex, CompactSeq, Index, IndexRef, Leaf, LeafIndex,
@@ -24,7 +24,7 @@ enum Mode {
 }
 pub(crate) struct ForestIter<T: TreeTypes, V, R, Q: Query<T>, F> {
     forest: Forest<T, V, R>,
-    stream: Secrets,
+    secrets: Secrets,
     offset: u64,
     query: Q,
     mk_extra: F,
@@ -77,7 +77,7 @@ where
 {
     pub(crate) fn new(
         forest: Forest<T, V, R>,
-        stream: Secrets,
+        secrets: Secrets,
         query: Q,
         index: Arc<Index<T>>,
         mk_extra: F,
@@ -87,7 +87,7 @@ where
 
         Self {
             forest,
-            stream,
+            secrets,
             offset: 0,
             query,
             mk_extra,
@@ -97,7 +97,7 @@ where
     }
     pub(crate) fn new_rev(
         forest: Forest<T, V, R>,
-        stream: Secrets,
+        secrets: Secrets,
         query: Q,
         index: Arc<Index<T>>,
         mk_extra: F,
@@ -108,7 +108,7 @@ where
 
         Self {
             forest,
-            stream,
+            secrets,
             offset,
             query,
             mk_extra,
@@ -150,7 +150,7 @@ where
                 continue;
             }
 
-            match self.forest.load_node(&self.stream, &head.index) {
+            match self.forest.load_node(&self.secrets, &head.index) {
                 Ok(NodeInfo::Branch(index, branch)) => {
                     if head.filter.is_empty() {
                         // we hit this branch node for the first time. Apply the
@@ -306,7 +306,7 @@ where
     pub(crate) fn load_branch_from_link(
         &self,
         secrets: &Secrets,
-        config: &Config,
+        sealed: impl Fn(&[Index<T>], u32) -> bool,
         link: T::Link,
     ) -> Result<(Index<T>, u64)> {
         let store = self.store.clone();
@@ -323,7 +323,7 @@ where
             level,
             count,
             summaries,
-            sealed: config.branch_sealed(&children, level),
+            sealed: sealed(&children, level),
             value_bytes,
             key_bytes,
         }
@@ -474,11 +474,11 @@ where
     /// Implemented in terms of stream_filtered_chunked
     pub(crate) fn stream_filtered0<Q: Query<T> + Clone + 'static>(
         &self,
-        stream: Secrets,
+        secrets: Secrets,
         query: Q,
         index: Arc<Index<T>>,
     ) -> BoxStream<'static, Result<(u64, T::Key, V)>> {
-        self.stream_filtered_chunked0(stream, query, index, &|_| {})
+        self.stream_filtered_chunked0(secrets, query, index, &|_| {})
             .map_ok(|chunk| stream::iter(chunk.data).map(Ok))
             .try_flatten()
             .boxed()
@@ -490,12 +490,12 @@ where
         F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
     >(
         &self,
-        stream: Secrets,
+        secrets: Secrets,
         query: Q,
         index: Arc<Index<T>>,
         mk_extra: &'static F,
     ) -> BoxStream<'static, Result<FilteredChunk<T, V, E>>> {
-        let iter = self.traverse0(stream, query, index, mk_extra);
+        let iter = self.traverse0(secrets, query, index, mk_extra);
         stream::unfold(iter, |mut iter| async move {
             iter.next().map(|res| (res, iter))
         })
@@ -505,11 +505,11 @@ where
     /// Convenience method to iterate filtered.
     pub(crate) fn iter_filtered0<Q: Query<T> + Clone + Send + 'static>(
         &self,
-        stream: Secrets,
+        secrets: Secrets,
         query: Q,
         index: Arc<Index<T>>,
     ) -> BoxedIter<'static, Result<(u64, T::Key, V)>> {
-        self.traverse0(stream, query, index, &|_| {})
+        self.traverse0(secrets, query, index, &|_| {})
             .map(|res| match res {
                 Ok(chunk) => chunk.data.into_iter().map(Ok).left_iter(),
                 Err(cause) => iter::once(Err(cause)).right_iter(),
@@ -519,11 +519,11 @@ where
     }
     pub(crate) fn iter_filtered_reverse0<Q: Query<T> + Clone + Send + 'static>(
         &self,
-        stream: Secrets,
+        secrets: Secrets,
         query: Q,
         index: Arc<Index<T>>,
     ) -> BoxedIter<'static, Result<(u64, T::Key, V)>> {
-        self.traverse_rev0(stream, query, index, &|_| {})
+        self.traverse_rev0(secrets, query, index, &|_| {})
             .map(|res| match res {
                 Ok(chunk) => chunk.data.into_iter().map(Ok).left_iter(),
                 Err(cause) => iter::once(Err(cause)).right_iter(),

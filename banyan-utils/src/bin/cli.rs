@@ -505,16 +505,15 @@ async fn main() -> Result<()> {
         }
         Command::RecvStream { topic } => {
             let secrets = Secrets::default();
-            let config = Config::debug();
-            let s = pubsub_sub(&*topic)?
+            let links = pubsub_sub(&*topic)?
                 .map_err(anyhow::Error::new)
                 .and_then(|data| future::ready(String::from_utf8(data).map_err(anyhow::Error::new)))
                 .and_then(|data| future::ready(Sha256Digest::from_str(&data)));
             let forest2 = forest.clone();
-            let trees = s.filter_map(move |x| {
+            let trees = links.filter_map(move |link| {
                 let forest = forest2.clone();
                 future::ready(
-                    x.and_then(move |link| forest.load_tree(secrets, config, link))
+                    link.and_then(move |link| forest.load_snapshot(secrets, link))
                         .ok(),
                 )
             });

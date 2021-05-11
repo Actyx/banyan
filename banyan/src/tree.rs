@@ -83,6 +83,28 @@ pub struct Tree<T: TreeTypes> {
     state: StreamBuilderState,
 }
 
+#[derive(Debug, Clone)]
+pub struct Snapshot<T: TreeTypes> {
+    root: Option<Arc<Index<T>>>,
+    secrets: Secrets,
+    offset: u64,
+}
+
+impl<T: TreeTypes> Snapshot<T> {
+    pub(crate) fn new(root: Option<Arc<Index<T>>>, secrets: Secrets, offset: u64) -> Self {
+        Self {
+            root,
+            secrets,
+            offset,
+        }
+    }
+
+    pub fn current(self) -> Option<(Arc<Index<T>>, Secrets)> {
+        let secrets = self.secrets.clone();
+        self.root.map(|x| (x, secrets))
+    }
+}
+
 impl<T: TreeTypes> fmt::Debug for Tree<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.root {
@@ -129,9 +151,20 @@ impl<
     > Forest<T, V, R>
 {
     pub fn load_tree(&self, secrets: Secrets, config: Config, link: T::Link) -> Result<Tree<T>> {
-        let (index, offset) = self.load_branch_from_link(&secrets, &config, link)?;
+        let (index, offset) = self.load_branch_from_link(
+            &secrets,
+            |items, level| config.branch_sealed(items, level),
+            link,
+        )?;
         let state = StreamBuilderState::new(offset, secrets, config);
-        Ok(Tree::new_with_offset(Some(index), state))
+        Ok(Tree::new_from_index(Some(index), state))
+    }
+
+    pub fn load_snapshot(&self, secrets: Secrets, link: T::Link) -> Result<Snapshot<T>> {
+        // we pass in a predicate that makes the nodes sealed, since we don't care
+        let (index, offset) = self.load_branch_from_link(&secrets, |_, _| true, link)?;
+        // store the offset with the snapshot. Snapshots are immutable, so this won't change.
+        Ok(Snapshot::new(Some(Arc::new(index)), secrets, offset))
     }
 
     /// dumps the tree structure
@@ -160,12 +193,12 @@ impl<
         F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
     >(
         &self,
-        stream: Secrets,
+        secrets: Secrets,
         query: Q,
         index: Arc<Index<T>>,
         mk_extra: &'static F,
     ) -> BoxedIter<'static, Result<FilteredChunk<T, V, E>>> {
-        ForestIter::new(self.clone(), stream, query, index, mk_extra).boxed()
+        ForestIter::new(self.clone(), secrets, query, index, mk_extra).boxed()
     }
 
     pub(crate) fn traverse_rev0<
@@ -174,30 +207,30 @@ impl<
         F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
     >(
         &self,
-        stream: Secrets,
+        secrets: Secrets,
         query: Q,
         index: Arc<Index<T>>,
         mk_extra: &'static F,
     ) -> BoxedIter<'static, Result<FilteredChunk<T, V, E>>> {
-        ForestIter::new_rev(self.clone(), stream, query, index, mk_extra).boxed()
+        ForestIter::new_rev(self.clone(), secrets, query, index, mk_extra).boxed()
     }
 
     fn index_iter0<Q: Query<T> + Clone + Send + 'static>(
         &self,
-        stream: Secrets,
+        secrets: Secrets,
         query: Q,
         index: Arc<Index<T>>,
     ) -> BoxedIter<'static, Result<Arc<Index<T>>>> {
-        IndexIter::new(self.clone(), stream, query, index).boxed()
+        IndexIter::new(self.clone(), secrets, query, index).boxed()
     }
 
     fn index_iter_rev0<Q: Query<T> + Clone + Send + 'static>(
         &self,
-        stream: Secrets,
+        secrets: Secrets,
         query: Q,
         index: Arc<Index<T>>,
     ) -> BoxedIter<'static, Result<Arc<Index<T>>>> {
-        IndexIter::new_rev(self.clone(), stream, query, index).boxed()
+        IndexIter::new_rev(self.clone(), secrets, query, index).boxed()
     }
 
     pub(crate) fn dump_graph0<S>(
@@ -243,7 +276,7 @@ impl<
         Ok(if let Some(index) = tree.as_index_ref() {
             self.left_roots0(tree.state.secrets(), index)?
                 .into_iter()
-                .map(|x| Tree::new_with_offset(Some(x), tree.state.clone()))
+                .map(|x| Tree::new_from_index(Some(x), tree.state.clone()))
                 .collect()
         } else {
             Vec::new()
@@ -515,7 +548,7 @@ impl<
         while roots.len() > 1 {
             self.simplify_roots(&mut roots, 0, stream)?;
         }
-        Ok(Tree::new_with_offset(roots.pop(), stream.clone()))
+        Ok(Tree::new_from_index(roots.pop(), stream.clone()))
     }
 
     /// Packs the tree to the left.
@@ -563,7 +596,7 @@ impl<
             from.by_ref(),
             &mut state,
         )?;
-        Ok(Tree::new_with_offset(Some(index), state))
+        Ok(Tree::new_from_index(Some(index), state))
     }
 
     /// extend the node with the given iterator of key/value pairs
@@ -582,7 +615,7 @@ impl<
     {
         let mut state = tree.state.clone();
         let index = self.extend_unpacked0(tree.as_index_ref(), from, &mut state)?;
-        Ok(Tree::new_with_offset(index, state))
+        Ok(Tree::new_from_index(index, state))
     }
 
     /// Retain just data matching the query
@@ -604,7 +637,7 @@ impl<
             let mut level: i32 = i32::max_value();
             let mut state = tree.state.clone();
             let res = self.retain0(0, query, index, &mut level, &mut state)?;
-            Tree::new_with_offset(Some(res), state)
+            Tree::new_from_index(Some(res), state)
         } else {
             tree.clone()
         })
@@ -623,7 +656,7 @@ impl<
             let mut level: i32 = i32::max_value();
             let mut state = tree.state.clone();
             let repaired = self.repair0(index, &mut report, &mut level, &mut state)?;
-            (Tree::new_with_offset(Some(repaired), state), report)
+            (Tree::new_from_index(Some(repaired), state), report)
         } else {
             (tree.clone(), report)
         })
@@ -637,23 +670,26 @@ impl<T: TreeTypes> Tree<T> {
 
     pub fn new(config: Config, secrets: Secrets) -> Self {
         let state = StreamBuilderState::new(0, secrets, config);
-        Self::new_with_offset(None, state)
+        Self::new_from_index(None, state)
     }
 
-    pub(crate) fn new_with_offset(root: Option<Index<T>>, state: StreamBuilderState) -> Self {
+    pub(crate) fn new_from_index(root: Option<Index<T>>, state: StreamBuilderState) -> Self {
         Self {
             root: root.map(Arc::new),
             state,
         }
     }
 
-    pub fn link(&self) -> Option<T::Link> {
-        self.root.as_ref().and_then(|r| *r.link())
+    pub fn snapshot(&self) -> Snapshot<T> {
+        Snapshot::new(
+            self.root.clone(),
+            self.state.secrets().clone(),
+            self.state.offset.value,
+        )
     }
 
-    pub fn current(self) -> Option<(Arc<Index<T>>, Secrets)> {
-        let secrets = self.state.secrets.clone();
-        self.root.map(|x| (x, secrets))
+    pub fn link(&self) -> Option<T::Link> {
+        self.root.as_ref().and_then(|r| *r.link())
     }
 
     pub fn as_index_ref(&self) -> Option<&Index<T>> {
@@ -666,7 +702,7 @@ impl<T: TreeTypes> Tree<T> {
 
     pub fn debug() -> Self {
         let state = StreamBuilderState::new(0, Secrets::default(), Config::debug());
-        Self::new_with_offset(None, state)
+        Self::new_from_index(None, state)
     }
 
     /// true for an empty tree

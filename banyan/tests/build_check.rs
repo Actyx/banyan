@@ -298,7 +298,7 @@ async fn stream_test_simple() -> anyhow::Result<()> {
         let mut tree = Tree::<TT>::debug();
         tree = forest.extend(&tree, (0..n).map(|t| (Key(t), n)))?;
         forest.assert_invariants(&tree)?;
-        trees.push(tree);
+        trees.push(tree.snapshot());
     }
     println!("{:?}", trees);
     let res = forest
@@ -316,7 +316,7 @@ async fn stream_trees_chunked_reverse_should_complete() {
     let stream = StreamBuilderState::new(0, Secrets::default(), Config::debug());
     let mut tree = Tree::<TT>::new(stream.config().clone(), stream.secrets().clone());
     tree = forest.extend_unpacked(&tree, vec![(Key(0), 0)]).unwrap();
-    let trees = stream::once(async move { tree }).chain(stream::pending());
+    let trees = stream::once(async move { tree.snapshot() }).chain(stream::pending());
     let _ = forest
         .stream_trees_chunked_reverse(EmptyQuery, trees, 0u64..=0, &|_| ())
         .map_ok(move |chunk| stream::iter(chunk.data))
@@ -334,7 +334,7 @@ async fn stream_trees_chunked_should_complete() {
     let stream = StreamBuilderState::new(0, Secrets::default(), Config::debug());
     let mut tree = Tree::<TT>::new(stream.config().clone(), stream.secrets().clone());
     tree = forest.extend_unpacked(&tree, vec![(Key(0), 0)]).unwrap();
-    let trees = stream::once(async move { tree }).chain(stream::pending());
+    let trees = stream::once(async move { tree.snapshot() }).chain(stream::pending());
     let _ = forest
         .stream_trees_chunked(EmptyQuery, trees, 0u64..=0, &|_| ())
         .map_ok(move |chunk| stream::iter(chunk.data))
