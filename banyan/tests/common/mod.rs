@@ -97,7 +97,7 @@ where
     let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
     let forest = txn(store, 1000);
     let mut tree = StreamBuilder::<TT>::debug();
-    tree = forest.extend(&tree, xs)?;
+    forest.extend(&mut tree, xs)?;
     forest.assert_invariants(&tree)?;
     Ok((tree.snapshot(), forest))
 }

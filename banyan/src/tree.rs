@@ -445,14 +445,15 @@ impl<
     pub(crate) fn tree_from_roots(
         &self,
         mut roots: Vec<Index<T>>,
-        stream: &mut StreamBuilderState,
-    ) -> Result<StreamBuilder<T>> {
+        stream: &mut StreamBuilder<T>,
+    ) -> Result<()> {
         assert!(roots.iter().all(|x| x.sealed()));
         assert!(is_sorted(roots.iter().map(|x| x.level()).rev()));
         while roots.len() > 1 {
-            self.simplify_roots(&mut roots, 0, stream)?;
+            self.simplify_roots(&mut roots, 0, stream.state_mut())?;
         }
-        Ok(StreamBuilder::new_from_index(roots.pop(), stream.clone()))
+        stream.set_index(roots.pop());
+        Ok(())
     }
 
     /// Packs the tree to the left.
@@ -462,33 +463,28 @@ impl<
     /// Likewise, sealed subtrees or leafs will be reused if possible.
     ///
     /// ![packing illustration](https://ipfs.io/ipfs/QmaEDTjHSdCKyGQ3cFMCf73kE67NvffLA5agquLW5qSEVn/packing.jpg)
-    pub fn pack(&self, tree: &StreamBuilder<T>) -> Result<StreamBuilder<T>> {
+    pub fn pack(&self, tree: &mut StreamBuilder<T>) -> Result<()> {
+        let initial = tree.snapshot();
         let roots = self.roots(tree)?;
-        let mut state = tree.state().clone();
-        let filled = self.tree_from_roots(roots, &mut state)?;
+        self.tree_from_roots(roots, tree)?;
         let remainder: Vec<_> = self
-            .collect_from(&tree.snapshot(), filled.count())?
+            .collect_from(&initial, tree.count())?
             .into_iter()
             .collect::<Option<Vec<_>>>()
             .ok_or_else(|| anyhow::anyhow!("found purged data"))?;
-        let extended = self.extend(&filled, remainder)?;
-        Ok(extended)
+        self.extend(tree, remainder)?;
+        Ok(())
     }
 
     /// append a single element. This is just a shortcut for extend.
-    pub fn push(
-        &mut self,
-        tree: &mut StreamBuilder<T>,
-        key: T::Key,
-        value: V,
-    ) -> Result<StreamBuilder<T>> {
+    pub fn push(&mut self, tree: &mut StreamBuilder<T>, key: T::Key, value: V) -> Result<()> {
         self.extend(tree, Some((key, value)))
     }
 
     /// extend the node with the given iterator of key/value pairs
     ///
     /// ![extend illustration](https://ipfs.io/ipfs/QmaEDTjHSdCKyGQ3cFMCf73kE67NvffLA5agquLW5qSEVn/extend.jpg)
-    pub fn extend<I>(&self, tree: &StreamBuilder<T>, from: I) -> Result<StreamBuilder<T>>
+    pub fn extend<I>(&self, tree: &mut StreamBuilder<T>, from: I) -> Result<()>
     where
         I: IntoIterator<Item = (T::Key, V)>,
         I::IntoIter: Send,
@@ -496,16 +492,17 @@ impl<
         let mut from = from.into_iter().peekable();
         if from.peek().is_none() {
             // nothing to do
-            return Ok(tree.clone());
+            return Ok(());
         }
-        let mut state = tree.state().clone();
+        let index = tree.as_index_ref().cloned();
         let index = self.extend_above(
-            tree.as_index_ref(),
+            index.as_ref(),
             u32::max_value(),
             from.by_ref(),
-            &mut state,
+            tree.state_mut(),
         )?;
-        Ok(StreamBuilder::new_from_index(Some(index), state))
+        tree.set_index(Some(index));
+        Ok(())
     }
 
     /// extend the node with the given iterator of key/value pairs
@@ -517,14 +514,15 @@ impl<
     /// To pack a tree, use the pack method.
     ///
     /// ![extend_unpacked illustration](https://ipfs.io/ipfs/QmaEDTjHSdCKyGQ3cFMCf73kE67NvffLA5agquLW5qSEVn/extend_unpacked.jpg)
-    pub fn extend_unpacked<I>(&self, tree: &StreamBuilder<T>, from: I) -> Result<StreamBuilder<T>>
+    pub fn extend_unpacked<I>(&self, tree: &mut StreamBuilder<T>, from: I) -> Result<()>
     where
         I: IntoIterator<Item = (T::Key, V)>,
         I::IntoIter: Send,
     {
-        let mut state = tree.state().clone();
-        let index = self.extend_unpacked0(tree.as_index_ref(), from, &mut state)?;
-        Ok(StreamBuilder::new_from_index(index, state))
+        let index = tree.as_index_ref().cloned();
+        let index = self.extend_unpacked0(index.as_ref(), from, tree.state_mut())?;
+        tree.set_index(index);
+        Ok(())
     }
 
     /// Retain just data matching the query
@@ -539,16 +537,14 @@ impl<
     /// even if they do not match the query.
     pub fn retain<'a, Q: Query<T> + Send + Sync>(
         &'a self,
-        tree: &StreamBuilder<T>,
+        tree: &mut StreamBuilder<T>,
         query: &'a Q,
-    ) -> Result<StreamBuilder<T>> {
-        Ok(if let Some(index) = tree.index() {
+    ) -> Result<()> {
+        let index = tree.index().cloned();
+        Ok(if let Some(index) = index {
             let mut level: i32 = i32::max_value();
-            let mut state = tree.state().clone();
-            let res = self.retain0(0, query, index, &mut level, &mut state)?;
-            StreamBuilder::new_from_index(Some(res), state)
-        } else {
-            tree.clone()
+            let index = self.retain0(0, query, &index, &mut level, tree.state_mut())?;
+            tree.set_index(Some(index));
         })
     }
 
@@ -559,15 +555,16 @@ impl<
     /// Note that this is an emergency measure to recover data if the tree is not completely
     /// available. It might result in a degenerate tree that can no longer be safely added to,
     /// especially if there are repaired blocks in the non-packed part.
-    pub fn repair(&self, tree: &StreamBuilder<T>) -> Result<(StreamBuilder<T>, Vec<String>)> {
+    pub fn repair(&self, tree: &mut StreamBuilder<T>) -> Result<Vec<String>> {
         let mut report = Vec::new();
-        Ok(if let Some(index) = tree.index() {
+        let index = tree.index().cloned();
+        Ok(if let Some(index) = index {
             let mut level: i32 = i32::max_value();
-            let mut state = tree.state().clone();
-            let repaired = self.repair0(index, &mut report, &mut level, &mut state)?;
-            (StreamBuilder::new_from_index(Some(repaired), state), report)
+            let repaired = self.repair0(&index, &mut report, &mut level, tree.state_mut())?;
+            tree.set_index(Some(repaired));
+            report
         } else {
-            (tree.clone(), report)
+            report
         })
     }
 }

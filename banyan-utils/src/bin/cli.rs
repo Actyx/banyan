@@ -263,10 +263,10 @@ async fn build_tree(
             })
             .collect::<Vec<_>>();
         if unbalanced {
-            tree = forest.extend_unpacked(&tree, v)?;
+            forest.extend_unpacked(&mut tree, v)?;
             forest.assert_invariants(&tree)?;
         } else {
-            tree = forest.extend(&tree, v)?;
+            forest.extend(&mut tree, v)?;
             forest.assert_invariants(&tree)?;
         }
     }
@@ -319,10 +319,10 @@ async fn bench_build(
     let t0 = std::time::Instant::now();
     for v in data {
         if unbalanced {
-            tree = forest.extend_unpacked(&tree, v)?;
+            forest.extend_unpacked(&mut tree, v)?;
             forest.assert_invariants(&tree)?;
         } else {
-            tree = forest.extend(&tree, v)?;
+            forest.extend(&mut tree, v)?;
             forest.assert_invariants(&tree)?;
         }
     }
@@ -481,7 +481,7 @@ async fn main() -> Result<()> {
             let secrets = Secrets::default();
             let config = Config::debug();
             let mut tree = forest.load_stream_builder(secrets, config, root)?;
-            tree = forest.retain(&tree, &OffsetRangeQuery::from(before..))?;
+            forest.retain(&mut tree, &OffsetRangeQuery::from(before..))?;
             forest.dump(&tree.snapshot())?;
             println!("{:?}", tree);
         }
@@ -490,7 +490,7 @@ async fn main() -> Result<()> {
             let config = Config::debug();
             let mut tree = forest.load_stream_builder(secrets, config, root)?;
             forest.dump(&tree.snapshot())?;
-            tree = forest.pack(&tree)?;
+            forest.pack(&mut tree)?;
             forest.assert_invariants(&tree)?;
             assert!(forest.is_packed(&tree.snapshot())?);
             forest.dump(&tree.snapshot())?;
@@ -517,8 +517,8 @@ async fn main() -> Result<()> {
             }
         }
         Command::Repair { root } => {
-            let tree = forest.load_stream_builder(secrets, config, root)?;
-            let (tree, _) = forest.repair(&tree)?;
+            let mut tree = forest.load_stream_builder(secrets, config, root)?;
+            let _ = forest.repair(&mut tree)?;
             forest.dump(&tree.snapshot())?;
             println!("{:?}", tree);
         }
@@ -529,10 +529,10 @@ async fn main() -> Result<()> {
             loop {
                 poll_fn(|cx| ticks.poll_tick(cx)).await;
                 let key = Key::single(offset, offset, tags_from_offset(offset));
-                tree = forest.extend_unpacked(&tree, Some((key, "xxx".into())))?;
+                forest.extend_unpacked(&mut tree, Some((key, "xxx".into())))?;
                 if tree.level() > 100 {
                     println!("packing the tree");
-                    tree = forest.pack(&tree)?;
+                    forest.pack(&mut tree)?;
                 }
                 offset += 1;
                 if let Some(cid) = tree.link() {
