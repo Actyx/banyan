@@ -1,4 +1,4 @@
-use super::{BranchCache, Config, Secrets, FilteredChunk, Forest, TreeTypes};
+use super::{BranchCache, Config, FilteredChunk, Forest, Secrets, TreeTypes};
 use crate::{
     index::{
         deserialize_compressed, Branch, BranchIndex, CompactSeq, Index, IndexRef, Leaf, LeafIndex,
@@ -309,11 +309,12 @@ where
 
     pub(crate) fn load_branch_from_link(
         &self,
-        stream: &StreamBuilderState,
+        secrets: &Secrets,
+        config: &Config,
         link: T::Link,
     ) -> Result<(Index<T>, u64)> {
         let store = self.store.clone();
-        let index_key = stream.index_key();
+        let index_key = secrets.index_key();
         let bytes = store.get(&link)?;
         let (children, offset) = deserialize_compressed::<T>(index_key, &bytes)?;
         let level = children.iter().map(|x| x.level()).max().unwrap() + 1;
@@ -326,7 +327,7 @@ where
             level,
             count,
             summaries,
-            sealed: stream.config().branch_sealed(&children, level),
+            sealed: config.branch_sealed(&children, level),
             value_bytes,
             key_bytes,
         }

@@ -32,7 +32,7 @@ use std::{
 
 use crate::{
     thread_local_zstd::decompress_and_transform,
-    tree::{Offset, StreamBuilderState},
+    tree::Offset,
 };
 use chacha20::{
     cipher::{NewCipher, StreamCipher, StreamCipherSeek},

@@ -1,7 +1,7 @@
 #![allow(clippy::upper_case_acronyms)]
 //! helper methods for the tests
 use banyan::{
-    forest::{BranchCache, Config, Secrets, Forest, Transaction, TreeTypes},
+    forest::{BranchCache, Forest, Transaction, TreeTypes},
     index::{CompactSeq, Summarizable},
     memstore::MemStore,
     tree::Tree,

@@ -1,7 +1,6 @@
 #![allow(clippy::upper_case_acronyms)]
 use banyan::{
-    forest::{BranchCache, Secrets, Forest},
-    forest::{Config, Transaction, TreeTypes},
+    forest::{BranchCache, Forest, Transaction, TreeTypes}, 
     index::{UnitSeq, VecSeq},
     memstore::MemStore,
     tree::Tree,

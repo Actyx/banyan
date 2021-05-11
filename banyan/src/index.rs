@@ -40,7 +40,7 @@
 //! [SimpleCompactSeq]: struct.SimpleCompactSeq.html
 use crate::{
     forest::TreeTypes,
-    tree::{Offset, StreamBuilderState},
+    tree::Offset,
     zstd_dag_cbor_seq::ZstdDagCborSeq,
 };
 use anyhow::{anyhow, Result};

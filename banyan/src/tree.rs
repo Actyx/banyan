@@ -14,8 +14,7 @@ use libipld::cbor::DagCbor;
 use std::{collections::BTreeMap, fmt, fmt::Debug, iter, sync::Arc, usize};
 use tracing::*;
 
-type ReadConfig = Arc<Secrets>;
-
+/// A thing that hands out unique offsets. Parts of StreamBuilderState
 #[derive(Debug, Clone)]
 pub struct Offset {
     value: u64,
@@ -136,9 +135,9 @@ impl<
         R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static,
     > Forest<T, V, R>
 {
-    pub fn load_tree(&self, stream: &StreamBuilderState, link: T::Link) -> Result<Tree<T>> {
-        let (index, offset) = self.load_branch_from_link(stream, link)?;
-        let state = StreamBuilderState::new(offset, stream.read_config, stream.config);
+    pub fn load_tree(&self, secrets: Secrets, config: Config, link: T::Link) -> Result<Tree<T>> {
+        let (index, offset) = self.load_branch_from_link(&secrets, &config, link)?;
+        let state = StreamBuilderState::new(offset, secrets, config);
         Ok(Tree::new_with_offset(Some(index), state))
     }
 
@@ -676,8 +675,8 @@ impl<T: TreeTypes> Tree<T> {
         self.root.as_ref().map(|x| x.level() as i32).unwrap_or(-1)
     }
 
-    pub fn empty(config: Config, crypto_config: Secrets) -> Self {
-        let state = StreamBuilderState::new(0, crypto_config, config);
+    pub fn empty(config: Config, secrets: Secrets) -> Self {
+        let state = StreamBuilderState::new(0, secrets, config);
         Self::new_with_offset(None, state)
     }
 
