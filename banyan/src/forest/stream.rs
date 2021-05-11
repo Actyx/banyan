@@ -6,7 +6,7 @@ use crate::{
     util::{take_until_condition, ToStreamExt},
 };
 
-use super::{Secrets, FilteredChunk, Forest, TreeTypes};
+use super::{FilteredChunk, Forest, TreeTypes};
 use crate::query::*;
 use futures::executor::ThreadPool;
 use futures::prelude::*;
@@ -25,7 +25,6 @@ impl<
     /// This is implemented by calling [stream_trees_chunked] and just flattening the chunks.
     pub fn stream_trees<Q, S>(
         &self,
-        stream: Secrets,
         query: Q,
         trees: S,
     ) -> impl Stream<Item = anyhow::Result<(u64, T::Key, V)>> + Send
@@ -33,7 +32,7 @@ impl<
         Q: Query<T> + Clone + 'static,
         S: Stream<Item = Tree<T>> + Send + 'static,
     {
-        self.stream_trees_chunked(stream, query, trees, 0..=u64::max_value(), &|_| ())
+        self.stream_trees_chunked(query, trees, 0..=u64::max_value(), &|_| ())
             .map_ok(|chunk| stream::iter(chunk.data.into_iter().map(Ok)))
             .try_flatten()
     }
@@ -46,7 +45,6 @@ impl<
     ///     this can be useful to get progress info even if the query does not match any events
     pub fn stream_trees_chunked<S, Q, E, F>(
         &self,
-        stream: Secrets,
         query: Q,
         trees: S,
         range: RangeInclusive<u64>,
@@ -62,15 +60,15 @@ impl<
         let start_offset_ref = Arc::new(AtomicU64::new(*range.start()));
         let forest = self.clone();
         let result = trees
-            .filter_map(move |link| future::ready(link.into_inner()))
-            .flat_map(move |index| {
+            .filter_map(move |tree| future::ready(tree.current()))
+            .flat_map(move |(index, secrets)| {
                 // create an intersection of a range query and the main query
                 // and wrap it in an arc so it is cheap to clone
                 let range = start_offset_ref.load(Ordering::SeqCst)..=*range.end();
                 let query = AndQuery(OffsetRangeQuery::from(range), query.clone()).boxed();
                 let start_offset_ref = start_offset_ref.clone();
                 forest
-                    .stream_filtered_chunked0(stream.clone(), query, index, mk_extra)
+                    .stream_filtered_chunked0(secrets, query, index, mk_extra)
                     .take_while(move |result| {
                         if let Ok(chunk) = result {
                             // update the offset
@@ -98,7 +96,6 @@ impl<
     ///     this can be useful to get progress info even if the query does not match any events
     pub fn stream_trees_chunked_threaded<S, Q, E, F>(
         &self,
-        stream: Secrets,
         query: Q,
         trees: S,
         range: RangeInclusive<u64>,
@@ -114,8 +111,8 @@ impl<
         let offset = Arc::new(AtomicU64::new(*range.start()));
         let forest = self.clone();
         trees
-            .filter_map(move |link| future::ready(link.into_inner()))
-            .flat_map(move |index| {
+            .filter_map(move |tree| future::ready(tree.current()))
+            .flat_map(move |(index, secrets)| {
                 // create an intersection of a range query and the main query
                 // and wrap it in an arc so it is cheap to clone
                 let range = offset.load(Ordering::SeqCst)..=*range.end();
@@ -123,7 +120,7 @@ impl<
                 let offset = offset.clone();
                 let iter = forest
                     .clone()
-                    .traverse0(stream.clone(), query, index, mk_extra)
+                    .traverse0(secrets, query, index, mk_extra)
                     .take_while(move |result| {
                         if let Ok(chunk) = result {
                             // update the offset
@@ -146,7 +143,6 @@ impl<
     ///     this can be useful to get progress info even if the query does not match any events
     pub fn stream_trees_chunked_reverse<S, Q, E, F>(
         &self,
-        stream: Secrets,
         query: Q,
         trees: S,
         range: RangeInclusive<u64>,
@@ -162,8 +158,8 @@ impl<
         let end_offset_ref = Arc::new(AtomicU64::new(*range.end()));
         let forest = self.clone();
         let result = trees
-            .filter_map(move |tree| future::ready(tree.into_inner()))
-            .flat_map(move |index| {
+            .filter_map(move |tree| future::ready(tree.current()))
+            .flat_map(move |(index, secrets)| {
                 let end_offset = end_offset_ref.load(Ordering::SeqCst);
                 // create an intersection of a range query and the main query
                 // and wrap it in an arc so it is cheap to clone
@@ -174,7 +170,7 @@ impl<
                 .boxed();
                 let end_offset_ref = end_offset_ref.clone();
                 forest
-                    .stream_filtered_chunked_reverse0(&stream, query, index, mk_extra)
+                    .stream_filtered_chunked_reverse0(&secrets, query, index, mk_extra)
                     .take_while(move |result| {
                         if let Ok(chunk) = result {
                             // update the end offset from the start of what we got

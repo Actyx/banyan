@@ -293,11 +293,7 @@ where
     }
 
     /// load a leaf given a leaf index
-    pub(crate) fn load_leaf(
-        &self,
-        stream: &Secrets,
-        index: &LeafIndex<T>,
-    ) -> Result<Option<Leaf>> {
+    pub(crate) fn load_leaf(&self, stream: &Secrets, index: &LeafIndex<T>) -> Result<Option<Leaf>> {
         Ok(if let Some(link) = &index.link {
             let data = &self.store().get(link)?;
             let (items, _) = ZstdDagCborSeq::decrypt(data, stream.value_key())?;
@@ -554,12 +550,7 @@ where
         .boxed()
     }
 
-    pub(crate) fn dump0(
-        &self,
-        stream: &Secrets,
-        index: &Index<T>,
-        prefix: &str,
-    ) -> Result<()> {
+    pub(crate) fn dump0(&self, stream: &Secrets, index: &Index<T>, prefix: &str) -> Result<()> {
         match self.load_node(stream, index)? {
             NodeInfo::Branch(index, branch) => {
                 println!(
@@ -584,11 +575,7 @@ where
         Ok(())
     }
 
-    pub(crate) fn roots_impl(
-        &self,
-        stream: &Secrets,
-        index: &Index<T>,
-    ) -> Result<Vec<Index<T>>> {
+    pub(crate) fn roots_impl(&self, stream: &Secrets, index: &Index<T>) -> Result<Vec<Index<T>>> {
         let mut res = Vec::new();
         let mut level: i32 = i32::max_value();
         self.roots0(stream, index, &mut level, &mut res)?;

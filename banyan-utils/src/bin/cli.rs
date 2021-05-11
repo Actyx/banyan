@@ -244,7 +244,7 @@ async fn build_tree(
     };
     let mut tree = match base {
         Some(root) => forest.load_tree(secrets.clone(), config.clone(), root)?,
-        None => Tree::<TT>::empty(config, secrets),
+        None => Tree::<TT>::new(config, secrets),
     };
     let mut offset: u64 = 0;
     for _ in 0..batches {
@@ -298,7 +298,7 @@ async fn bench_build(
     };
     let mut tree = match base {
         Some(link) => forest.load_tree(secrets, config, link)?,
-        None => Tree::<TT>::empty(config, secrets),
+        None => Tree::<TT>::new(config, secrets),
     };
     let mut offset: u64 = 0;
     let data = (0..batches)
@@ -420,7 +420,8 @@ async fn main() -> Result<()> {
             let base = None;
             let batches = 1;
             let unbalanced = false;
-            let (tree, tcreate) = bench_build(&forest, base, batches, count, unbalanced, secrets, config).await?;
+            let (tree, tcreate) =
+                bench_build(&forest, base, batches, count, unbalanced, secrets, config).await?;
             let t0 = std::time::Instant::now();
             let _values: Vec<_> = forest.collect(&tree)?;
             let t1 = std::time::Instant::now();
@@ -512,12 +513,12 @@ async fn main() -> Result<()> {
             let forest2 = forest.clone();
             let trees = s.filter_map(move |x| {
                 let forest = forest2.clone();
-                future::ready(x.and_then(move |link| forest.load_tree(secrets, config, link)).ok())
+                future::ready(
+                    x.and_then(move |link| forest.load_tree(secrets, config, link))
+                        .ok(),
+                )
             });
-            let mut s = forest
-                .read()
-                .stream_trees(secrets.clone(), AllQuery, trees)
-                .boxed_local();
+            let mut s = forest.read().stream_trees(AllQuery, trees).boxed_local();
             while let Some(ev) = s.next().await {
                 println!("{:?}", ev);
             }
@@ -530,8 +531,7 @@ async fn main() -> Result<()> {
         }
         Command::SendStream { topic } => {
             let mut ticks = tokio::time::interval(Duration::from_secs(1));
-            let mut tree =
-                Tree::<TT>::empty(config, secrets);
+            let mut tree = Tree::<TT>::new(config, secrets);
             let mut offset = 0;
             loop {
                 poll_fn(|cx| ticks.poll_tick(cx)).await;

@@ -2,7 +2,7 @@
 use super::index::*;
 use crate::{
     forest::{
-        Config, Secrets, FilteredChunk, Forest, ForestIter, IndexIter, Transaction, TreeTypes,
+        Config, FilteredChunk, Forest, ForestIter, IndexIter, Secrets, Transaction, TreeTypes,
     },
     store::BlockWriter,
     util::BoxedIter,
@@ -37,16 +37,19 @@ impl Offset {
 
 #[derive(Debug, Clone)]
 pub struct StreamBuilderState {
-    read_config: Secrets,
+    /// the secrets used for building the trees of the stream
+    secrets: Secrets,
+    /// config that determines the branch size etc.
     pub(crate) config: Config,
+    /// current offset
     pub(crate) offset: Offset,
 }
 
 impl StreamBuilderState {
-    pub fn new(offset: u64, read_config: Secrets, config: Config) -> Self {
+    pub fn new(offset: u64, secrets: Secrets, config: Config) -> Self {
         Self {
             offset: Offset::new(offset),
-            read_config,
+            secrets,
             config,
         }
     }
@@ -60,27 +63,17 @@ impl StreamBuilderState {
     }
 
     pub fn secrets(&self) -> &Secrets {
-        &self.read_config
+        &self.secrets
     }
 
     pub fn value_key(&self) -> &chacha20::Key {
-        self.read_config.value_key()
+        self.secrets.value_key()
     }
 
     pub fn index_key(&self) -> &chacha20::Key {
-        self.read_config.index_key()
+        self.secrets.index_key()
     }
 }
-
-// pub struct StreamBuilder<T: TreeTypes> {
-//     state: StreamBuilderState,
-//     current: Option<Arc<Index<T>>>,
-// }
-
-// pub struct Tree2<T: TreeTypes> {
-//     read_config: ReadConfig,
-//     root: Option<Arc<Index<T>>>,
-// }
 
 /// A tree. This is mostly an user friendly handle.
 ///
@@ -403,12 +396,7 @@ impl<
     {
         match &tree.root {
             Some(index) => self
-                .traverse0(
-                    tree.state.secrets().clone(),
-                    query,
-                    index.clone(),
-                    mk_extra,
-                )
+                .traverse0(tree.state.secrets().clone(), query, index.clone(), mk_extra)
                 .left_iter(),
             None => iter::empty().right_iter(),
         }
@@ -427,12 +415,7 @@ impl<
     {
         match &tree.root {
             Some(index) => self
-                .traverse_rev0(
-                    tree.state.secrets().clone(),
-                    query,
-                    index.clone(),
-                    mk_extra,
-                )
+                .traverse_rev0(tree.state.secrets().clone(), query, index.clone(), mk_extra)
                 .left_iter(),
             None => iter::empty().right_iter(),
         }
@@ -652,6 +635,11 @@ impl<T: TreeTypes> Tree<T> {
         self.state.clone()
     }
 
+    pub fn new(config: Config, secrets: Secrets) -> Self {
+        let state = StreamBuilderState::new(0, secrets, config);
+        Self::new_with_offset(None, state)
+    }
+
     pub(crate) fn new_with_offset(root: Option<Index<T>>, state: StreamBuilderState) -> Self {
         Self {
             root: root.map(Arc::new),
@@ -663,8 +651,9 @@ impl<T: TreeTypes> Tree<T> {
         self.root.as_ref().and_then(|r| *r.link())
     }
 
-    pub fn into_inner(self) -> Option<Arc<Index<T>>> {
-        self.root
+    pub fn current(self) -> Option<(Arc<Index<T>>, Secrets)> {
+        let secrets = self.state.secrets.clone();
+        self.root.map(|x| (x, secrets))
     }
 
     pub fn as_index_ref(&self) -> Option<&Index<T>> {
@@ -673,11 +662,6 @@ impl<T: TreeTypes> Tree<T> {
 
     pub fn level(&self) -> i32 {
         self.root.as_ref().map(|x| x.level() as i32).unwrap_or(-1)
-    }
-
-    pub fn empty(config: Config, secrets: Secrets) -> Self {
-        let state = StreamBuilderState::new(0, secrets, config);
-        Self::new_with_offset(None, state)
     }
 
     pub fn debug() -> Self {

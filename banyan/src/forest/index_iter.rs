@@ -1,4 +1,4 @@
-use super::{Secrets, Forest, TreeTypes};
+use super::{Forest, Secrets, TreeTypes};
 use crate::{
     index::{CompactSeq, Index, NodeInfo},
     query::Query,
