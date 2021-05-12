@@ -32,7 +32,7 @@ impl Offset {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(crate) struct StreamBuilderState {
     /// the secrets used for building the trees of the stream
     secrets: Secrets,
@@ -103,18 +103,13 @@ impl<T: TreeTypes> fmt::Display for StreamBuilder<T> {
     }
 }
 
-impl<T: TreeTypes> Clone for StreamBuilder<T> {
-    fn clone(&self) -> Self {
-        Self {
-            root: self.root.clone(),
-            state: self.state.clone(),
-        }
-    }
-}
-
 impl<T: TreeTypes> StreamBuilder<T> {
-    pub(crate) fn state(&self) -> StreamBuilderState {
-        self.state.clone()
+    pub(crate) fn state(&self) -> &StreamBuilderState {
+        &self.state
+    }
+
+    pub(crate) fn state_mut(&mut self) -> &mut StreamBuilderState {
+        &mut self.state
     }
 
     pub fn new(config: Config, secrets: Secrets) -> Self {
@@ -172,5 +167,9 @@ impl<T: TreeTypes> StreamBuilder<T> {
     /// root of a non-empty tree
     pub fn index(&self) -> Option<&Index<T>> {
         self.root.as_ref().map(|x| x.as_ref())
+    }
+
+    pub(crate) fn set_index(&mut self, index: Option<Index<T>>) {
+        self.root = index.map(Arc::new)
     }
 }
