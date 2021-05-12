@@ -27,6 +27,7 @@ use std::{
     fmt,
     io::{Cursor, Write},
     iter,
+    ops::Range,
     time::Instant,
 };
 
@@ -274,19 +275,22 @@ impl ZstdDagCborSeq {
     }
 
     /// decrypt using the given key
-    pub fn decrypt(data: &[u8], key: &chacha20::Key) -> anyhow::Result<(Self, u64)> {
+    pub fn decrypt(data: &[u8], key: &chacha20::Key) -> anyhow::Result<(Self, Range<u64>)> {
         let (links, mut encrypted) = DagCborCodec.decode::<IpldNode>(data)?.into_data()?;
         let len = encrypted.len();
         anyhow::ensure!(len >= EXTRA_LEN);
         let (compressed, offset) = encrypted.split_at_mut(len - EXTRA_LEN);
-        let offset = u64::from_be_bytes((*offset).try_into()?);
+        let start_offset = u64::from_be_bytes((*offset).try_into()?);
+        let end_offset = start_offset
+            .checked_add(compressed.len() as u64)
+            .ok_or_else(|| anyhow::anyhow!("illegal start offset!"))?;
         let mut cipher = XChaCha20::new(key, &NONCE.into());
-        cipher.seek(offset);
+        cipher.seek(start_offset);
         cipher.apply_keystream(compressed);
         // just remove the nonce, but don't use a new vec.
         let mut decrypted = encrypted;
         decrypted.drain(len - EXTRA_LEN..);
-        Ok((Self::new(decrypted, links), offset))
+        Ok((Self::new(decrypted, links), start_offset..end_offset))
     }
 }
 
@@ -468,11 +472,11 @@ mod tests {
         let offset = rng.next_u64();
         let key: chacha20::Key = rng.gen::<[u8; 32]>().into();
         let encrypted = za.encrypt(&key, offset)?;
-        let (za2, offset2) = ZstdDagCborSeq::decrypt(&encrypted, &key)?;
+        let (za2, byte_range) = ZstdDagCborSeq::decrypt(&encrypted, &key)?;
         if za != za2 {
             return Ok(false);
         }
-        if offset != offset2 {
+        if (offset..offset + za.compressed().len() as u64) != byte_range {
             return Ok(false);
         }
         // println!("compressed={} n={} bytes={}", za.compressed().len(), data.len(), bytes);

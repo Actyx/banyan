@@ -51,6 +51,7 @@ use std::{
     fmt::{self, Debug, Display},
     io,
     iter::FromIterator,
+    ops::Range,
     sync::Arc,
 };
 
@@ -268,25 +269,25 @@ impl<T: TreeTypes> Index<T> {
 pub struct Branch<T: TreeTypes> {
     // index data for the children
     pub children: Arc<[Index<T>]>,
-    // stream offset at the start of this branch
-    offset: u64,
+    // stream offset at the end of this branch
+    end_offset: u64,
 }
 
 impl<T: TreeTypes> Clone for Branch<T> {
     fn clone(&self) -> Self {
         Self {
             children: self.children.clone(),
-            offset: self.offset,
+            end_offset: self.end_offset,
         }
     }
 }
 
 impl<T: TreeTypes> Branch<T> {
-    pub fn new(children: Vec<Index<T>>, offset: u64) -> Self {
+    pub fn new(children: Vec<Index<T>>, byte_range: Range<u64>) -> Self {
         assert!(!children.is_empty());
         Self {
             children: children.into(),
-            offset,
+            end_offset: byte_range.end,
         }
     }
     pub fn last_child(&self) -> &Index<T> {
@@ -312,12 +313,15 @@ impl<T: TreeTypes> Branch<T> {
 #[derive(Debug)]
 pub struct Leaf {
     items: ZstdDagCborSeq,
-    offset: u64,
+    end_offset: u64,
 }
 
 impl Leaf {
-    pub fn new(items: ZstdDagCborSeq, offset: u64) -> Self {
-        Self { items, offset }
+    pub fn new(items: ZstdDagCborSeq, byte_range: Range<u64>) -> Self {
+        Self {
+            items,
+            end_offset: byte_range.end,
+        }
     }
 
     pub fn child_at<T: DagCbor>(&self, offset: u64) -> Result<T> {
@@ -411,10 +415,10 @@ pub(crate) fn serialize_compressed<T: TreeTypes>(
 pub(crate) fn deserialize_compressed<T: TreeTypes>(
     key: &chacha20::Key,
     ipld: &[u8],
-) -> Result<(Vec<Index<T>>, u64)> {
-    let (seq, offset) = ZstdDagCborSeq::decrypt(ipld, key)?;
+) -> Result<(Vec<Index<T>>, Range<u64>)> {
+    let (seq, byte_range) = ZstdDagCborSeq::decrypt(ipld, key)?;
     let seq = seq.items::<Index<T>>()?;
-    Ok((seq, offset))
+    Ok((seq, byte_range))
 }
 
 /// Utility method to zip a number of indices with an offset that is increased by each index value

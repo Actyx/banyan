@@ -15,7 +15,7 @@ use futures::{prelude::*, stream::BoxStream};
 use libipld::cbor::DagCbor;
 use smallvec::{smallvec, SmallVec};
 
-use std::{iter, sync::Arc, time::Instant};
+use std::{iter, ops::Range, sync::Arc, time::Instant};
 #[derive(PartialEq)]
 enum Mode {
     Forward,
@@ -295,8 +295,8 @@ where
     pub(crate) fn load_leaf(&self, stream: &Secrets, index: &LeafIndex<T>) -> Result<Option<Leaf>> {
         Ok(if let Some(link) = &index.link {
             let data = &self.store().get(link)?;
-            let (items, offset) = ZstdDagCborSeq::decrypt(data, stream.value_key())?;
-            Some(Leaf::new(items, offset))
+            let (items, range) = ZstdDagCborSeq::decrypt(data, stream.value_key())?;
+            Some(Leaf::new(items, range))
         } else {
             None
         })
@@ -307,11 +307,11 @@ where
         secrets: &Secrets,
         sealed: impl Fn(&[Index<T>], u32) -> bool,
         link: T::Link,
-    ) -> Result<(Index<T>, u64)> {
+    ) -> Result<(Index<T>, Range<u64>)> {
         let store = self.store.clone();
         let index_key = secrets.index_key();
         let bytes = store.get(&link)?;
-        let (children, offset) = deserialize_compressed::<T>(index_key, &bytes)?;
+        let (children, byte_range) = deserialize_compressed::<T>(index_key, &bytes)?;
         let level = children.iter().map(|x| x.level()).max().unwrap() + 1;
         let count = children.iter().map(|x| x.count()).sum();
         let value_bytes = children.iter().map(|x| x.value_bytes()).sum();
@@ -327,7 +327,7 @@ where
             key_bytes,
         }
         .into();
-        Ok((result, offset))
+        Ok((result, byte_range))
     }
 
     /// load a branch given a branch index, from the cache
@@ -390,8 +390,8 @@ where
         let t0 = Instant::now();
         let result = Ok(if let Some(link) = &index.link {
             let bytes = self.store.get(&link)?;
-            let (children, offset) = deserialize_compressed(secrets.index_key(), &bytes)?;
-            Some(Branch::<T>::new(children, offset))
+            let (children, byte_range) = deserialize_compressed(secrets.index_key(), &bytes)?;
+            Some(Branch::<T>::new(children, byte_range))
         } else {
             None
         });
