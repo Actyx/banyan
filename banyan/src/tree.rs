@@ -11,10 +11,11 @@ use crate::{query::Query, store::ReadOnlyStore, util::IterExt, StreamBuilder, St
 use anyhow::Result;
 use futures::prelude::*;
 use libipld::cbor::DagCbor;
+use core::fmt;
 use std::{collections::BTreeMap, fmt::Debug, iter, sync::Arc, usize};
 use tracing::*;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Tree<T: TreeTypes> {
     root: Option<Arc<Index<T>>>,
     secrets: Secrets,
@@ -35,12 +36,67 @@ impl<T: TreeTypes> Tree<T> {
         self.root.map(|x| (x, secrets))
     }
 
-    pub(crate) fn as_index_ref(&self) -> Option<&Index<T>> {
+    pub fn as_index_ref(&self) -> Option<&Index<T>> {
         self.root.as_ref().map(|arc| arc.as_ref())
+    }
+
+    pub fn link(&self) -> Option<T::Link> {
+        self.root.as_ref().and_then(|r| *r.link())
+    }
+
+    pub fn level(&self) -> i32 {
+        self.root.as_ref().map(|x| x.level() as i32).unwrap_or(-1)
+    }
+
+    /// true for an empty tree
+    pub fn is_empty(&self) -> bool {
+        self.count() == 0
+    }
+
+    /// number of elements in the tree
+    pub fn count(&self) -> u64 {
+        self.root.as_ref().map(|x| x.count()).unwrap_or_default()
+    }
+
+    /// root of a non-empty tree
+    pub fn root(&self) -> Option<&T::Link> {
+        self.root.as_ref().and_then(|index| index.link().as_ref())
+    }
+
+    /// root of a non-empty tree
+    pub fn index(&self) -> Option<&Index<T>> {
+        self.root.as_ref().map(|x| x.as_ref())
     }
 
     pub fn secrets(&self) -> &Secrets {
         &self.secrets
+    }
+}
+
+impl<T: TreeTypes> fmt::Debug for Tree<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.root {
+            Some(root) => f
+                .debug_struct("Tree")
+                .field("count", &self.count())
+                .field("key_bytes", &root.key_bytes())
+                .field("value_bytes", &root.value_bytes())
+                .field("link", &root.link())
+                .finish(),
+            None => f
+                .debug_struct("Tree")
+                .field("count", &self.count())
+                .finish(),
+        }
+    }
+}
+
+impl<T: TreeTypes> fmt::Display for Tree<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.root {
+            Some(root) => write!(f, "{:?}", root.link(),),
+            None => write!(f, "empty tree"),
+        }
     }
 }
 

@@ -107,24 +107,15 @@ impl<T: TreeTypes> fmt::Display for StreamBuilder<T> {
 }
 
 impl<T: TreeTypes> StreamBuilder<T> {
-    pub(crate) fn state(&self) -> &StreamBuilderState {
-        &self.state
-    }
-
-    pub(crate) fn state_mut(&mut self) -> &mut StreamBuilderState {
-        &mut self.state
-    }
 
     pub fn new(config: Config, secrets: Secrets) -> Self {
         let state = StreamBuilderState::new(0, secrets, config);
         Self::new_from_index(None, state)
     }
 
-    pub(crate) fn new_from_index(root: Option<Index<T>>, state: StreamBuilderState) -> Self {
-        Self {
-            root: root.map(Arc::new),
-            state,
-        }
+    pub fn debug() -> Self {
+        let state = StreamBuilderState::new(0, Secrets::default(), Config::debug());
+        Self::new_from_index(None, state)
     }
 
     pub fn snapshot(&self) -> Tree<T> {
@@ -147,11 +138,6 @@ impl<T: TreeTypes> StreamBuilder<T> {
         self.root.as_ref().map(|x| x.level() as i32).unwrap_or(-1)
     }
 
-    pub fn debug() -> Self {
-        let state = StreamBuilderState::new(0, Secrets::default(), Config::debug());
-        Self::new_from_index(None, state)
-    }
-
     /// true for an empty tree
     pub fn is_empty(&self) -> bool {
         self.count() == 0
@@ -170,6 +156,21 @@ impl<T: TreeTypes> StreamBuilder<T> {
     /// root of a non-empty tree
     pub fn index(&self) -> Option<&Index<T>> {
         self.root.as_ref().map(|x| x.as_ref())
+    }
+
+    pub(crate) fn state(&self) -> &StreamBuilderState {
+        &self.state
+    }
+
+    pub(crate) fn state_mut(&mut self) -> &mut StreamBuilderState {
+        &mut self.state
+    }
+
+    pub(crate) fn new_from_index(root: Option<Index<T>>, state: StreamBuilderState) -> Self {
+        Self {
+            root: root.map(Arc::new),
+            state,
+        }
     }
 
     pub(crate) fn set_index(&mut self, index: Option<Index<T>>) {
