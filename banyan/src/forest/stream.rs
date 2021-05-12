@@ -80,7 +80,8 @@ impl<
             });
         // make sure we terminate when `end` is reached
         take_until_condition(result, move |chunk| match chunk {
-            Ok(chunk) => chunk.range.end >= end,
+            // end is inclusive, whereas `chunk.range.end` is exclusive
+            Ok(chunk) => chunk.range.end > end,
             Err(_) => true,
         })
     }
