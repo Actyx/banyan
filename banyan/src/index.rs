@@ -38,7 +38,7 @@
 //! [CompactSeq]: trait.CompactSeq.html
 //! [Semigroup]: trait.Semigroup.html
 //! [SimpleCompactSeq]: struct.SimpleCompactSeq.html
-use crate::{forest::TreeTypes, zstd_dag_cbor_seq::ZstdDagCborSeq, Offset};
+use crate::{forest::TreeTypes, zstd_dag_cbor_seq::ZstdDagCborSeq, StreamOffset};
 use anyhow::{anyhow, Result};
 use derive_more::From;
 use libipld::{
@@ -268,7 +268,7 @@ impl<T: TreeTypes> Index<T> {
 pub struct Branch<T: TreeTypes> {
     // index data for the children
     pub children: Arc<[Index<T>]>,
-    // offset of the branch
+    // stream offset at the start of this branch
     offset: u64,
 }
 
@@ -400,7 +400,7 @@ impl<T: TreeTypes> Display for NodeInfo<'_, T> {
 
 pub(crate) fn serialize_compressed<T: TreeTypes>(
     key: &chacha20::Key,
-    state: &mut Offset,
+    state: &mut StreamOffset,
     items: &[Index<T>],
     level: i32,
 ) -> Result<Vec<u8>> {

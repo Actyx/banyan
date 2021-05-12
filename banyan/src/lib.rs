@@ -71,7 +71,7 @@ pub use chacha20;
 pub use zstd_dag_cbor_seq::ZstdDagCborSeq;
 
 pub use stream_builder::StreamBuilder;
-use stream_builder::{Offset, StreamBuilderState};
+use stream_builder::{StreamBuilderState, StreamOffset};
 
 #[cfg(test)]
 extern crate quickcheck;

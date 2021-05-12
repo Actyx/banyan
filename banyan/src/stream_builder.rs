@@ -9,11 +9,11 @@ use crate::{
 
 /// A thing that hands out unique offsets. Parts of StreamBuilderState
 #[derive(Debug, Clone)]
-pub(crate) struct Offset {
+pub(crate) struct StreamOffset {
     value: u64,
 }
 
-impl Offset {
+impl StreamOffset {
     pub fn new(value: u64) -> Self {
         Self { value }
     }
@@ -36,16 +36,19 @@ impl Offset {
 pub(crate) struct StreamBuilderState {
     /// the secrets used for building the trees of the stream
     secrets: Secrets,
-    /// config that determines the branch size etc.
+    /// tree config that determines the branch size etc.
     config: Config,
-    /// current offset
-    pub(crate) offset: Offset,
+    /// current stream offset
+    ///
+    /// this is the first free offset, or the total number of bytes ever written
+    /// on this stream.
+    pub(crate) offset: StreamOffset,
 }
 
 impl StreamBuilderState {
     pub fn new(offset: u64, secrets: Secrets, config: Config) -> Self {
         Self {
-            offset: Offset::new(offset),
+            offset: StreamOffset::new(offset),
             secrets,
             config,
         }
