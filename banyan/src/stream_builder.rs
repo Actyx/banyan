@@ -118,11 +118,16 @@ impl<T: TreeTypes> StreamBuilder<T> {
     }
 
     pub fn snapshot(&self) -> Tree<T> {
-        Tree::new(
-            self.root.clone(),
-            self.state.secrets().clone(),
-            self.state.offset.current(),
-        )
+        self.root
+            .as_ref()
+            .map(|root| {
+                Tree::new(
+                    root.clone(),
+                    self.state.secrets().clone(),
+                    self.state.offset.current(),
+                )
+            })
+            .unwrap_or_default()
     }
 
     pub fn link(&self) -> Option<T::Link> {
