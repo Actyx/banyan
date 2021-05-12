@@ -331,9 +331,9 @@ impl Summarizable<Key> for KeySeq {
         let tags = self.tags.tags.clone();
         Key {
             time: TimeData {
-                max_time,
-                min_time,
                 min_lamport,
+                min_time,
+                max_time,
             },
             tags,
         }

@@ -332,9 +332,9 @@ async fn stream_trees_chunked_should_honour_an_inclusive_upper_bound(
     }
     let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
     let forest = txn(store, 1000);
-    let mut tree = Tree::<TT>::empty();
-    tree = forest.extend_unpacked(&tree, xs.clone().into_iter())?;
-    let trees = stream::once(async move { tree }).chain(stream::pending());
+    let mut tree = StreamBuilder::<TT>::debug();
+    forest.extend_unpacked(&mut tree, xs.clone().into_iter())?;
+    let trees = stream::once(async move { tree.snapshot() }).chain(stream::pending());
 
     let actual = forest
         .stream_trees_chunked(AllQuery, trees, 0u64..=(len - 1), &|_| ())
@@ -367,9 +367,9 @@ async fn stream_trees_chunked_reverse_should_honour_an_inclusive_upper_bound(
     }
     let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
     let forest = txn(store, 1000);
-    let mut tree = Tree::<TT>::empty();
-    tree = forest.extend_unpacked(&tree, xs.clone().into_iter())?;
-    let trees = stream::once(async move { tree }).chain(stream::pending());
+    let mut tree = StreamBuilder::<TT>::debug();
+    forest.extend_unpacked(&mut tree, xs.clone().into_iter())?;
+    let trees = stream::once(async move { tree.snapshot() }).chain(stream::pending());
     let actual = forest
         .stream_trees_chunked_reverse(AllQuery, trees, 0u64..=(len - 1), &|_| ())
         .map_ok(move |chunk| stream::iter(chunk.data))

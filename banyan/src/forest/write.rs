@@ -340,7 +340,7 @@ where
     ) -> Result<(T::Link, u64)> {
         let t0 = Instant::now();
         let level = stream.config().zstd_level;
-        let key = stream.index_key().clone();
+        let key = *stream.index_key();
         let cbor = serialize_compressed(&key, &mut stream.offset, &items, level)?;
         let len = cbor.len() as u64;
         let result = Ok((self.writer.put(cbor)?, len));

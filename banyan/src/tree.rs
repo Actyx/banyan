@@ -541,11 +541,12 @@ impl<
         query: &'a Q,
     ) -> Result<()> {
         let index = tree.index().cloned();
-        Ok(if let Some(index) = index {
+        if let Some(index) = index {
             let mut level: i32 = i32::max_value();
             let index = self.retain0(0, query, &index, &mut level, tree.state_mut())?;
             tree.set_index(Some(index));
-        })
+        }
+        Ok(())
     }
 
     /// repair a tree by purging parts of the tree that can not be resolved.
@@ -558,14 +559,12 @@ impl<
     pub fn repair(&self, tree: &mut StreamBuilder<T>) -> Result<Vec<String>> {
         let mut report = Vec::new();
         let index = tree.index().cloned();
-        Ok(if let Some(index) = index {
+        if let Some(index) = index {
             let mut level: i32 = i32::max_value();
             let repaired = self.repair0(&index, &mut report, &mut level, tree.state_mut())?;
             tree.set_index(Some(repaired));
-            report
-        } else {
-            report
-        })
+        }
+        Ok(report)
     }
 }
 
