@@ -38,7 +38,7 @@
 //! [CompactSeq]: trait.CompactSeq.html
 //! [Semigroup]: trait.Semigroup.html
 //! [SimpleCompactSeq]: struct.SimpleCompactSeq.html
-use crate::{forest::TreeTypes, zstd_dag_cbor_seq::ZstdDagCborSeq};
+use crate::{forest::TreeTypes, zstd_dag_cbor_seq::ZstdDagCborSeq, StreamOffset};
 use anyhow::{anyhow, Result};
 use derive_more::From;
 use libipld::{
@@ -51,6 +51,7 @@ use std::{
     fmt::{self, Debug, Display},
     io,
     iter::FromIterator,
+    ops::Range,
     sync::Arc,
 };
 
@@ -268,21 +269,25 @@ impl<T: TreeTypes> Index<T> {
 pub struct Branch<T: TreeTypes> {
     // index data for the children
     pub children: Arc<[Index<T>]>,
+    // stream offset at the end of this branch
+    end_offset: u64,
 }
 
 impl<T: TreeTypes> Clone for Branch<T> {
     fn clone(&self) -> Self {
         Self {
             children: self.children.clone(),
+            end_offset: self.end_offset,
         }
     }
 }
 
 impl<T: TreeTypes> Branch<T> {
-    pub fn new(children: Vec<Index<T>>) -> Self {
+    pub fn new(children: Vec<Index<T>>, byte_range: Range<u64>) -> Self {
         assert!(!children.is_empty());
         Self {
             children: children.into(),
+            end_offset: byte_range.end,
         }
     }
     pub fn last_child(&self) -> &Index<T> {
@@ -306,11 +311,17 @@ impl<T: TreeTypes> Branch<T> {
 ///
 /// This is a wrapper around a cbor encoded and zstd compressed sequence of values
 #[derive(Debug)]
-pub struct Leaf(ZstdDagCborSeq);
+pub struct Leaf {
+    items: ZstdDagCborSeq,
+    end_offset: u64,
+}
 
 impl Leaf {
-    pub fn new(value: ZstdDagCborSeq) -> Self {
-        Self(value)
+    pub fn new(items: ZstdDagCborSeq, byte_range: Range<u64>) -> Self {
+        Self {
+            items,
+            end_offset: byte_range.end,
+        }
     }
 
     pub fn child_at<T: DagCbor>(&self, offset: u64) -> Result<T> {
@@ -322,7 +333,7 @@ impl Leaf {
 
 impl AsRef<ZstdDagCborSeq> for Leaf {
     fn as_ref(&self) -> &ZstdDagCborSeq {
-        &self.0
+        &self.items
     }
 }
 
@@ -393,20 +404,21 @@ impl<T: TreeTypes> Display for NodeInfo<'_, T> {
 
 pub(crate) fn serialize_compressed<T: TreeTypes>(
     key: &chacha20::Key,
-    nonce: &chacha20::XNonce,
+    state: &mut StreamOffset,
     items: &[Index<T>],
     level: i32,
 ) -> Result<Vec<u8>> {
     let zs = ZstdDagCborSeq::from_iter(items, level)?;
-    zs.into_encrypted(nonce, key)
+    zs.into_encrypted(key, state)
 }
 
 pub(crate) fn deserialize_compressed<T: TreeTypes>(
     key: &chacha20::Key,
     ipld: &[u8],
-) -> Result<Vec<Index<T>>> {
-    let seq = ZstdDagCborSeq::decrypt(ipld, key)?;
-    seq.items::<Index<T>>()
+) -> Result<(Vec<Index<T>>, Range<u64>)> {
+    let (seq, byte_range) = ZstdDagCborSeq::decrypt(ipld, key)?;
+    let seq = seq.items::<Index<T>>()?;
+    Ok((seq, byte_range))
 }
 
 /// Utility method to zip a number of indices with an offset that is increased by each index value

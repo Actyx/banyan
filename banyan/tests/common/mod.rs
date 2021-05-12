@@ -1,10 +1,11 @@
 #![allow(clippy::upper_case_acronyms)]
 //! helper methods for the tests
 use banyan::{
-    forest::{BranchCache, Config, CryptoConfig, Forest, Transaction, TreeTypes},
+    forest::{BranchCache, Forest, Transaction, TreeTypes},
     index::{CompactSeq, Summarizable},
     memstore::MemStore,
     tree::Tree,
+    StreamBuilder,
 };
 use futures::Future;
 use libipld::{
@@ -84,15 +85,7 @@ impl Arbitrary for Key {
 #[allow(dead_code)]
 pub fn txn(store: MemStore<Sha256Digest>, cache_cap: usize) -> Txn {
     let branch_cache = BranchCache::new(cache_cap);
-    Txn::new(
-        Forest::new(
-            store.clone(),
-            branch_cache,
-            CryptoConfig::default(),
-            Config::debug(),
-        ),
-        store,
-    )
+    Txn::new(Forest::new(store.clone(), branch_cache), store)
 }
 
 #[allow(dead_code)]
@@ -103,10 +96,10 @@ where
 {
     let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
     let forest = txn(store, 1000);
-    let mut tree = Tree::<TT>::empty();
-    tree = forest.extend(&tree, xs)?;
+    let mut tree = StreamBuilder::<TT>::debug();
+    forest.extend(&mut tree, xs)?;
     forest.assert_invariants(&tree)?;
-    Ok((tree, forest))
+    Ok((tree.snapshot(), forest))
 }
 
 #[allow(dead_code)]

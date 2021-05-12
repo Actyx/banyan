@@ -2,6 +2,7 @@ use crate::{
     forest::{BranchResult, Config, CreateMode, Forest, Transaction, TreeTypes},
     index::zip_with_offset_ref,
     store::{BlockWriter, ReadOnlyStore},
+    StreamBuilderState,
 };
 use crate::{
     index::serialize_compressed,
@@ -17,7 +18,6 @@ use crate::{
 use anyhow::{ensure, Result};
 use core::fmt::Debug;
 use libipld::cbor::DagCbor;
-use rand::RngCore;
 use std::{iter, time::Instant};
 
 /// basic random access append only tree
@@ -36,9 +36,10 @@ where
     fn leaf_from_iter(
         &self,
         from: &mut iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
+        stream: &mut StreamBuilderState,
     ) -> Result<LeafIndex<T>> {
         assert!(from.peek().is_some());
-        self.extend_leaf(&[], None, from)
+        self.extend_leaf(&[], None, from, stream)
     }
 
     /// Creates a leaf from a sequence that either contains all items from the sequence, or is full
@@ -49,6 +50,7 @@ where
         compressed: &[u8],
         keys: Option<T::KeySeq>,
         from: &mut iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
+        stream: &mut StreamBuilderState,
     ) -> Result<LeafIndex<T>> {
         let t0 = Instant::now();
         assert!(from.peek().is_some());
@@ -57,14 +59,13 @@ where
             compressed,
             from,
             &mut keys,
-            self.config().zstd_level,
-            self.config().target_leaf_size,
-            self.config().max_uncompressed_leaf_size,
-            self.config().max_leaf_count as usize,
+            stream.config().zstd_level,
+            stream.config().target_leaf_size,
+            stream.config().max_uncompressed_leaf_size,
+            stream.config().max_leaf_count as usize,
         )?;
         let value_bytes = data.compressed().len() as u64;
-        let nonce = self.random_nonce();
-        let encrypted = data.into_encrypted(&nonce, &self.value_key())?;
+        let encrypted = data.into_encrypted(&stream.value_key().clone(), &mut stream.offset)?;
         let keys = keys.into_iter().collect::<T::KeySeq>();
         let encrypted_len = encrypted.len();
         // store leaf
@@ -96,6 +97,7 @@ where
         mut children: Vec<Index<T>>,
         level: u32,
         from: &mut iter::Peekable<impl Iterator<Item = (T::Key, V)> + Send>,
+        stream: &mut StreamBuilderState,
         mode: CreateMode,
     ) -> Result<BranchIndex<T>> {
         assert!(
@@ -120,13 +122,14 @@ where
             .iter()
             .map(|child| child.summarize())
             .collect::<Vec<_>>();
-        while from.peek().is_some() && ((children.len() as u64) < self.config().max_branch_count) {
-            let child = self.fill_node(level - 1, from)?;
+        while from.peek().is_some() && ((children.len() as u64) < stream.config().max_branch_count)
+        {
+            let child = self.fill_node(level - 1, from, stream)?;
             let summary = child.summarize();
             summaries.push(summary);
             children.push(child);
         }
-        let index = self.new_branch(&children, mode)?;
+        let index = self.new_branch(&children, stream, mode)?;
         tracing::debug!(
             "branch created count={} value_bytes={} key_bytes={} sealed={}",
             index.summaries.count(),
@@ -152,12 +155,13 @@ where
         &self,
         level: u32,
         from: &mut iter::Peekable<impl Iterator<Item = (T::Key, V)> + Send>,
+        stream: &mut StreamBuilderState,
     ) -> Result<Index<T>> {
         assert!(from.peek().is_some());
         Ok(if level == 0 {
-            self.leaf_from_iter(from)?.into()
+            self.leaf_from_iter(from, stream)?.into()
         } else {
-            self.extend_branch(Vec::new(), level, from, CreateMode::Packed)?
+            self.extend_branch(Vec::new(), level, from, stream, CreateMode::Packed)?
                 .into()
         })
     }
@@ -165,7 +169,12 @@ where
     /// creates a new branch from the given children and returns the branch index as a result.
     ///
     /// The level will be the max level of the children + 1. We do not want to support branches that are artificially high.
-    fn new_branch(&self, children: &[Index<T>], mode: CreateMode) -> Result<BranchIndex<T>> {
+    fn new_branch(
+        &self,
+        children: &[Index<T>],
+        stream: &mut StreamBuilderState,
+        mode: CreateMode,
+    ) -> Result<BranchIndex<T>> {
         assert!(!children.is_empty());
         if mode == CreateMode::Packed {
             assert!(is_sorted(children.iter().map(|x| x.level()).rev()));
@@ -177,9 +186,9 @@ where
             .map(|child| child.summarize())
             .collect::<Vec<_>>();
         let value_bytes = children.iter().map(|x| x.value_bytes()).sum();
-        let sealed = self.config.branch_sealed(&children, level);
+        let sealed = stream.config().branch_sealed(&children, level);
         let summaries: T::SummarySeq = summaries.into_iter().collect();
-        let (link, encoded_children_len) = self.persist_branch(&children)?;
+        let (link, encoded_children_len) = self.persist_branch(&children, stream)?;
         let key_bytes = children.iter().map(|x| x.key_bytes()).sum::<u64>() + encoded_children_len;
         Ok(BranchIndex {
             level,
@@ -200,6 +209,7 @@ where
         node: Option<&Index<T>>,
         level: u32,
         from: &mut iter::Peekable<impl Iterator<Item = (T::Key, V)> + Send>,
+        stream: &mut StreamBuilderState,
     ) -> Result<Index<T>> {
         ensure!(
             from.peek().is_some(),
@@ -207,14 +217,14 @@ where
         );
         assert!(node.map(|node| level >= node.level()).unwrap_or(true));
         let mut node = if let Some(node) = node {
-            self.extend0(node, from)?
+            self.extend0(node, from, stream)?
         } else {
-            self.leaf_from_iter(from)?.into()
+            self.leaf_from_iter(from, stream)?.into()
         };
         while (from.peek().is_some() || node.level() == 0) && node.level() < level {
             let level = node.level() + 1;
             node = self
-                .extend_branch(vec![node], level, from, CreateMode::Packed)?
+                .extend_branch(vec![node], level, from, stream, CreateMode::Packed)?
                 .into();
         }
         if from.peek().is_some() {
@@ -230,6 +240,7 @@ where
         &self,
         index: Option<&Index<T>>,
         from: I,
+        stream: &mut StreamBuilderState,
     ) -> Result<Option<Index<T>>>
     where
         I: IntoIterator<Item = (T::Key, V)>,
@@ -240,12 +251,18 @@ where
             return Ok(index.cloned());
         }
         // create a completely new tree
-        let b = self.extend_above(None, u32::max_value(), &mut from)?;
+        let b = self.extend_above(None, u32::max_value(), &mut from, stream)?;
         Ok(Some(match index.cloned() {
             Some(a) => {
                 let level = a.level().max(b.level()) + 1;
-                self.extend_branch(vec![a, b], level, from.by_ref(), CreateMode::Unpacked)?
-                    .into()
+                self.extend_branch(
+                    vec![a, b],
+                    level,
+                    from.by_ref(),
+                    stream,
+                    CreateMode::Unpacked,
+                )?
+                .into()
             }
             None => b,
         }))
@@ -258,6 +275,7 @@ where
         &self,
         index: &Index<T>,
         from: &mut iter::Peekable<impl Iterator<Item = (T::Key, V)> + Send>,
+        stream: &mut StreamBuilderState,
     ) -> Result<Index<T>> {
         tracing::debug!(
             "extend {} {} {} {}",
@@ -269,20 +287,21 @@ where
         if index.sealed() || from.peek().is_none() {
             return Ok(index.clone());
         }
-        Ok(match self.load_node(index)? {
+        Ok(match self.load_node(stream.secrets(), index)? {
             NodeInfo::Leaf(index, leaf) => {
                 tracing::debug!("extending existing leaf");
                 let keys = index.keys.clone();
-                self.extend_leaf(leaf.as_ref().compressed(), Some(keys), from)?
+                self.extend_leaf(leaf.as_ref().compressed(), Some(keys), from, stream)?
                     .into()
             }
             NodeInfo::Branch(index, branch) => {
                 tracing::debug!("extending existing branch");
                 let mut children = branch.children.to_vec();
                 if let Some(last_child) = children.last_mut() {
-                    *last_child = self.extend_above(Some(last_child), index.level - 1, from)?;
+                    *last_child =
+                        self.extend_above(Some(last_child), index.level - 1, from, stream)?;
                 }
-                self.extend_branch(children, index.level, from, CreateMode::Packed)?
+                self.extend_branch(children, index.level, from, stream, CreateMode::Packed)?
                     .into()
             }
             NodeInfo::PurgedBranch(_) | NodeInfo::PurgedLeaf(_) => {
@@ -293,36 +312,36 @@ where
     }
 
     /// Performs a single step of simplification on a sequence of sealed roots of descending level
-    pub(crate) fn simplify_roots(&self, roots: &mut Vec<Index<T>>, from: usize) -> Result<()> {
+    pub(crate) fn simplify_roots(
+        &self,
+        roots: &mut Vec<Index<T>>,
+        from: usize,
+        stream: &mut StreamBuilderState,
+    ) -> Result<()> {
         assert!(roots.len() > 1);
         assert!(is_sorted(roots.iter().map(|x| x.level()).rev()));
-        match find_valid_branch(&self.config, &roots[from..]) {
+        match find_valid_branch(stream.config(), &roots[from..]) {
             BranchResult::Sealed(count) | BranchResult::Unsealed(count) => {
                 let range = from..from + count;
-                let node = self.new_branch(&roots[range.clone()], CreateMode::Packed)?;
+                let node = self.new_branch(&roots[range.clone()], stream, CreateMode::Packed)?;
                 roots.splice(range, Some(node.into()));
             }
             BranchResult::Skip(count) => {
-                self.simplify_roots(roots, from + count)?;
+                self.simplify_roots(roots, from + count, stream)?;
             }
         }
         Ok(())
     }
 
-    fn random_nonce(&self) -> chacha20::XNonce {
-        let mut nonce = [0u8; 24];
-        rand::thread_rng().fill_bytes(&mut nonce);
-        nonce.into()
-    }
-
-    fn persist_branch(&self, children: &[Index<T>]) -> Result<(T::Link, u64)> {
+    fn persist_branch(
+        &self,
+        items: &[Index<T>],
+        stream: &mut StreamBuilderState,
+    ) -> Result<(T::Link, u64)> {
         let t0 = Instant::now();
-        let cbor = serialize_compressed(
-            &self.index_key(),
-            &self.random_nonce(),
-            &children,
-            self.config().zstd_level,
-        )?;
+        let level = stream.config().zstd_level;
+        let key = *stream.index_key();
+        let cbor = serialize_compressed(&key, &mut stream.offset, &items, level)?;
         let len = cbor.len() as u64;
         let result = Ok((self.writer.put(cbor)?, len));
         tracing::debug!("persist_branch {}", t0.elapsed().as_secs_f64());
@@ -335,6 +354,7 @@ where
         query: &Q,
         index: &Index<T>,
         level: &mut i32,
+        stream: &mut StreamBuilderState,
     ) -> Result<Index<T>> {
         if index.sealed() && index.level() as i32 <= *level {
             // this node is sealed and below the level, so we can proceed.
@@ -359,13 +379,13 @@ where
                     index.link = None;
                 }
                 // this will only be executed unless we are already purged
-                if let Some(node) = self.load_branch(&index)? {
+                if let Some(node) = self.load_branch(stream.secrets(), &index)? {
                     let mut children = node.children.to_vec();
                     let mut changed = false;
                     let offsets = zip_with_offset_ref(node.children.iter(), offset);
                     for (i, (child, offset)) in offsets.enumerate() {
                         // TODO: ensure we only purge children that are in the packed part!
-                        let child1 = self.retain0(offset, query, child, level)?;
+                        let child1 = self.retain0(offset, query, child, level, stream)?;
                         if child1.link() != child.link() {
                             children[i] = child1;
                             changed = true;
@@ -373,7 +393,7 @@ where
                     }
                     // rewrite the node and update the link if children have changed
                     if changed {
-                        let (link, _) = self.persist_branch(&children)?;
+                        let (link, _) = self.persist_branch(&children, stream)?;
                         // todo: update size data
                         index.link = Some(link);
                     }
@@ -400,6 +420,7 @@ where
         index: &Index<T>,
         report: &mut Vec<String>,
         level: &mut i32,
+        stream: &mut StreamBuilderState,
     ) -> Result<Index<T>> {
         if !index.sealed() {
             *level = (*level).min((index.level() as i32) - 1);
@@ -407,14 +428,14 @@ where
         match index {
             Index::Branch(index) => {
                 // important not to hit the cache here!
-                let branch = self.load_branch(index);
+                let branch = self.load_branch(stream.secrets(), index);
                 let mut index = index.clone();
                 match branch {
                     Ok(Some(node)) => {
                         let mut children = node.children.to_vec();
                         let mut changed = false;
                         for (i, child) in node.children.iter().enumerate() {
-                            let child1 = self.repair0(child, report, level)?;
+                            let child1 = self.repair0(child, report, level, stream)?;
                             if child1.link() != child.link() {
                                 children[i] = child1;
                                 changed = true;
@@ -422,7 +443,7 @@ where
                         }
                         // rewrite the node and update the link if children have changed
                         if changed {
-                            let (link, _) = self.persist_branch(&children)?;
+                            let (link, _) = self.persist_branch(&children, stream)?;
                             index.link = Some(link);
                         }
                     }
@@ -445,7 +466,7 @@ where
             Index::Leaf(index) => {
                 let mut index = index.clone();
                 // important not to hit the cache here!
-                if let Err(cause) = self.load_leaf(&index) {
+                if let Err(cause) = self.load_leaf(stream.secrets(), &index) {
                     let link_txt = index.link.map(|x| x.to_string()).unwrap_or_default();
                     report.push(format!("forgetting leaf {} due to {}", link_txt, cause));
                     if !index.sealed {

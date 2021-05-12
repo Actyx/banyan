@@ -60,15 +60,15 @@ impl<
         let start_offset_ref = Arc::new(AtomicU64::new(*range.start()));
         let forest = self.clone();
         let result = trees
-            .filter_map(move |link| future::ready(link.into_inner()))
-            .flat_map(move |index| {
+            .filter_map(move |tree| future::ready(tree.into_inner()))
+            .flat_map(move |(index, secrets)| {
                 // create an intersection of a range query and the main query
                 // and wrap it in an arc so it is cheap to clone
                 let range = start_offset_ref.load(Ordering::SeqCst)..=*range.end();
                 let query = AndQuery(OffsetRangeQuery::from(range), query.clone()).boxed();
                 let start_offset_ref = start_offset_ref.clone();
                 forest
-                    .stream_filtered_chunked0(query, index, mk_extra)
+                    .stream_filtered_chunked0(secrets, query, index, mk_extra)
                     .take_while(move |result| {
                         if let Ok(chunk) = result {
                             // update the offset
@@ -112,25 +112,24 @@ impl<
         let offset = Arc::new(AtomicU64::new(*range.start()));
         let forest = self.clone();
         trees
-            .filter_map(move |link| future::ready(link.into_inner()))
-            .flat_map(move |index| {
+            .filter_map(move |tree| future::ready(tree.into_inner()))
+            .flat_map(move |(index, secrets)| {
                 // create an intersection of a range query and the main query
                 // and wrap it in an arc so it is cheap to clone
                 let range = offset.load(Ordering::SeqCst)..=*range.end();
                 let query = AndQuery(OffsetRangeQuery::from(range), query.clone()).boxed();
                 let offset = offset.clone();
-                let iter =
-                    forest
-                        .clone()
-                        .traverse0(query, index, mk_extra)
-                        .take_while(move |result| {
-                            if let Ok(chunk) = result {
-                                // update the offset
-                                offset.store(chunk.range.end, Ordering::SeqCst)
-                            }
-                            // abort at the first non-ok offset
-                            result.is_ok()
-                        });
+                let iter = forest
+                    .clone()
+                    .traverse0(secrets, query, index, mk_extra)
+                    .take_while(move |result| {
+                        if let Ok(chunk) = result {
+                            // update the offset
+                            offset.store(chunk.range.end, Ordering::SeqCst)
+                        }
+                        // abort at the first non-ok offset
+                        result.is_ok()
+                    });
                 iter.into_stream(1, thread_pool.clone())
             })
     }
@@ -161,7 +160,7 @@ impl<
         let forest = self.clone();
         let result = trees
             .filter_map(move |tree| future::ready(tree.into_inner()))
-            .flat_map(move |index| {
+            .flat_map(move |(index, secrets)| {
                 let end_offset = end_offset_ref.load(Ordering::SeqCst);
                 // create an intersection of a range query and the main query
                 // and wrap it in an arc so it is cheap to clone
@@ -172,7 +171,7 @@ impl<
                 .boxed();
                 let end_offset_ref = end_offset_ref.clone();
                 forest
-                    .stream_filtered_chunked_reverse0(query, index, mk_extra)
+                    .stream_filtered_chunked_reverse0(&secrets, query, index, mk_extra)
                     .take_while(move |result| {
                         if let Ok(chunk) = result {
                             // update the end offset from the start of what we got

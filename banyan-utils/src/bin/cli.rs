@@ -12,6 +12,7 @@ use banyan::{
     query::{AllQuery, OffsetRangeQuery, QueryExt},
     store::{ArcBlockWriter, ArcReadOnlyStore, BlockWriter, ReadOnlyStore},
     tree::*,
+    StreamBuilder,
 };
 use banyan_utils::{
     create_chacha_key, dump,
@@ -224,7 +225,9 @@ async fn build_tree(
     count: u64,
     unbalanced: bool,
     print_every: u64,
-) -> anyhow::Result<Tree<TT>> {
+) -> anyhow::Result<StreamBuilder<TT>> {
+    let secrets = Secrets::default();
+    let config = Config::debug();
     let mut tagger = Tagger::new();
     // function to add some arbitrary tags to test out tag querying and compression
     let mut tags_from_offset = |i: u64| -> TagSet {
@@ -241,8 +244,8 @@ async fn build_tree(
         }
     };
     let mut tree = match base {
-        Some(root) => forest.load_tree(root)?,
-        None => Tree::<TT>::empty(),
+        Some(root) => forest.load_stream_builder(secrets, config, root)?,
+        None => StreamBuilder::<TT>::new(config, secrets),
     };
     let mut offset: u64 = 0;
     for _ in 0..batches {
@@ -260,10 +263,10 @@ async fn build_tree(
             })
             .collect::<Vec<_>>();
         if unbalanced {
-            tree = forest.extend_unpacked(&tree, v)?;
+            forest.extend_unpacked(&mut tree, v)?;
             forest.assert_invariants(&tree)?;
         } else {
-            tree = forest.extend(&tree, v)?;
+            forest.extend(&mut tree, v)?;
             forest.assert_invariants(&tree)?;
         }
     }
@@ -276,6 +279,8 @@ async fn bench_build(
     batches: u64,
     count: u64,
     unbalanced: bool,
+    secrets: Secrets,
+    config: Config,
 ) -> anyhow::Result<(Tree<TT>, std::time::Duration)> {
     let mut tagger = Tagger::new();
     // function to add some arbitrary tags to test out tag querying and compression
@@ -293,8 +298,8 @@ async fn bench_build(
         }
     };
     let mut tree = match base {
-        Some(root) => forest.load_tree(root)?,
-        None => Tree::<TT>::empty(),
+        Some(link) => forest.load_stream_builder(secrets, config, link)?,
+        None => StreamBuilder::<TT>::new(config, secrets),
     };
     let mut offset: u64 = 0;
     let data = (0..batches)
@@ -314,15 +319,15 @@ async fn bench_build(
     let t0 = std::time::Instant::now();
     for v in data {
         if unbalanced {
-            tree = forest.extend_unpacked(&tree, v)?;
+            forest.extend_unpacked(&mut tree, v)?;
             forest.assert_invariants(&tree)?;
         } else {
-            tree = forest.extend(&tree, v)?;
+            forest.extend(&mut tree, v)?;
             forest.assert_invariants(&tree)?;
         }
     }
     let t1 = std::time::Instant::now();
-    Ok((tree, t1 - t0))
+    Ok((tree.snapshot(), t1 - t0))
 }
 
 #[tokio::main]
@@ -348,29 +353,26 @@ async fn main() -> Result<()> {
     let index_key: chacha20::Key = opts.index_pass.map(create_chacha_key).unwrap_or_default();
     let value_key: chacha20::Key = opts.value_pass.map(create_chacha_key).unwrap_or_default();
     let config = Config::debug_fast();
-    let crypto_config = CryptoConfig {
-        index_key,
-        value_key,
-    };
+    let secrets = Secrets::new(index_key, value_key);
     let txn = || {
         Txn::new(
-            Forest::new(store.clone(), BranchCache::default(), crypto_config, config),
+            Forest::new(store.clone(), BranchCache::default()),
             store.clone(),
         )
     };
     let forest = txn();
     match opts.cmd {
         Command::Graph { root } => {
-            let tree = forest.load_tree(root)?;
+            let tree = forest.load_tree(secrets, root)?;
             let mut stdout = std::io::stdout();
             dump::graph(&forest, &tree, &mut stdout)?;
         }
         Command::Dump { root } => {
-            let tree = forest.load_tree(root)?;
+            let tree = forest.load_tree(secrets, root)?;
             forest.dump(&tree)?;
         }
         Command::DumpValues { root } => {
-            let tree = forest.load_tree(root)?;
+            let tree = forest.load_tree(secrets, root)?;
             let iter = forest.iter_from(&tree);
             for res in iter {
                 let (i, k, v) = res?;
@@ -381,7 +383,7 @@ async fn main() -> Result<()> {
             dump::dump_json(store, hash, value_key, &mut std::io::stdout())?;
         }
         Command::Stream { root } => {
-            let tree = forest.load_tree(root)?;
+            let tree = forest.load_tree(secrets, root)?;
             let mut stream = forest.stream_filtered(&tree, AllQuery).enumerate();
             while let Some((i, Ok(v))) = stream.next().await {
                 if i % 1000 == 0 {
@@ -400,31 +402,19 @@ async fn main() -> Result<()> {
                 batches, count, unbalanced
             );
             let tree = build_tree(&forest, base, batches, count, unbalanced, 1000).await?;
-            forest.dump(&tree)?;
-            let roots = forest.roots(&tree)?;
-            let levels = roots.iter().map(|x| x.level()).collect::<Vec<_>>();
-            let _tree2 = forest.tree_from_roots(roots)?;
-            println!("{:?}", tree);
-            println!("{}", tree);
-            println!("{:?}", levels);
-            forest.dump(&tree)?;
+            forest.dump(&tree.snapshot())?;
         }
         Command::Bench { count } => {
             let config = Config::debug_fast();
-            let crypto_config = CryptoConfig {
-                index_key,
-                value_key,
-            };
+            let secrets = Secrets::new(index_key, value_key);
             let branch_cache = BranchCache::default();
-            let forest = Txn::new(
-                Forest::new(store.clone(), branch_cache, crypto_config, config),
-                store,
-            );
+            let forest = Txn::new(Forest::new(store.clone(), branch_cache), store);
             let _t0 = std::time::Instant::now();
             let base = None;
             let batches = 1;
             let unbalanced = false;
-            let (tree, tcreate) = bench_build(&forest, base, batches, count, unbalanced).await?;
+            let (tree, tcreate) =
+                bench_build(&forest, base, batches, count, unbalanced, secrets, config).await?;
             let t0 = std::time::Instant::now();
             let _values: Vec<_> = forest.collect(&tree)?;
             let t1 = std::time::Instant::now();
@@ -476,9 +466,11 @@ async fn main() -> Result<()> {
                 .map(|tag| Key::filter_tags(TagSet::single(Tag::from(tag))))
                 .collect::<Vec<_>>();
             let query = DnfQuery(tags).boxed();
-            let tree = forest.load_tree(root)?;
-            forest.dump(&tree)?;
-            let mut stream = forest.stream_filtered(&tree, query).enumerate();
+            let secrets = Secrets::default();
+            let config = Config::debug();
+            let tree = forest.load_stream_builder(secrets, config, root)?;
+            forest.dump(&tree.snapshot())?;
+            let mut stream = forest.stream_filtered(&tree.snapshot(), query).enumerate();
             while let Some((i, Ok(v))) = stream.next().await {
                 if i % 1000 == 0 {
                     println!("{:?}", v);
@@ -486,52 +478,61 @@ async fn main() -> Result<()> {
             }
         }
         Command::Forget { root, before } => {
-            let mut tree = forest.load_tree(root)?;
-            tree = forest.retain(&tree, &OffsetRangeQuery::from(before..))?;
-            forest.dump(&tree)?;
+            let secrets = Secrets::default();
+            let config = Config::debug();
+            let mut tree = forest.load_stream_builder(secrets, config, root)?;
+            forest.retain(&mut tree, &OffsetRangeQuery::from(before..))?;
+            forest.dump(&tree.snapshot())?;
             println!("{:?}", tree);
         }
         Command::Pack { root } => {
-            let mut tree = forest.load_tree(root)?;
-            forest.dump(&tree)?;
-            tree = forest.pack(&tree)?;
+            let secrets = Secrets::default();
+            let config = Config::debug();
+            let mut tree = forest.load_stream_builder(secrets, config, root)?;
+            forest.dump(&tree.snapshot())?;
+            forest.pack(&mut tree)?;
             forest.assert_invariants(&tree)?;
-            assert!(forest.is_packed(&tree)?);
-            forest.dump(&tree)?;
+            assert!(forest.is_packed(&tree.snapshot())?);
+            forest.dump(&tree.snapshot())?;
             println!("{:?}", tree);
         }
         Command::RecvStream { topic } => {
-            let stream = pubsub_sub(&*topic)?
+            let secrets = Secrets::default();
+            let links = pubsub_sub(&*topic)?
                 .map_err(anyhow::Error::new)
                 .and_then(|data| future::ready(String::from_utf8(data).map_err(anyhow::Error::new)))
                 .and_then(|data| future::ready(Sha256Digest::from_str(&data)));
             let forest2 = forest.clone();
-            let trees = stream.filter_map(move |x| {
+            let trees = links.filter_map(move |link| {
                 let forest = forest2.clone();
-                future::ready(x.and_then(move |link| forest.load_tree(link)).ok())
+                let secrets = secrets.clone();
+                future::ready(
+                    link.and_then(move |link| forest.load_tree(secrets, link))
+                        .ok(),
+                )
             });
-            let mut stream = forest.read().stream_trees(AllQuery, trees).boxed_local();
-            while let Some(ev) = stream.next().await {
+            let mut s = forest.read().stream_trees(AllQuery, trees).boxed_local();
+            while let Some(ev) = s.next().await {
                 println!("{:?}", ev);
             }
         }
         Command::Repair { root } => {
-            let tree = forest.load_tree(root)?;
-            let (tree, _) = forest.repair(&tree)?;
-            forest.dump(&tree)?;
+            let mut tree = forest.load_stream_builder(secrets, config, root)?;
+            let _ = forest.repair(&mut tree)?;
+            forest.dump(&tree.snapshot())?;
             println!("{:?}", tree);
         }
         Command::SendStream { topic } => {
             let mut ticks = tokio::time::interval(Duration::from_secs(1));
-            let mut tree = Tree::<TT>::empty();
+            let mut tree = StreamBuilder::<TT>::new(config, secrets);
             let mut offset = 0;
             loop {
                 poll_fn(|cx| ticks.poll_tick(cx)).await;
                 let key = Key::single(offset, offset, tags_from_offset(offset));
-                tree = forest.extend_unpacked(&tree, Some((key, "xxx".into())))?;
+                forest.extend_unpacked(&mut tree, Some((key, "xxx".into())))?;
                 if tree.level() > 100 {
                     println!("packing the tree");
-                    tree = forest.pack(&tree)?;
+                    forest.pack(&mut tree)?;
                 }
                 offset += 1;
                 if let Some(cid) = tree.link() {

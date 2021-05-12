@@ -1,10 +1,10 @@
 #![allow(clippy::upper_case_acronyms)]
 use banyan::{
-    forest::{BranchCache, CryptoConfig, Forest},
-    forest::{Config, Transaction, TreeTypes},
+    forest::{BranchCache, Forest, Transaction, TreeTypes},
     index::{UnitSeq, VecSeq},
     memstore::MemStore,
     tree::Tree,
+    StreamBuilder,
 };
 use common::Sha256Digest;
 use fnv::FnvHashSet;
@@ -65,15 +65,7 @@ impl TreeTypes for TT {
 
 fn txn(store: MemStore<Sha256Digest>) -> Txn {
     let branch_cache = BranchCache::default();
-    Txn::new(
-        Forest::new(
-            store.clone(),
-            branch_cache,
-            CryptoConfig::default(),
-            Config::debug(),
-        ),
-        store,
-    )
+    Txn::new(Forest::new(store.clone(), branch_cache), store)
 }
 
 fn create_test_tree<I>(xs: I) -> anyhow::Result<(Tree<TT>, Txn)>
@@ -83,10 +75,10 @@ where
 {
     let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
     let forest = txn(store);
-    let mut tree = Tree::<TT>::empty();
-    tree = forest.extend(&tree, xs)?;
+    let mut tree = StreamBuilder::<TT>::debug();
+    forest.extend(&mut tree, xs)?;
     forest.assert_invariants(&tree)?;
-    Ok((tree, forest))
+    Ok((tree.snapshot(), forest))
 }
 
 fn links_get_properly_scraped(xs: Vec<(Key, Payload)>) -> anyhow::Result<bool> {

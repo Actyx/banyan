@@ -6,7 +6,6 @@ use core::{fmt::Debug, hash::Hash, iter::FromIterator, marker::PhantomData, ops:
 use futures::future::BoxFuture;
 use libipld::cbor::DagCbor;
 use parking_lot::Mutex;
-use rand::RngCore;
 use std::{fmt::Display, num::NonZeroUsize, sync::Arc};
 use weight_cache::{Weighable, WeightCache};
 mod index_iter;
@@ -108,8 +107,6 @@ pub trait TreeTypes: Debug + Send + Sync + Clone + 'static {
 pub struct ForestInner<T: TreeTypes, V, R> {
     pub(crate) store: R,
     pub(crate) branch_cache: BranchCache<T>,
-    pub(crate) crypto_config: CryptoConfig,
-    pub(crate) config: Config,
     pub(crate) _tt: PhantomData<(T, V, R)>,
 }
 
@@ -123,17 +120,10 @@ impl<TT: TreeTypes, V, R> Clone for Forest<TT, V, R> {
 }
 
 impl<TT: TreeTypes, V, R: Clone> Forest<TT, V, R> {
-    pub fn new(
-        store: R,
-        branch_cache: BranchCache<TT>,
-        crypto_config: CryptoConfig,
-        config: Config,
-    ) -> Self {
+    pub fn new(store: R, branch_cache: BranchCache<TT>) -> Self {
         Self(Arc::new(ForestInner {
             store,
             branch_cache,
-            crypto_config,
-            config,
             _tt: PhantomData,
         }))
     }
@@ -144,12 +134,7 @@ impl<TT: TreeTypes, V, R: Clone> Forest<TT, V, R> {
     ) -> Transaction<TT, V, R, W> {
         let (reader, writer) = f(self.0.as_ref().store.clone());
         Transaction {
-            read: Self::new(
-                reader,
-                self.branch_cache.clone(),
-                self.crypto_config,
-                self.config,
-            ),
+            read: Self::new(reader, self.branch_cache.clone()),
             writer,
         }
     }
@@ -204,23 +189,32 @@ impl<T: TreeTypes, V, R, W> std::ops::Deref for Transaction<T, V, R, W> {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
-pub struct CryptoConfig {
+#[derive(Debug, Clone)]
+pub struct Secrets {
     /// chacha20 key to decrypt index nodes
-    pub index_key: chacha20::Key,
+    index_key: chacha20::Key,
     /// chacha20 key to decrypt value nodes
-    pub value_key: chacha20::Key,
+    value_key: chacha20::Key,
 }
 
-impl CryptoConfig {
-    pub fn random_key() -> chacha20::Key {
-        let mut key = [0u8; 32];
-        rand::thread_rng().fill_bytes(&mut key);
-        key.into()
+impl Secrets {
+    pub fn new(index_key: chacha20::Key, value_key: chacha20::Key) -> Self {
+        Self {
+            index_key,
+            value_key,
+        }
+    }
+
+    pub fn index_key(&self) -> &chacha20::Key {
+        &self.index_key
+    }
+
+    pub fn value_key(&self) -> &chacha20::Key {
+        &self.value_key
     }
 }
 
-impl Default for CryptoConfig {
+impl Default for Secrets {
     fn default() -> Self {
         Self {
             index_key: [0; 32].into(),
@@ -229,7 +223,7 @@ impl Default for CryptoConfig {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Clone)]
 /// Configuration for a forest. Includes settings for when a node is considered full
 pub struct Config {
     /// maximum number of values in a leaf

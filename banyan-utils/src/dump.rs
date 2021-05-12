@@ -143,7 +143,7 @@ pub fn dump_json<Link>(
     mut writer: impl std::io::Write,
 ) -> anyhow::Result<()> {
     let bytes = store.get(&hash)?;
-    let dag_cbor = ZstdDagCborSeq::decrypt(&bytes, &value_key)?;
+    let (dag_cbor, _) = ZstdDagCborSeq::decrypt(&bytes, &value_key)?;
     let ipld_ast = dag_cbor.items::<libipld::Ipld>()?;
     for x in ipld_ast {
         let json = DagJsonCodec.encode(&x)?;
