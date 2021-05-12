@@ -1,4 +1,5 @@
 use banyan::{
+    forest::Config,
     index::{BranchIndex, Index, LeafIndex},
     memstore::MemStore,
     query::{AllQuery, EmptyQuery, OffsetRangeQuery},
@@ -7,6 +8,7 @@ use banyan::{
 use common::{create_test_tree, txn, IterExt, Key, KeySeq, Sha256Digest, TT};
 use futures::prelude::*;
 use libipld::{cbor::DagCborCodec, codec::Codec, Cid};
+use quickcheck::TestResult;
 use quickcheck_macros::quickcheck;
 use std::{convert::TryInto, iter, ops::Range, str::FromStr};
 
@@ -305,6 +307,83 @@ async fn stream_test_simple() -> anyhow::Result<()> {
     let res = res.collect::<Vec<_>>().await;
     println!("{:?}", res);
     Ok(())
+}
+
+#[quickcheck_async::tokio]
+async fn stream_trees_chunked_should_honour_an_inclusive_upper_bound(
+    xs: Vec<(Key, u64)>,
+) -> anyhow::Result<TestResult> {
+    let len = xs.len() as u64;
+    if len == 0 {
+        return Ok(TestResult::discard());
+    }
+    let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
+    let forest = txn(store, 1000);
+    let mut tree = Tree::<TT>::empty();
+    tree = forest.extend_unpacked(&tree, xs.clone().into_iter())?;
+    let trees = stream::once(async move { tree }).chain(stream::pending());
+
+    let actual = forest
+        .stream_trees_chunked(AllQuery, trees, 0u64..=(len - 1), &|_| ())
+        .map_ok(move |chunk| stream::iter(chunk.data))
+        .take_while(|x| future::ready(x.is_ok()))
+        .filter_map(|x| future::ready(x.ok()))
+        .flatten()
+        .collect::<Vec<_>>()
+        .await;
+
+    let expected = xs
+        .iter()
+        .cloned()
+        .enumerate()
+        .map(|(i, (k, v))| (i as u64, k, v))
+        .collect::<Vec<_>>();
+    if expected != actual {
+        println!("{:?} {:?}", expected, actual);
+    }
+    Ok(TestResult::from_bool(expected == actual))
+}
+
+#[quickcheck_async::tokio]
+async fn stream_trees_chunked_reverse_should_honour_an_inclusive_upper_bound(
+    xs: Vec<(Key, u64)>,
+) -> anyhow::Result<TestResult> {
+    let len = xs.len() as u64;
+    if len == 0 {
+        return Ok(TestResult::discard());
+    }
+    let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
+    let forest = txn(store, 1000);
+    let mut tree = Tree::<TT>::empty();
+    tree = forest.extend_unpacked(&tree, xs.clone().into_iter())?;
+    let trees = stream::once(async move { tree }).chain(stream::pending());
+    let actual = forest
+        .stream_trees_chunked_reverse(AllQuery, trees, 0u64..=(len - 1), &|_| ())
+        .map_ok(move |chunk| stream::iter(chunk.data))
+        .take_while(|x| future::ready(x.is_ok()))
+        .filter_map(|x| future::ready(x.ok()))
+        .flatten()
+        .collect::<Vec<_>>()
+        .await;
+
+    let values = xs
+        .iter()
+        .cloned()
+        .enumerate()
+        .map(|(i, (k, v))| (i as u64, k, v))
+        .collect::<Vec<_>>();
+    let leaf_count = Config::debug().max_leaf_count;
+    // desc per chunk, asc inside chunk
+    let expected: Vec<_> = values
+        .chunks(leaf_count as usize)
+        .rev()
+        .flat_map(|x| x.iter().cloned())
+        .collect();
+
+    if expected != actual {
+        println!("{:?} {:?}", expected, actual);
+    }
+    Ok(TestResult::from_bool(expected == actual))
 }
 
 #[tokio::test]
