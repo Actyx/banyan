@@ -262,24 +262,15 @@ impl<T: TreeTypes> Index<T> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 /// fully in memory representation of a branch node
 ///
 /// This is a wrapper around a non-empty sequence of child indices.
 pub struct Branch<T: TreeTypes> {
     // index data for the children
     pub children: Arc<[Index<T>]>,
-    // stream offset at the end of this branch
-    end_offset: u64,
-}
-
-impl<T: TreeTypes> Clone for Branch<T> {
-    fn clone(&self) -> Self {
-        Self {
-            children: self.children.clone(),
-            end_offset: self.end_offset,
-        }
-    }
+    // byte range of this branch
+    pub byte_range: Range<u64>,
 }
 
 impl<T: TreeTypes> Branch<T> {
@@ -287,7 +278,7 @@ impl<T: TreeTypes> Branch<T> {
         assert!(!children.is_empty());
         Self {
             children: children.into(),
-            end_offset: byte_range.end,
+            byte_range,
         }
     }
     pub fn last_child(&self) -> &Index<T> {
@@ -312,15 +303,15 @@ impl<T: TreeTypes> Branch<T> {
 /// This is a wrapper around a cbor encoded and zstd compressed sequence of values
 #[derive(Debug)]
 pub struct Leaf {
-    items: ZstdDagCborSeq,
-    end_offset: u64,
+    pub items: ZstdDagCborSeq,
+    pub byte_range: Range<u64>,
 }
 
 impl Leaf {
     pub fn new(items: ZstdDagCborSeq, byte_range: Range<u64>) -> Self {
         Self {
             items,
-            end_offset: byte_range.end,
+            byte_range,
         }
     }
 
