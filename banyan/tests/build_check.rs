@@ -260,12 +260,17 @@ fn do_retain(xss: Vec<Vec<(Key, u64)>>) -> anyhow::Result<bool> {
     for xs in xss.iter() {
         forest.extend_unpacked(&mut builder, xs.clone()).unwrap();
     }
+    let tree0 = builder.snapshot();
     forest.retain(&mut builder, &OffsetRangeQuery::from(xs.len() as u64..))?;
+    let tree1 = builder.snapshot();
     forest.assert_invariants(&builder)?;
     forest.pack(&mut builder)?;
+    let tree2 = builder.snapshot();
     forest.retain(&mut builder, &OffsetRangeQuery::from(xs.len() as u64..))?;
     forest.assert_invariants(&builder)?;
-    Ok(true)
+    let tree3 = builder.snapshot();
+    let offsets_ok = no_offset_overlap(&forest, &[tree0, tree1, tree2, tree3])?;
+    Ok(offsets_ok)
 }
 
 #[quickcheck]
@@ -314,12 +319,12 @@ async fn stream_test_simple() -> anyhow::Result<()> {
         forest.assert_invariants(&builder)?;
         trees.push(builder.snapshot());
     }
-    println!("{:?}", trees);
+    // println!("{:?}", trees);
     let res = forest
         .read()
         .stream_trees(AllQuery, stream::iter(trees).boxed());
-    let res = res.collect::<Vec<_>>().await;
-    println!("{:?}", res);
+    let _res = res.collect::<Vec<_>>().await;
+    // println!("{:?}", res);
     Ok(())
 }
 
