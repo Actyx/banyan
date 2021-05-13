@@ -309,10 +309,7 @@ pub struct Leaf {
 
 impl Leaf {
     pub fn new(items: ZstdDagCborSeq, byte_range: Range<u64>) -> Self {
-        Self {
-            items,
-            byte_range,
-        }
+        Self { items, byte_range }
     }
 
     pub fn child_at<T: DagCbor>(&self, offset: u64) -> Result<T> {

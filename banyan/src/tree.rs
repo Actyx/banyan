@@ -64,6 +64,10 @@ impl<T: TreeTypes> Tree<T> {
     pub fn index(&self) -> Option<&Arc<Index<T>>> {
         self.0.as_ref().map(|(r, _, _)| r)
     }
+
+    pub fn secrets(&self) -> Option<&Secrets> {
+        self.0.as_ref().map(|(_, secrets, _)| secrets)
+    }
 }
 
 impl<T: TreeTypes> Default for Tree<T> {

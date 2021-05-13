@@ -2,23 +2,30 @@
 //! helper methods for the tests
 use banyan::{
     index::{CompactSeq, Summarizable},
-    store::{BranchCache, MemStore},
-    Forest, StreamBuilder, Transaction, Tree, TreeTypes,
+    query::AllQuery,
+    store::{BranchCache, MemStore, ReadOnlyStore},
+    StreamBuilder, Transaction, Tree, TreeTypes,
 };
 use futures::Future;
 use libipld::{
     cbor::DagCborCodec,
-    codec::{Decode, Encode},
-    Cid, DagCbor,
+    codec::{Codec, Decode, Encode},
+    Cid, DagCbor, Ipld,
 };
 use quickcheck::{Arbitrary, Gen, TestResult};
+use range_collections::RangeSet;
 use sha2::{Digest, Sha256};
 use std::{
+    collections::HashSet,
     convert::{TryFrom, TryInto},
     fmt,
     io::{Read, Seek, Write},
     iter::FromIterator,
+    ops::Range,
 };
+
+#[allow(dead_code)]
+pub type Forest = banyan::Forest<TT, u64, MemStore<Sha256Digest>>;
 
 #[allow(dead_code)]
 pub type Txn = Transaction<TT, u64, MemStore<Sha256Digest>, MemStore<Sha256Digest>>;
@@ -98,6 +105,90 @@ where
     forest.extend(&mut tree, xs)?;
     forest.assert_invariants(&tree)?;
     Ok((tree.snapshot(), forest))
+}
+
+/// Extract all links from a tree
+pub fn links(
+    forest: &Forest,
+    tree: &Tree<TT>,
+    links: &mut HashSet<Sha256Digest>,
+) -> anyhow::Result<()> {
+    let link_opts = forest
+        .iter_index(&tree, AllQuery)
+        .map(|x| x.map(|x| x.link().as_ref().cloned()))
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    links.extend(link_opts.into_iter().filter_map(|x| x));
+    Ok(())
+}
+
+fn same_secrets(a: &Tree<TT>, b: &Tree<TT>) -> bool {
+    match (a.secrets(), b.secrets()) {
+        (Some(sa), Some(sb)) => {
+            sa.index_key() == sb.index_key() || sa.value_key() == sb.value_key()
+        }
+        _ => {
+            // return true here since the empty tree is "compatible" with all trees
+            true
+        }
+    }
+}
+
+type OffsetSet = RangeSet<u64, [u64; 16]>;
+
+/// utility struct for encoding and decoding
+#[derive(DagCbor)]
+struct IpldNode(Vec<Cid>, Ipld);
+
+impl IpldNode {
+    fn into_data(self) -> anyhow::Result<(Vec<Cid>, Vec<u8>)> {
+        if let Ipld::Bytes(data) = self.1 {
+            Ok((self.0, data))
+        } else {
+            Err(anyhow::anyhow!("expected ipld bytes"))
+        }
+    }
+}
+
+fn block_range(forest: &Forest, hash: &Sha256Digest) -> anyhow::Result<Range<u64>> {
+    let blob = forest.store().get(hash)?;
+    let (_, encrypted) = DagCborCodec.decode::<IpldNode>(&blob)?.into_data()?;
+    let (data, offset) = encrypted.split_at(encrypted.len() - 8);
+    let len = data.len() as u64;
+    let offset = u64::from_be_bytes((*offset).try_into()?);
+    Ok(offset..offset + len)
+}
+
+/// check that for the given blocks, ranges do not overlap
+fn no_range_overlap(forest: &Forest, hashes: HashSet<Sha256Digest>) -> anyhow::Result<bool> {
+    let mut ranges = OffsetSet::empty();
+    let mut result = true;
+    for hash in hashes {
+        let range = OffsetSet::from(block_range(forest, &hash)?);
+        // println!("{} {:?}", hash, range);
+        if !ranges.is_disjoint(&range) {
+            result = false;
+        }
+        ranges |= range;
+    }
+    Ok(result)
+}
+
+#[allow(dead_code)]
+pub fn no_offset_overlap<'a>(
+    forest: &'a Forest,
+    trees: impl IntoIterator<Item = &'a Tree<TT>>,
+) -> anyhow::Result<bool> {
+    let mut trees = trees.into_iter().peekable();
+    if let Some(first) = trees.peek().cloned() {
+        let mut hashes = HashSet::new();
+        for tree in trees {
+            anyhow::ensure!(same_secrets(first, tree), "not the same secrets");
+            links(forest, tree, &mut hashes)?;
+        }
+        no_range_overlap(forest, hashes)
+    } else {
+        Ok(true)
+    }
 }
 
 #[allow(dead_code)]

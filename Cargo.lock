@@ -101,8 +101,10 @@ dependencies = [
  "quickcheck_macros",
  "rand",
  "rand_chacha",
+ "range-collections",
+ "range-set",
  "sha2",
- "smallvec",
+ "smallvec 1.6.1",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -1000,6 +1002,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7ffc5c5338469d4d3ea17d269fa8ea3512ad247247c30bd2df69e68309ed0a08"
 
 [[package]]
+name = "maybe-uninit"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "60302e4db3a61da70c0cb7991976248362f30319e88850c487b9b95bbf059e00"
+
+[[package]]
 name = "memchr"
 version = "2.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1173,7 +1181,7 @@ dependencies = [
  "instant",
  "libc",
  "redox_syscall",
- "smallvec",
+ "smallvec 1.6.1",
  "winapi",
 ]
 
@@ -1424,6 +1432,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "range-collections"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d3b65c549aad5f887f00443cab15de69db85e18c5f91a01511bc9af5424a3a3a"
+dependencies = [
+ "serde",
+ "smallvec 1.6.1",
+]
+
+[[package]]
+name = "range-set"
+version = "0.0.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e51c363412e87a2d92e8730f95cbdae590a46959bbcb17d0b5c1ad2c7af98d11"
+dependencies = [
+ "num-traits",
+ "smallvec 0.6.14",
+]
+
+[[package]]
 name = "redox_syscall"
 version = "0.2.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1535,7 +1563,7 @@ dependencies = [
  "hashlink",
  "libsqlite3-sys",
  "memchr",
- "smallvec",
+ "smallvec 1.6.1",
 ]
 
 [[package]]
@@ -1664,6 +1692,15 @@ name = "slab"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f173ac3d1a7e3b28003f40de0b5ce7fe2710f9b9dc3fc38664cebee46b3b6527"
+
+[[package]]
+name = "smallvec"
+version = "0.6.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b97fcaeba89edba30f044a10c6a3cc39df9c3f17d7cd829dd1446cab35f890e0"
+dependencies = [
+ "maybe-uninit",
+]
 
 [[package]]
 name = "smallvec"
@@ -1964,7 +2001,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sharded-slab",
- "smallvec",
+ "smallvec 1.6.1",
  "thread_local",
  "tracing",
  "tracing-core",
@@ -2067,7 +2104,7 @@ checksum = "fda5a72f237908a7d5087b0411f44ac4c29f39d53845d7e3f7c84085b15639f6"
 dependencies = [
  "num-traits",
  "serde",
- "smallvec",
+ "smallvec 1.6.1",
  "sorted-iter",
 ]
 
