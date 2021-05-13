@@ -2,8 +2,8 @@
 //! helper methods for the tests
 use banyan::{
     index::{CompactSeq, Summarizable},
-    store::MemStore,
-    BranchCache, Forest, StreamBuilder, Transaction, Tree, TreeTypes,
+    store::{BranchCache, MemStore},
+    Forest, StreamBuilder, Transaction, Tree, TreeTypes,
 };
 use futures::Future;
 use libipld::{

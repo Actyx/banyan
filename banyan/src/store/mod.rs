@@ -3,12 +3,22 @@ use anyhow::anyhow;
 use anyhow::Result;
 use core::hash::Hash;
 use fnv::FnvHashMap;
-use std::sync::{Arc, RwLock};
+use parking_lot::Mutex;
+use std::{
+    num::NonZeroUsize,
+    sync::{Arc, RwLock},
+};
+use weight_cache::{Weighable, WeightCache};
 mod thread_local_zstd;
 mod zstd_dag_cbor_seq;
 
 pub(crate) use thread_local_zstd::decompress_and_transform;
 pub use zstd_dag_cbor_seq::ZstdDagCborSeq;
+
+use crate::{
+    index::{Branch, CompactSeq, Index},
+    TreeTypes,
+};
 
 pub trait BlockWriter<L>: Send + Sync {
     /// adds a block to a temporary staging area
@@ -143,5 +153,58 @@ impl<L: Eq + Hash + Copy> ReadOnlyStore<L> for MemStore<L> {
 impl<L: Eq + Hash + Send + Sync + Copy + 'static> BlockWriter<L> for MemStore<L> {
     fn put(&self, data: Vec<u8>) -> anyhow::Result<L> {
         self.put0(data)
+    }
+}
+
+impl<T: TreeTypes> Weighable for Branch<T> {
+    fn measure(value: &Self) -> usize {
+        let mut bytes = std::mem::size_of::<Branch<T>>();
+        for child in value.children.iter() {
+            bytes += std::mem::size_of::<Index<T>>();
+            match child {
+                Index::Leaf(leaf) => {
+                    bytes += leaf.keys.estimated_size();
+                }
+                Index::Branch(branch) => {
+                    bytes += branch.summaries.estimated_size();
+                }
+            }
+        }
+        bytes
+    }
+}
+
+type CacheOrBypass<T> = Option<Arc<Mutex<WeightCache<<T as TreeTypes>::Link, Branch<T>>>>>;
+
+#[derive(Debug, Clone)]
+pub struct BranchCache<T: TreeTypes>(CacheOrBypass<T>);
+
+impl<T: TreeTypes> Default for BranchCache<T> {
+    fn default() -> Self {
+        Self::new(64 << 20)
+    }
+}
+
+impl<T: TreeTypes> BranchCache<T> {
+    /// Passing a capacity of 0 disables the cache.
+    pub fn new(capacity: usize) -> Self {
+        let cache = if capacity == 0 {
+            None
+        } else {
+            Some(Arc::new(Mutex::new(WeightCache::new(
+                NonZeroUsize::new(capacity).expect("Cache capacity must be "),
+            ))))
+        };
+        Self(cache)
+    }
+
+    pub fn get<'a>(&'a self, link: &'a T::Link) -> Option<Branch<T>> {
+        self.0.as_ref().and_then(|x| x.lock().get(link).cloned())
+    }
+
+    pub fn put(&self, link: T::Link, branch: Branch<T>) {
+        if let Some(Err(e)) = self.0.as_ref().map(|x| x.lock().put(link, branch)) {
+            tracing::warn!("Adding {} to cache failed: {}", link, e);
+        }
     }
 }

@@ -8,8 +8,8 @@ use tracing::Level;
 
 use banyan::{
     query::{AllQuery, OffsetRangeQuery, QueryExt},
-    store::{ArcBlockWriter, ArcReadOnlyStore, BlockWriter, MemStore, ReadOnlyStore},
-    BranchCache, Config, Forest, Secrets, StreamBuilder, Transaction, Tree,
+    store::{ArcBlockWriter, ArcReadOnlyStore, BlockWriter, BranchCache, MemStore, ReadOnlyStore},
+    Config, Forest, Secrets, StreamBuilder, Transaction, Tree,
 };
 use banyan_utils::{
     create_chacha_key, dump,

@@ -66,7 +66,7 @@ mod util;
 use stream_builder::{StreamBuilderState, StreamOffset};
 
 pub use chacha20;
-pub use forest::{BranchCache, Config, Forest, Secrets, Transaction, TreeTypes};
+pub use forest::{Config, Forest, Secrets, Transaction, TreeTypes};
 pub use stream_builder::StreamBuilder;
 pub use tree::Tree;
 
