@@ -1,6 +1,6 @@
 use crate::{tag_index::map_to_index_set, tag_index::TagIndex, tag_index::TagSet};
-use banyan::index::*;
-use banyan::{forest::*, query::Query};
+use banyan::query::Query;
+use banyan::{index::*, TreeTypes};
 use libipld::{
     cbor::DagCborCodec,
     codec::{Decode, Encode},

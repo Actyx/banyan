@@ -21,17 +21,6 @@
 //!
 //! https://github.com/ipld/specs/blob/master/block-layer/codecs/dag-cbor.md
 //! https://tools.ietf.org/html/rfc8742
-use std::{
-    collections::BTreeSet,
-    convert::{TryFrom, TryInto},
-    fmt,
-    io::{Cursor, Write},
-    iter,
-    ops::Range,
-    time::Instant,
-};
-
-use crate::{thread_local_zstd::decompress_and_transform, StreamOffset};
 use chacha20::{
     cipher::{NewCipher, StreamCipher, StreamCipherSeek},
     XChaCha20,
@@ -42,6 +31,17 @@ use libipld::{
     raw_value::IgnoredAny,
     Cid, DagCbor, Ipld,
 };
+use std::{
+    collections::BTreeSet,
+    convert::{TryFrom, TryInto},
+    fmt,
+    io::{Cursor, Write},
+    iter,
+    ops::Range,
+    time::Instant,
+};
+
+use crate::{store::decompress_and_transform, stream_builder::StreamOffset};
 
 const EXTRA_LEN: usize = 8;
 const NONCE: [u8; 24] = [0u8; 24];

@@ -12,8 +12,8 @@ use crate::{
     index::LeafIndex,
     index::NodeInfo,
     query::Query,
+    store::ZstdDagCborSeq,
     util::{is_sorted, BoolSliceExt},
-    zstd_dag_cbor_seq::ZstdDagCborSeq,
 };
 use anyhow::{ensure, Result};
 use core::fmt::Debug;

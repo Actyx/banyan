@@ -1,11 +1,9 @@
 #![allow(clippy::upper_case_acronyms)]
 //! helper methods for the tests
 use banyan::{
-    forest::{BranchCache, Forest, Transaction, TreeTypes},
     index::{CompactSeq, Summarizable},
-    memstore::MemStore,
-    tree::Tree,
-    StreamBuilder,
+    store::MemStore,
+    BranchCache, Forest, StreamBuilder, Transaction, Tree, TreeTypes,
 };
 use futures::Future;
 use libipld::{

@@ -1,9 +1,7 @@
 //! creation and traversal of banyan trees
 use super::index::*;
 use crate::store::{BlockWriter, ReadOnlyStore};
-use anyhow::Result;
 use core::{fmt::Debug, hash::Hash, iter::FromIterator, marker::PhantomData, ops::Range};
-use futures::future::BoxFuture;
 use libipld::cbor::DagCbor;
 use parking_lot::Mutex;
 use std::{fmt::Display, num::NonZeroUsize, sync::Arc};
@@ -14,8 +12,6 @@ mod stream;
 mod write;
 pub(crate) use index_iter::IndexIter;
 pub(crate) use read::ForestIter;
-
-pub type FutureResult<'a, T> = BoxFuture<'a, Result<T>>;
 
 impl<T: TreeTypes> Weighable for Branch<T> {
     fn measure(value: &Self) -> usize {

@@ -6,8 +6,8 @@ use crate::{
     },
     query::Query,
     store::ReadOnlyStore,
+    store::ZstdDagCborSeq,
     util::{BoxedIter, IterExt},
-    zstd_dag_cbor_seq::ZstdDagCborSeq,
 };
 use anyhow::{anyhow, Result};
 use core::fmt::Debug;

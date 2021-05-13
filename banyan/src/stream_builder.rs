@@ -112,6 +112,14 @@ impl<T: TreeTypes> StreamBuilder<T> {
         Self::new_from_index(None, state)
     }
 
+    /// Creates a stream builder with debug settings.
+    ///
+    /// The tree config will be the debug config that produces "interesting" trees even with a small
+    /// number of elements.
+    ///
+    /// The secrets will be the default secrets
+    ///
+    /// Do not use this in production!
     pub fn debug() -> Self {
         let state = StreamBuilderState::new(0, Secrets::default(), Config::debug());
         Self::new_from_index(None, state)

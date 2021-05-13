@@ -1,9 +1,8 @@
 use banyan::{
-    forest::{Config, Secrets},
     index::{BranchIndex, Index, LeafIndex},
-    memstore::MemStore,
     query::{AllQuery, EmptyQuery, OffsetRangeQuery},
-    StreamBuilder,
+    store::MemStore,
+    Config, Secrets, StreamBuilder,
 };
 use common::{create_test_tree, txn, IterExt, Key, KeySeq, Sha256Digest, TT};
 use futures::prelude::*;

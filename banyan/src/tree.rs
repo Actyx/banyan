@@ -236,7 +236,7 @@ impl<
 
     /// leftmost branches of the tree as separate trees
     pub fn left_roots(&self, tree: &Tree<T>) -> Result<Vec<Tree<T>>> {
-        Ok(if let Some((index, secrets, _)) = tree.0.as_ref() {
+        Ok(if let Some((index, secrets, _)) = &tree.0 {
             self.left_roots0(secrets, index)?
                 .into_iter()
                 .map(|x| Tree::new(Arc::new(x), secrets.clone(), u64::max_value()))

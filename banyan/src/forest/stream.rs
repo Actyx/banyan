@@ -22,7 +22,7 @@ impl<
 {
     /// Given a sequence of roots, will stream matching events in ascending order indefinitely.
     ///
-    /// This is implemented by calling [stream_trees_chunked] and just flattening the chunks.
+    /// This is implemented by calling stream_trees_chunked and just flattening the chunks.
     pub fn stream_trees<Q, S>(
         &self,
         query: Q,
