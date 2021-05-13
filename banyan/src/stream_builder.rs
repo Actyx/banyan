@@ -170,6 +170,21 @@ impl<T: TreeTypes> StreamBuilder<T> {
         self.root.as_ref().map(|x| x.as_ref())
     }
 
+    /// Modify a StreamBuilder and roll back the changes if the operation was not successful
+    ///
+    /// Note that consumed offets are *not* rolled back to make sure we don't reuse offsets.
+    pub fn transaction<R, E>(
+        &mut self,
+        f: impl Fn(&mut Self) -> std::result::Result<R, E>,
+    ) -> std::result::Result<R, E> {
+        let root0 = self.root.clone();
+        let result = f(self);
+        if result.is_err() {
+            self.root = root0;
+        }
+        result
+    }
+
     pub(crate) fn state(&self) -> &StreamBuilderState {
         &self.state
     }
