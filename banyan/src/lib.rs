@@ -67,7 +67,7 @@ use stream_builder::{CipherOffset, StreamBuilderState};
 
 pub use chacha20;
 pub use forest::{Config, FilteredChunk, Forest, Secrets, Transaction, TreeTypes};
-pub use stream_builder::StreamBuilder;
+pub use stream_builder::{StreamBuilder, StreamBuilderTransaction};
 pub use tree::Tree;
 
 #[cfg(test)]

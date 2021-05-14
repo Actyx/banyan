@@ -326,7 +326,6 @@ fn transaction_1() -> anyhow::Result<()> {
     forest.extend(&mut txn, vec![(Key(2), 2)])?;
     assert_eq!(txn.count(), 2);
     txn.commit();
-    drop(txn);
     assert_eq!(builder.count(), 2);
     Ok(())
 }

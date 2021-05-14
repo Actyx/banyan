@@ -205,21 +205,19 @@ impl<T: TreeTypes> StreamBuilder<T> {
 
 pub struct StreamBuilderTransaction<'a, T: TreeTypes> {
     builder: &'a mut StreamBuilder<T>,
-    index: Option<Index<T>>,
-    committed: bool,
+    restore: Option<Option<Index<T>>>,
 }
 
 impl<'a, T: TreeTypes> StreamBuilderTransaction<'a, T> {
     fn new(builder: &'a mut StreamBuilder<T>, index: Option<Index<T>>) -> Self {
         Self {
             builder,
-            index,
-            committed: false,
+            restore: Some(index),
         }
     }
 
-    pub fn commit(&mut self) {
-        self.committed = true;
+    pub fn commit(mut self) {
+        self.restore.take();
     }
 }
 
@@ -239,8 +237,8 @@ impl<'a, T: TreeTypes> DerefMut for StreamBuilderTransaction<'a, T> {
 
 impl<'a, T: TreeTypes> Drop for StreamBuilderTransaction<'a, T> {
     fn drop(&mut self) {
-        if !self.committed {
-            self.builder.set_index(self.index.take());
+        if let Some(index) = self.restore.take() {
+            self.builder.set_index(index);
         }
     }
 }
