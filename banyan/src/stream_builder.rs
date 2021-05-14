@@ -178,7 +178,7 @@ impl<T: TreeTypes> StreamBuilder<T> {
     /// Note that consumed offets are *not* rolled back to make sure we don't reuse offsets.
     pub fn transaction<R, E>(
         &mut self,
-        f: impl Fn(&mut Self) -> std::result::Result<R, E>,
+        f: impl FnOnce(&mut Self) -> std::result::Result<R, E>,
     ) -> std::result::Result<R, E> {
         let root0 = self.root.clone();
         let result = f(self);
