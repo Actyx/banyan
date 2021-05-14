@@ -101,6 +101,7 @@ dependencies = [
  "quickcheck_macros",
  "rand",
  "rand_chacha",
+ "range-collections",
  "sha2",
  "smallvec",
  "tokio",
@@ -1421,6 +1422,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3190ef7066a446f2e7f42e239d161e905420ccab01eb967c9eb27d21b2322a73"
 dependencies = [
  "rand_core",
+]
+
+[[package]]
+name = "range-collections"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d3b65c549aad5f887f00443cab15de69db85e18c5f91a01511bc9af5424a3a3a"
+dependencies = [
+ "serde",
+ "smallvec",
 ]
 
 [[package]]
