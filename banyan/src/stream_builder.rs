@@ -179,8 +179,8 @@ impl<T: TreeTypes> StreamBuilder<T> {
     /// Modify a StreamBuilder and roll back the changes if the operation was not successful
     ///
     /// Note that consumed offets are *not* rolled back to make sure we don't reuse offsets.
-    pub fn transaction(&mut self) -> StreamBuilderTransaction<'_, T> {
-        StreamBuilderTransaction::new(self, self.index().cloned())
+    pub fn transaction(&mut self) -> StreamTransaction<'_, T> {
+        StreamTransaction::new(self, self.index().cloned())
     }
 
     pub(crate) fn state(&self) -> &StreamBuilderState {
@@ -203,12 +203,12 @@ impl<T: TreeTypes> StreamBuilder<T> {
     }
 }
 
-pub struct StreamBuilderTransaction<'a, T: TreeTypes> {
+pub struct StreamTransaction<'a, T: TreeTypes> {
     builder: &'a mut StreamBuilder<T>,
     restore: Option<Option<Index<T>>>,
 }
 
-impl<'a, T: TreeTypes> StreamBuilderTransaction<'a, T> {
+impl<'a, T: TreeTypes> StreamTransaction<'a, T> {
     fn new(builder: &'a mut StreamBuilder<T>, index: Option<Index<T>>) -> Self {
         Self {
             builder,
@@ -221,7 +221,7 @@ impl<'a, T: TreeTypes> StreamBuilderTransaction<'a, T> {
     }
 }
 
-impl<'a, T: TreeTypes> Deref for StreamBuilderTransaction<'a, T> {
+impl<'a, T: TreeTypes> Deref for StreamTransaction<'a, T> {
     type Target = StreamBuilder<T>;
 
     fn deref(&self) -> &Self::Target {
@@ -229,13 +229,13 @@ impl<'a, T: TreeTypes> Deref for StreamBuilderTransaction<'a, T> {
     }
 }
 
-impl<'a, T: TreeTypes> DerefMut for StreamBuilderTransaction<'a, T> {
+impl<'a, T: TreeTypes> DerefMut for StreamTransaction<'a, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.builder
     }
 }
 
-impl<'a, T: TreeTypes> Drop for StreamBuilderTransaction<'a, T> {
+impl<'a, T: TreeTypes> Drop for StreamTransaction<'a, T> {
     fn drop(&mut self) {
         if let Some(index) = self.restore.take() {
             self.builder.set_index(index);
