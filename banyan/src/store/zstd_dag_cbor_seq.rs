@@ -33,7 +33,7 @@ use libipld::{
 };
 use std::{
     collections::BTreeSet,
-    convert::{TryFrom, TryInto},
+    convert::TryFrom,
     fmt,
     io::{Cursor, Write},
     iter,
@@ -43,7 +43,6 @@ use std::{
 
 use crate::{store::decompress_and_transform, stream_builder::CipherOffset};
 
-const EXTRA_LEN: usize = 8;
 const NONCE: [u8; 24] = [0u8; 24];
 
 #[derive(Clone, PartialEq, Eq)]
@@ -267,45 +266,37 @@ impl ZstdDagCborSeq {
         let offset = state.reserve(data.len());
         chacha20.seek(offset);
         chacha20.apply_keystream(&mut data);
-        // add the nonce
-        data.extend(&offset.to_be_bytes());
         // encode via IpldNode
-        let result = DagCborCodec.encode(&IpldNode::new(links, data))?;
+        let result = DagCborCodec.encode(&IpldNode::new(links, data, offset))?;
         Ok(result)
     }
 
     /// decrypt using the given key
     pub fn decrypt(data: &[u8], key: &chacha20::Key) -> anyhow::Result<(Self, Range<u64>)> {
-        let (links, mut encrypted) = DagCborCodec.decode::<IpldNode>(data)?.into_data()?;
-        let len = encrypted.len();
-        anyhow::ensure!(len >= EXTRA_LEN);
-        let (compressed, offset) = encrypted.split_at_mut(len - EXTRA_LEN);
-        let start_offset = u64::from_be_bytes((*offset).try_into()?);
-        let end_offset = start_offset
-            .checked_add(compressed.len() as u64)
-            .ok_or_else(|| anyhow::anyhow!("illegal start offset!"))?;
+        let (offset, links, mut encrypted) = DagCborCodec.decode::<IpldNode>(data)?.into_data()?;
         let mut cipher = XChaCha20::new(key, &NONCE.into());
-        cipher.seek(start_offset);
-        cipher.apply_keystream(compressed);
-        // just remove the nonce, but don't use a new vec.
-        let mut decrypted = encrypted;
-        decrypted.drain(len - EXTRA_LEN..);
-        Ok((Self::new(decrypted, links), start_offset..end_offset))
+        let end_offset = offset
+            .checked_add(encrypted.len() as u64)
+            .ok_or_else(|| anyhow::anyhow!("seek offset wraparound"))?;
+        cipher.seek(offset);
+        cipher.apply_keystream(&mut encrypted);
+        let decrypted = encrypted;
+        Ok((Self::new(decrypted, links), offset..end_offset))
     }
 }
 
 /// utility struct for encoding and decoding
 #[derive(DagCbor)]
-struct IpldNode(Vec<Cid>, Ipld);
+struct IpldNode(u64, Vec<Cid>, Ipld);
 
 impl IpldNode {
-    fn new(links: Vec<Cid>, data: impl Into<Vec<u8>>) -> Self {
-        Self(links, Ipld::Bytes(data.into()))
+    fn new(links: Vec<Cid>, data: impl Into<Vec<u8>>, offset: u64) -> Self {
+        Self(offset, links, Ipld::Bytes(data.into()))
     }
 
-    fn into_data(self) -> anyhow::Result<(Vec<Cid>, Vec<u8>)> {
-        if let Ipld::Bytes(data) = self.1 {
-            Ok((self.0, data))
+    fn into_data(self) -> anyhow::Result<(u64, Vec<Cid>, Vec<u8>)> {
+        if let Ipld::Bytes(data) = self.2 {
+            Ok((self.0, self.1, data))
         } else {
             Err(anyhow::anyhow!("expected ipld bytes"))
         }
@@ -448,8 +439,7 @@ mod tests {
     }
 
     /// basic test to ensure that the decompress works and properly clears the thread local buffer
-    #[quickcheck]
-    fn zstd_array_fill_roundtrip(
+    fn do_zstd_array_fill_roundtrip(
         first: Vec<u8>,
         data: Vec<Vec<u8>>,
         seed: u64,
@@ -469,7 +459,9 @@ mod tests {
             usize::max_value(),
         )?;
         let mut rng = ChaCha8Rng::seed_from_u64(seed);
-        let offset = rng.next_u64();
+        let len = za.compressed().len() as u64;
+        // do not test offsets that would wrap around!
+        let offset = rng.next_u64().saturating_add(len).saturating_sub(len);
         let key: chacha20::Key = rng.gen::<[u8; 32]>().into();
         let encrypted = za.encrypt(&key, offset)?;
         let (za2, byte_range) = ZstdDagCborSeq::decrypt(&encrypted, &key)?;
@@ -499,12 +491,25 @@ mod tests {
         }
         Ok(true)
     }
+    #[quickcheck]
+    fn zstd_array_fill_roundtrip(
+        first: Vec<u8>,
+        data: Vec<Vec<u8>>,
+        seed: u64,
+    ) -> anyhow::Result<bool> {
+        do_zstd_array_fill_roundtrip(first, data, seed)
+    }
+
+    #[test]
+    fn zstd_array_fill_roundtrip_1() {
+        assert!(do_zstd_array_fill_roundtrip(vec![], vec![], 0).unwrap());
+    }
 
     #[test]
     fn test_disk_format() -> anyhow::Result<()> {
         let data = vec![1u32, 2, 3, 4];
         let key: chacha20::Key = [0u8; 32].into();
-        let offset = 1234567890u64;
+        let offset = 7u64;
 
         let res = ZstdDagCborSeq::single(&data, 10)?;
         let bytes = res.encrypt(&key, offset)?;
@@ -512,21 +517,19 @@ mod tests {
         // do not exactly check the compressed and encrypted part, since the exact
         // bytes depend on zstd details and might be fragile.
         assert_eq!(
-            bytes[0..2],
+            bytes[0..3],
             vec![
-                0x82, // list 0x80 of length 2
+                0x83, // list 0x80 of length 3
+                0x07, // offset, unsigned(7)
                 0x80, // array of links, size 0 (no links)
             ]
         );
         let items: Vec<Ipld> = DagCborCodec.decode(&bytes)?;
-        assert_eq!(items.len(), 2);
-        assert_eq!(items[0], Ipld::List(vec![]));
-        if let Ipld::Bytes(bytes) = &items[1] {
-            let len = bytes.len();
-            assert!(len >= EXTRA_LEN);
-            // nonce should be stored last
-            let (encrypted, offset1) = bytes.split_at(len - EXTRA_LEN);
-            assert_eq!(offset1, offset.to_be_bytes());
+        assert_eq!(items.len(), 3);
+        assert_eq!(items[1], Ipld::List(vec![]));
+        if let (Ipld::Integer(offset1), Ipld::Bytes(encrypted)) = (&items[0], &items[2]) {
+            let offset1 = u64::try_from(*offset1)?;
+            assert_eq!(offset1, offset);
             // once decrypted, must be valid zstd
             let mut decrypted = encrypted.to_vec();
             let mut chacha = XChaCha20::new(&key, &NONCE.into());
