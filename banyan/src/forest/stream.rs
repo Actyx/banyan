@@ -22,7 +22,7 @@ impl<
 {
     /// Given a sequence of roots, will stream matching events in ascending order indefinitely.
     ///
-    /// This is implemented by calling [stream_trees_chunked] and just flattening the chunks.
+    /// This is implemented by calling stream_trees_chunked and just flattening the chunks.
     pub fn stream_trees<Q, S>(
         &self,
         query: Q,
@@ -61,7 +61,7 @@ impl<
         let forest = self.clone();
         let result = trees
             .filter_map(move |tree| future::ready(tree.into_inner()))
-            .flat_map(move |(index, secrets)| {
+            .flat_map(move |(index, secrets, _)| {
                 // create an intersection of a range query and the main query
                 // and wrap it in an arc so it is cheap to clone
                 let range = start_offset_ref.load(Ordering::SeqCst)..=*range.end();
@@ -113,7 +113,7 @@ impl<
         let forest = self.clone();
         trees
             .filter_map(move |tree| future::ready(tree.into_inner()))
-            .flat_map(move |(index, secrets)| {
+            .flat_map(move |(index, secrets, _)| {
                 // create an intersection of a range query and the main query
                 // and wrap it in an arc so it is cheap to clone
                 let range = offset.load(Ordering::SeqCst)..=*range.end();
@@ -160,7 +160,7 @@ impl<
         let forest = self.clone();
         let result = trees
             .filter_map(move |tree| future::ready(tree.into_inner()))
-            .flat_map(move |(index, secrets)| {
+            .flat_map(move |(index, secrets, _)| {
                 let end_offset = end_offset_ref.load(Ordering::SeqCst);
                 // create an intersection of a range query and the main query
                 // and wrap it in an arc so it is cheap to clone

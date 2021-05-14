@@ -56,22 +56,19 @@
 //! [chacha20]: https://en.wikipedia.org/wiki/Salsa20#ChaCha_variant
 //! [ipfs]: https://ipfs.io/
 //! [B-Trees]: https://en.wikipedia.org/wiki/B-tree
-pub mod forest;
+mod forest;
 pub mod index;
-pub mod memstore;
 pub mod query;
 pub mod store;
 mod stream_builder;
-mod thread_local_zstd;
-pub mod tree;
+mod tree;
 mod util;
-mod zstd_dag_cbor_seq;
+use stream_builder::{CipherOffset, StreamBuilderState};
 
 pub use chacha20;
-pub use zstd_dag_cbor_seq::ZstdDagCborSeq;
-
+pub use forest::{Config, FilteredChunk, Forest, Secrets, Transaction, TreeTypes};
 pub use stream_builder::StreamBuilder;
-use stream_builder::{StreamBuilderState, StreamOffset};
+pub use tree::Tree;
 
 #[cfg(test)]
 extern crate quickcheck;

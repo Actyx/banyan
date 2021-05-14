@@ -1,10 +1,8 @@
 #![allow(clippy::upper_case_acronyms)]
 use banyan::{
-    forest::{BranchCache, Forest, Transaction, TreeTypes},
     index::{UnitSeq, VecSeq},
-    memstore::MemStore,
-    tree::Tree,
-    StreamBuilder,
+    store::{BranchCache, MemStore},
+    Forest, StreamBuilder, Transaction, Tree, TreeTypes,
 };
 use common::Sha256Digest;
 use fnv::FnvHashSet;

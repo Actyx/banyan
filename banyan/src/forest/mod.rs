@@ -1,74 +1,15 @@
 //! creation and traversal of banyan trees
 use super::index::*;
-use crate::store::{BlockWriter, ReadOnlyStore};
-use anyhow::Result;
+use crate::store::{BlockWriter, BranchCache, ReadOnlyStore};
 use core::{fmt::Debug, hash::Hash, iter::FromIterator, marker::PhantomData, ops::Range};
-use futures::future::BoxFuture;
 use libipld::cbor::DagCbor;
-use parking_lot::Mutex;
-use std::{fmt::Display, num::NonZeroUsize, sync::Arc};
-use weight_cache::{Weighable, WeightCache};
+use std::{fmt::Display, sync::Arc};
 mod index_iter;
 mod read;
 mod stream;
 mod write;
 pub(crate) use index_iter::IndexIter;
 pub(crate) use read::ForestIter;
-
-pub type FutureResult<'a, T> = BoxFuture<'a, Result<T>>;
-
-impl<T: TreeTypes> Weighable for Branch<T> {
-    fn measure(value: &Self) -> usize {
-        let mut bytes = std::mem::size_of::<Branch<T>>();
-        for child in value.children.iter() {
-            bytes += std::mem::size_of::<Index<T>>();
-            match child {
-                Index::Leaf(leaf) => {
-                    bytes += leaf.keys.estimated_size();
-                }
-                Index::Branch(branch) => {
-                    bytes += branch.summaries.estimated_size();
-                }
-            }
-        }
-        bytes
-    }
-}
-
-type CacheOrBypass<T> = Option<Arc<Mutex<WeightCache<<T as TreeTypes>::Link, Branch<T>>>>>;
-
-#[derive(Debug, Clone)]
-pub struct BranchCache<T: TreeTypes>(CacheOrBypass<T>);
-
-impl<T: TreeTypes> Default for BranchCache<T> {
-    fn default() -> Self {
-        Self::new(64 << 20)
-    }
-}
-
-impl<T: TreeTypes> BranchCache<T> {
-    /// Passing a capacity of 0 disables the cache.
-    pub fn new(capacity: usize) -> Self {
-        let cache = if capacity == 0 {
-            None
-        } else {
-            Some(Arc::new(Mutex::new(WeightCache::new(
-                NonZeroUsize::new(capacity).expect("Cache capacity must be "),
-            ))))
-        };
-        Self(cache)
-    }
-
-    pub fn get<'a>(&'a self, link: &'a T::Link) -> Option<Branch<T>> {
-        self.0.as_ref().and_then(|x| x.lock().get(link).cloned())
-    }
-
-    pub fn put(&self, link: T::Link, branch: Branch<T>) {
-        if let Some(Err(e)) = self.0.as_ref().map(|x| x.lock().put(link, branch)) {
-            tracing::warn!("Adding {} to cache failed: {}", link, e);
-        }
-    }
-}
 
 /// Trees can be parametrized with the key type and the sequence type. Also, to avoid a dependency
 /// on a link type with all its baggage, we parameterize the link type.

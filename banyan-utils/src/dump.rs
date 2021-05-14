@@ -2,10 +2,8 @@ use core::fmt::Debug;
 use std::collections::BTreeMap;
 
 use banyan::{
-    forest::{Forest, TreeTypes},
-    store::{ArcReadOnlyStore, ReadOnlyStore},
-    tree::Tree,
-    ZstdDagCborSeq,
+    store::{ArcReadOnlyStore, ReadOnlyStore, ZstdDagCborSeq},
+    Tree, {Forest, TreeTypes},
 };
 use libipld::{cbor::DagCbor, codec::Codec, json::DagJsonCodec};
 

@@ -8,12 +8,15 @@ use crate::{
 };
 
 /// A thing that hands out unique offsets. Parts of StreamBuilderState
+///
+/// these are the byte offsets for the stream cipher and not related to the event offsets
+/// inside the tree.
 #[derive(Debug, Clone)]
-pub(crate) struct StreamOffset {
+pub(crate) struct CipherOffset {
     value: u64,
 }
 
-impl StreamOffset {
+impl CipherOffset {
     pub fn new(value: u64) -> Self {
         Self { value }
     }
@@ -42,13 +45,13 @@ pub(crate) struct StreamBuilderState {
     ///
     /// this is the first free offset, or the total number of bytes ever written
     /// on this stream.
-    pub(crate) offset: StreamOffset,
+    pub(crate) offset: CipherOffset,
 }
 
 impl StreamBuilderState {
     pub fn new(offset: u64, secrets: Secrets, config: Config) -> Self {
         Self {
-            offset: StreamOffset::new(offset),
+            offset: CipherOffset::new(offset),
             secrets,
             config,
         }
@@ -107,23 +110,35 @@ impl<T: TreeTypes> fmt::Display for StreamBuilder<T> {
 }
 
 impl<T: TreeTypes> StreamBuilder<T> {
-
     pub fn new(config: Config, secrets: Secrets) -> Self {
         let state = StreamBuilderState::new(0, secrets, config);
         Self::new_from_index(None, state)
     }
 
+    /// Creates a stream builder with debug settings.
+    ///
+    /// The tree config will be the debug config that produces "interesting" trees even with a small
+    /// number of elements.
+    ///
+    /// The secrets will be the default secrets
+    ///
+    /// Do not use this in production!
     pub fn debug() -> Self {
         let state = StreamBuilderState::new(0, Secrets::default(), Config::debug());
         Self::new_from_index(None, state)
     }
 
     pub fn snapshot(&self) -> Tree<T> {
-        Tree::new(
-            self.root.clone(),
-            self.state.secrets().clone(),
-            self.state.offset.current(),
-        )
+        self.root
+            .as_ref()
+            .map(|root| {
+                Tree::new(
+                    root.clone(),
+                    self.state.secrets().clone(),
+                    self.state.offset.current(),
+                )
+            })
+            .unwrap_or_default()
     }
 
     pub fn link(&self) -> Option<T::Link> {
@@ -156,6 +171,21 @@ impl<T: TreeTypes> StreamBuilder<T> {
     /// root of a non-empty tree
     pub fn index(&self) -> Option<&Index<T>> {
         self.root.as_ref().map(|x| x.as_ref())
+    }
+
+    /// Modify a StreamBuilder and roll back the changes if the operation was not successful
+    ///
+    /// Note that consumed offets are *not* rolled back to make sure we don't reuse offsets.
+    pub fn transaction<R, E>(
+        &mut self,
+        f: impl Fn(&mut Self) -> std::result::Result<R, E>,
+    ) -> std::result::Result<R, E> {
+        let root0 = self.root.clone();
+        let result = f(self);
+        if result.is_err() {
+            self.root = root0;
+        }
+        result
     }
 
     pub(crate) fn state(&self) -> &StreamBuilderState {

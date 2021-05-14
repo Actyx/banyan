@@ -9,74 +9,77 @@ use crate::{
 };
 use crate::{query::Query, store::ReadOnlyStore, util::IterExt, StreamBuilder, StreamBuilderState};
 use anyhow::Result;
+use core::fmt;
 use futures::prelude::*;
 use libipld::cbor::DagCbor;
-use core::fmt;
 use std::{collections::BTreeMap, fmt::Debug, iter, sync::Arc, usize};
 use tracing::*;
 
 #[derive(Clone)]
-pub struct Tree<T: TreeTypes> {
-    root: Option<Arc<Index<T>>>,
-    secrets: Secrets,
-    offset: u64,
-}
+pub struct Tree<T: TreeTypes>(Option<(Arc<Index<T>>, Secrets, u64)>);
 
 impl<T: TreeTypes> Tree<T> {
-    pub(crate) fn new(root: Option<Arc<Index<T>>>, secrets: Secrets, offset: u64) -> Self {
-        Self {
-            root,
-            secrets,
-            offset,
-        }
+    pub(crate) fn new(root: Arc<Index<T>>, secrets: Secrets, offset: u64) -> Self {
+        Self(Some((root, secrets, offset)))
     }
 
-    pub(crate) fn into_inner(self) -> Option<(Arc<Index<T>>, Secrets)> {
-        let secrets = self.secrets().clone();
-        self.root.map(|x| (x, secrets))
+    pub(crate) fn into_inner(self) -> Option<(Arc<Index<T>>, Secrets, u64)> {
+        self.0
     }
 
     pub fn as_index_ref(&self) -> Option<&Index<T>> {
-        self.root.as_ref().map(|arc| arc.as_ref())
+        self.0.as_ref().map(|(r, _, _)| r.as_ref())
     }
 
     pub fn link(&self) -> Option<T::Link> {
-        self.root.as_ref().and_then(|r| *r.link())
+        self.0.as_ref().and_then(|(r, _, _)| *r.link())
     }
 
     pub fn level(&self) -> i32 {
-        self.root.as_ref().map(|x| x.level() as i32).unwrap_or(-1)
+        self.0
+            .as_ref()
+            .map(|(r, _, _)| r.level() as i32)
+            .unwrap_or(-1)
     }
 
     /// true for an empty tree
     pub fn is_empty(&self) -> bool {
-        self.count() == 0
+        self.0.is_none()
     }
 
     /// number of elements in the tree
     pub fn count(&self) -> u64 {
-        self.root.as_ref().map(|x| x.count()).unwrap_or_default()
+        self.0
+            .as_ref()
+            .map(|(r, _, _)| r.count())
+            .unwrap_or_default()
     }
 
     /// root of a non-empty tree
     pub fn root(&self) -> Option<&T::Link> {
-        self.root.as_ref().and_then(|index| index.link().as_ref())
+        self.0.as_ref().and_then(|(r, _, _)| r.link().as_ref())
     }
 
     /// root of a non-empty tree
-    pub fn index(&self) -> Option<&Index<T>> {
-        self.root.as_ref().map(|x| x.as_ref())
+    pub fn index(&self) -> Option<&Arc<Index<T>>> {
+        self.0.as_ref().map(|(r, _, _)| r)
     }
 
-    pub fn secrets(&self) -> &Secrets {
-        &self.secrets
+    pub fn secrets(&self) -> Option<&Secrets> {
+        self.0.as_ref().map(|(_, secrets, _)| secrets)
+    }
+}
+
+impl<T: TreeTypes> Default for Tree<T> {
+    fn default() -> Self {
+        Self(None)
     }
 }
 
 impl<T: TreeTypes> fmt::Debug for Tree<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &self.root {
-            Some(root) => f
+        match &self.0 {
+            Some((root, ..)) => f
                 .debug_struct("Tree")
                 .field("count", &self.count())
                 .field("key_bytes", &root.key_bytes())
@@ -93,8 +96,8 @@ impl<T: TreeTypes> fmt::Debug for Tree<T> {
 
 impl<T: TreeTypes> fmt::Display for Tree<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &self.root {
-            Some(root) => write!(f, "{:?}", root.link(),),
+        match &self.0 {
+            Some((root, ..)) => write!(f, "{:?}", root.link(),),
             None => write!(f, "empty tree"),
         }
     }
@@ -128,13 +131,13 @@ impl<
         // we pass in a predicate that makes the nodes sealed, since we don't care
         let (index, byte_range) = self.load_branch_from_link(&secrets, |_, _| true, link)?;
         // store the offset with the snapshot. Snapshots are immutable, so this won't change.
-        Ok(Tree::new(Some(Arc::new(index)), secrets, byte_range.end))
+        Ok(Tree::new(Arc::new(index), secrets, byte_range.end))
     }
 
     /// dumps the tree structure
     pub fn dump(&self, tree: &Tree<T>) -> Result<()> {
-        match &tree.root {
-            Some(index) => self.dump0(tree.secrets(), index, ""),
+        match &tree.0 {
+            Some((index, secrets, _)) => self.dump0(secrets, index, ""),
             None => Ok(()),
         }
     }
@@ -145,8 +148,8 @@ impl<
         tree: &Tree<T>,
         f: impl Fn((usize, &NodeInfo<T>)) -> S + Clone,
     ) -> Result<(GraphEdges, GraphNodes<S>)> {
-        match &tree.root {
-            Some(index) => self.dump_graph0(tree.secrets(), None, 0, index, f),
+        match &tree.0 {
+            Some((index, secrets, _)) => self.dump_graph0(secrets, None, 0, index, f),
             None => anyhow::bail!("Tree must not be empty"),
         }
     }
@@ -237,10 +240,10 @@ impl<
 
     /// leftmost branches of the tree as separate trees
     pub fn left_roots(&self, tree: &Tree<T>) -> Result<Vec<Tree<T>>> {
-        Ok(if let Some(index) = tree.as_index_ref() {
-            self.left_roots0(tree.secrets(), index)?
+        Ok(if let Some((index, secrets, _)) = &tree.0 {
+            self.left_roots0(secrets, index)?
                 .into_iter()
-                .map(|x| Tree::new(Some(Arc::new(x)), tree.secrets().clone(), u64::max_value()))
+                .map(|x| Tree::new(Arc::new(x), secrets.clone(), u64::max_value()))
                 .collect()
         } else {
             Vec::new()
@@ -278,8 +281,8 @@ impl<
     }
 
     pub fn is_packed(&self, tree: &Tree<T>) -> Result<bool> {
-        if let Some(root) = &tree.root {
-            self.is_packed0(tree.secrets(), &root)
+        if let Some((root, secrets, _)) = &tree.0 {
+            self.is_packed0(secrets, &root)
         } else {
             Ok(true)
         }
@@ -302,9 +305,9 @@ impl<
         tree: &Tree<T>,
         query: impl Query<T> + Clone + 'static,
     ) -> impl Stream<Item = Result<(u64, T::Key, V)>> + 'static {
-        match &tree.root {
-            Some(index) => self
-                .stream_filtered0(tree.secrets().clone(), query, index.clone())
+        match &tree.0 {
+            Some((index, secrets, _)) => self
+                .stream_filtered0(secrets.clone(), query, index.clone())
                 .left_stream(),
             None => stream::empty().right_stream(),
         }
@@ -317,9 +320,9 @@ impl<
         tree: &Tree<T>,
         query: impl Query<T> + Clone + 'static,
     ) -> impl Iterator<Item = Result<Arc<Index<T>>>> + 'static {
-        match &tree.root {
-            Some(index) => self
-                .index_iter0(tree.secrets().clone(), query, index.clone())
+        match &tree.0 {
+            Some((index, secrets, _)) => self
+                .index_iter0(secrets.clone(), query, index.clone())
                 .boxed()
                 .left_iter(),
             None => iter::empty().right_iter(),
@@ -333,9 +336,9 @@ impl<
         tree: &Tree<T>,
         query: impl Query<T> + Clone + 'static,
     ) -> impl Iterator<Item = Result<Arc<Index<T>>>> + 'static {
-        match &tree.root {
-            Some(index) => self
-                .index_iter_rev0(tree.secrets().clone(), query, index.clone())
+        match &tree.0 {
+            Some((index, secrets, _)) => self
+                .index_iter_rev0(secrets.clone(), query, index.clone())
                 .boxed()
                 .left_iter(),
             None => iter::empty().right_iter(),
@@ -347,9 +350,9 @@ impl<
         tree: &Tree<T>,
         query: impl Query<T> + Clone + 'static,
     ) -> impl Iterator<Item = Result<(u64, T::Key, V)>> + 'static {
-        match &tree.root {
-            Some(index) => self
-                .iter_filtered0(tree.secrets().clone(), query, index.clone())
+        match &tree.0 {
+            Some((index, secrets, _)) => self
+                .iter_filtered0(secrets.clone(), query, index.clone())
                 .boxed()
                 .left_iter(),
             None => iter::empty().right_iter(),
@@ -361,9 +364,9 @@ impl<
         tree: &Tree<T>,
         query: impl Query<T> + Clone + 'static,
     ) -> impl Iterator<Item = Result<(u64, T::Key, V)>> + 'static {
-        match &tree.root {
-            Some(index) => self
-                .iter_filtered_reverse0(tree.secrets().clone(), query, index.clone())
+        match &tree.0 {
+            Some((index, secrets, _)) => self
+                .iter_filtered_reverse0(secrets.clone(), query, index.clone())
                 .boxed()
                 .left_iter(),
             None => iter::empty().right_iter(),
@@ -374,13 +377,9 @@ impl<
         &self,
         tree: &Tree<T>,
     ) -> impl Iterator<Item = Result<(u64, T::Key, V)>> + 'static {
-        match &tree.root {
-            Some(index) => self
-                .iter_filtered0(
-                    tree.secrets().clone(),
-                    crate::query::AllQuery,
-                    index.clone(),
-                )
+        match &tree.0 {
+            Some((index, secrets, _)) => self
+                .iter_filtered0(secrets.clone(), crate::query::AllQuery, index.clone())
                 .left_iter(),
             None => iter::empty().right_iter(),
         }
@@ -397,9 +396,9 @@ impl<
         E: Send + 'static,
         F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
     {
-        match &tree.root {
-            Some(index) => self
-                .traverse0(tree.secrets().clone(), query, index.clone(), mk_extra)
+        match &tree.0 {
+            Some((index, secrets, _)) => self
+                .traverse0(secrets.clone(), query, index.clone(), mk_extra)
                 .left_iter(),
             None => iter::empty().right_iter(),
         }
@@ -416,9 +415,9 @@ impl<
         E: Send + 'static,
         F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
     {
-        match &tree.root {
-            Some(index) => self
-                .traverse_rev0(tree.secrets().clone(), query, index.clone(), mk_extra)
+        match &tree.0 {
+            Some((index, secrets, _)) => self
+                .traverse_rev0(secrets.clone(), query, index.clone(), mk_extra)
                 .left_iter(),
             None => iter::empty().right_iter(),
         }
@@ -435,9 +434,9 @@ impl<
         E: Send + 'static,
         F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
     {
-        match &tree.root {
-            Some(index) => self
-                .stream_filtered_chunked0(tree.secrets().clone(), query, index.clone(), mk_extra)
+        match &tree.0 {
+            Some((index, secrets, _)) => self
+                .stream_filtered_chunked0(secrets.clone(), query, index.clone(), mk_extra)
                 .left_stream(),
             None => stream::empty().right_stream(),
         }
@@ -454,9 +453,9 @@ impl<
         E: Send + 'static,
         F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
     {
-        match &tree.root {
-            Some(index) => self
-                .stream_filtered_chunked_reverse0(tree.secrets(), query, index.clone(), mk_extra)
+        match &tree.0 {
+            Some((index, secrets, _)) => self
+                .stream_filtered_chunked_reverse0(secrets, query, index.clone(), mk_extra)
                 .left_stream(),
             None => stream::empty().right_stream(),
         }
@@ -468,8 +467,8 @@ impl<
     /// part of the tree. Returns an error when part of the tree should be there, but could
     /// not be read.
     pub fn get(&self, tree: &Tree<T>, offset: u64) -> Result<Option<(T::Key, V)>> {
-        Ok(match &tree.root {
-            Some(index) => self.get0(tree.secrets(), index, offset)?,
+        Ok(match &tree.0 {
+            Some((index, secrets, _)) => self.get0(secrets, index, offset)?,
             None => None,
         })
     }
@@ -484,8 +483,8 @@ impl<
     #[allow(clippy::type_complexity)]
     pub fn collect_from(&self, tree: &Tree<T>, offset: u64) -> Result<Vec<Option<(T::Key, V)>>> {
         let mut res = Vec::new();
-        if let Some(index) = &tree.root {
-            self.collect0(&tree.secrets(), index, offset, &mut res)?;
+        if let Some((index, secrets, _)) = &tree.0 {
+            self.collect0(secrets, index, offset, &mut res)?;
         }
         Ok(res)
     }
