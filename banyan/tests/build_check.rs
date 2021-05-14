@@ -308,6 +308,29 @@ fn filter_test_simple() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[test]
+fn transaction_1() -> anyhow::Result<()> {
+    let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
+    let forest = txn(store, 1000);
+    let mut builder = StreamBuilder::<TT>::debug();
+    forest.extend(&mut builder, vec![(Key(1), 1)])?;
+    // transaction that is dropped without committing
+    let mut txn = builder.transaction();
+    forest.extend(&mut txn, vec![(Key(1), 1)])?;
+    assert_eq!(txn.count(), 2);
+    drop(txn);
+    assert_eq!(builder.count(), 1);
+
+    // transaction that is dropped after committing
+    let mut txn = builder.transaction();
+    forest.extend(&mut txn, vec![(Key(2), 2)])?;
+    assert_eq!(txn.count(), 2);
+    txn.commit();
+    drop(txn);
+    assert_eq!(builder.count(), 2);
+    Ok(())
+}
+
 #[tokio::test]
 async fn stream_test_simple() -> anyhow::Result<()> {
     let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
