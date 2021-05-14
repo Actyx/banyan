@@ -8,12 +8,15 @@ use crate::{
 };
 
 /// A thing that hands out unique offsets. Parts of StreamBuilderState
+///
+/// these are the byte offsets for the stream cipher and not related to the event offsets
+/// inside the tree.
 #[derive(Debug, Clone)]
-pub(crate) struct StreamOffset {
+pub(crate) struct CipherOffset {
     value: u64,
 }
 
-impl StreamOffset {
+impl CipherOffset {
     pub fn new(value: u64) -> Self {
         Self { value }
     }
@@ -42,13 +45,13 @@ pub(crate) struct StreamBuilderState {
     ///
     /// this is the first free offset, or the total number of bytes ever written
     /// on this stream.
-    pub(crate) offset: StreamOffset,
+    pub(crate) offset: CipherOffset,
 }
 
 impl StreamBuilderState {
     pub fn new(offset: u64, secrets: Secrets, config: Config) -> Self {
         Self {
-            offset: StreamOffset::new(offset),
+            offset: CipherOffset::new(offset),
             secrets,
             config,
         }

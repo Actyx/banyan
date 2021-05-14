@@ -41,7 +41,7 @@ use std::{
     time::Instant,
 };
 
-use crate::{store::decompress_and_transform, stream_builder::StreamOffset};
+use crate::{store::decompress_and_transform, stream_builder::CipherOffset};
 
 const EXTRA_LEN: usize = 8;
 const NONCE: [u8; 24] = [0u8; 24];
@@ -251,7 +251,7 @@ impl ZstdDagCborSeq {
 
     /// encrypt using the given key and nonce
     pub fn encrypt(&self, key: &chacha20::Key, offset: u64) -> anyhow::Result<Vec<u8>> {
-        let mut state = StreamOffset::new(offset);
+        let mut state = CipherOffset::new(offset);
         self.clone().into_encrypted(key, &mut state)
     }
 
@@ -259,7 +259,7 @@ impl ZstdDagCborSeq {
     pub(crate) fn into_encrypted(
         self,
         key: &chacha20::Key,
-        state: &mut StreamOffset,
+        state: &mut CipherOffset,
     ) -> anyhow::Result<Vec<u8>> {
         let Self { mut data, links } = self;
         // encrypt in place with the key and nonce

@@ -117,7 +117,7 @@ pub fn links(
         .iter_index(&tree, AllQuery)
         .map(|x| x.map(|x| x.link().as_ref().cloned()))
         .collect::<anyhow::Result<Vec<_>>>()?;
-    links.extend(link_opts.into_iter().filter_map(|x| x));
+    links.extend(link_opts.into_iter().flatten());
     Ok(())
 }
 

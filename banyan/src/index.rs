@@ -38,7 +38,7 @@
 //! [CompactSeq]: trait.CompactSeq.html
 //! [Semigroup]: trait.Semigroup.html
 //! [SimpleCompactSeq]: struct.SimpleCompactSeq.html
-use crate::{forest::TreeTypes, store::ZstdDagCborSeq, StreamOffset};
+use crate::{forest::TreeTypes, store::ZstdDagCborSeq, CipherOffset};
 use anyhow::{anyhow, Result};
 use derive_more::From;
 use libipld::{
@@ -392,7 +392,7 @@ impl<T: TreeTypes> Display for NodeInfo<'_, T> {
 
 pub(crate) fn serialize_compressed<T: TreeTypes>(
     key: &chacha20::Key,
-    state: &mut StreamOffset,
+    state: &mut CipherOffset,
     items: &[Index<T>],
     level: i32,
 ) -> Result<Vec<u8>> {

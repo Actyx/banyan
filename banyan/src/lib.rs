@@ -63,7 +63,7 @@ pub mod store;
 mod stream_builder;
 mod tree;
 mod util;
-use stream_builder::{StreamBuilderState, StreamOffset};
+use stream_builder::{CipherOffset, StreamBuilderState};
 
 pub use chacha20;
 pub use forest::{Config, FilteredChunk, Forest, Secrets, Transaction, TreeTypes};
