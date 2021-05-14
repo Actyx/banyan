@@ -87,8 +87,8 @@ fn links_get_properly_scraped(xs: Vec<(Key, Payload)>) -> anyhow::Result<bool> {
     // collect references from blocks
     for (_, v) in store {
         let t: Vec<Ipld> = DagCborCodec.decode(&v)?;
-        anyhow::ensure!(t.len() == 2);
-        t[0].references(&mut references_from_blocks);
+        anyhow::ensure!(t.len() == 3);
+        t[1].references(&mut references_from_blocks);
     }
     // collect references from keys and values
     for (k, v) in &xs {

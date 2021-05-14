@@ -135,14 +135,14 @@ fn same_secrets(a: &Tree<TT>, b: &Tree<TT>) -> bool {
 
 type OffsetSet = RangeSet<u64, [u64; 16]>;
 
-/// utility struct for encoding and decoding
+/// utility struct for encoding and decoding - copied for the tests
 #[derive(DagCbor)]
-struct IpldNode(Vec<Cid>, Ipld);
+struct IpldNode(u64, Vec<Cid>, Ipld);
 
 impl IpldNode {
-    fn into_data(self) -> anyhow::Result<(Vec<Cid>, Vec<u8>)> {
-        if let Ipld::Bytes(data) = self.1 {
-            Ok((self.0, data))
+    fn into_data(self) -> anyhow::Result<(u64, Vec<Cid>, Vec<u8>)> {
+        if let Ipld::Bytes(data) = self.2 {
+            Ok((self.0, self.1, data))
         } else {
             Err(anyhow::anyhow!("expected ipld bytes"))
         }
@@ -151,11 +151,12 @@ impl IpldNode {
 
 fn block_range(forest: &Forest, hash: &Sha256Digest) -> anyhow::Result<Range<u64>> {
     let blob = forest.store().get(hash)?;
-    let (_, encrypted) = DagCborCodec.decode::<IpldNode>(&blob)?.into_data()?;
-    let (data, offset) = encrypted.split_at(encrypted.len() - 8);
-    let len = data.len() as u64;
-    let offset = u64::from_be_bytes((*offset).try_into()?);
-    Ok(offset..offset + len)
+    let (offset, _, encrypted) = DagCborCodec.decode::<IpldNode>(&blob)?.into_data()?;
+    let len = encrypted.len() as u64;
+    let end_offset = offset
+        .checked_add(len)
+        .ok_or_else(|| anyhow::anyhow!("seek wraparound"))?;
+    Ok(offset..end_offset)
 }
 
 /// check that for the given blocks, ranges do not overlap
