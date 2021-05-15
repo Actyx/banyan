@@ -424,10 +424,8 @@ async fn main() -> Result<()> {
             )];
             let query = DnfQuery(tags).boxed();
             let values: Vec<_> = forest
-                .stream_filtered(&tree, query)
-                .map_ok(|(_, k, v)| (k, v))
-                .collect::<Vec<_>>()
-                .await;
+                .iter_filtered(&tree, query)
+                .collect::<Vec<_>>();
             println!("{}", values.len());
             let t1 = std::time::Instant::now();
             let tfilter_common = t1 - t0;
@@ -439,10 +437,8 @@ async fn main() -> Result<()> {
             )];
             let query = DnfQuery(tags).boxed();
             let values: Vec<_> = forest
-                .stream_filtered(&tree, query)
-                .map_ok(|(_, k, v)| (k, v))
-                .collect::<Vec<_>>()
-                .await;
+                .iter_filtered(&tree, query)
+                .collect::<Vec<_>>();
             println!("{}", values.len());
             let t1 = std::time::Instant::now();
             let tfilter_rare = t1 - t0;

@@ -353,7 +353,6 @@ impl<
         match &tree.0 {
             Some((index, secrets, _)) => self
                 .iter_filtered0(secrets.clone(), query, index.clone())
-                .boxed()
                 .left_iter(),
             None => iter::empty().right_iter(),
         }
@@ -367,7 +366,6 @@ impl<
         match &tree.0 {
             Some((index, secrets, _)) => self
                 .iter_filtered_reverse0(secrets.clone(), query, index.clone())
-                .boxed()
                 .left_iter(),
             None => iter::empty().right_iter(),
         }
