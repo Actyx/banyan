@@ -4,7 +4,7 @@ use banyan::{
     index::{CompactSeq, Summarizable},
     query::AllQuery,
     store::{BranchCache, MemStore, ReadOnlyStore},
-    Config, StreamBuilder, Transaction, Tree, TreeTypes,
+    StreamBuilder, Transaction, Tree, TreeTypes,
 };
 use futures::Future;
 use libipld::{
