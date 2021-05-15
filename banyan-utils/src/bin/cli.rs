@@ -423,9 +423,7 @@ async fn main() -> Result<()> {
                 TagSet::single(Tag::from("fizz")),
             )];
             let query = DnfQuery(tags).boxed();
-            let values: Vec<_> = forest
-                .iter_filtered(&tree, query)
-                .collect::<Vec<_>>();
+            let values: Vec<_> = forest.iter_filtered(&tree, query).collect::<Vec<_>>();
             println!("{}", values.len());
             let t1 = std::time::Instant::now();
             let tfilter_common = t1 - t0;
@@ -436,9 +434,7 @@ async fn main() -> Result<()> {
                 TagSet::single(Tag::from("fizzbuzz")),
             )];
             let query = DnfQuery(tags).boxed();
-            let values: Vec<_> = forest
-                .iter_filtered(&tree, query)
-                .collect::<Vec<_>>();
+            let values: Vec<_> = forest.iter_filtered(&tree, query).collect::<Vec<_>>();
             println!("{}", values.len());
             let t1 = std::time::Instant::now();
             let tfilter_rare = t1 - t0;
