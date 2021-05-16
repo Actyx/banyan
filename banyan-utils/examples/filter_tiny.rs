@@ -81,8 +81,8 @@ fn main() -> anyhow::Result<()> {
     );
     let config = Config {
         target_leaf_size: 1 << 14,
-        max_leaf_count: 1 << 14,
-        max_branch_count: 32,
+        max_leaf_count: 1 << 12,
+        max_branch_count: 8,
         zstd_level: 10,
         max_uncompressed_leaf_size: 16 * 1024 * 1024,
     };
@@ -93,7 +93,7 @@ fn main() -> anyhow::Result<()> {
     println!("{:?}", tree);
 
     for _i in 0..1000 {
-        let (xs4, _, r_iter_tiny) = test_ops_count("", &txn, &tree, OffsetRangeQuery::from(0..10));
+        let (xs4, _, _) = test_ops_count("", &txn, &tree, OffsetRangeQuery::from(0..10));
         assert!(xs4.len() as u64 == 10);
         // assert_eq!(r_iter_tiny, 4);
     }

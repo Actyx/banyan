@@ -152,18 +152,11 @@ where
                 continue;
             }
 
-            // let range = match self.mode {
-            //     Mode::Forward => {
-            //         let before = self.offset;
-            //         self.offset += head.index.count();
-            //         before..self.offset
-            //     }
-            //     Mode::Backward => {
-            //         let before = self.offset;
-            //         self.offset -= head.index.count();
-            //         self.offset..before
-            //     }
-            // };
+            // calculate the range in advance
+            let range = match self.mode {
+                Mode::Forward => self.offset..self.offset.saturating_add(head.index.count()),
+                Mode::Backward => self.offset.saturating_sub(head.index.count())..self.offset,
+            };
 
             match &head.index {
                 Index::Branch(index) if index.link.is_some() => {
@@ -175,12 +168,8 @@ where
                             Mode::Forward => 0,
                             Mode::Backward => index.summaries.len() as isize - 1,
                         };
-                        let start_offset = match self.mode {
-                            Mode::Forward => self.offset,
-                            Mode::Backward => self.offset - index.count,
-                        };
                         self.query
-                            .intersecting(start_offset, &index, &mut head.filter);
+                            .intersecting(range.start, &index, &mut head.filter);
                     }
 
                     let branch = match &head.branch {
@@ -189,8 +178,8 @@ where
                             let branch = match self.forest.load_branch_cached(&self.secrets, index)
                             {
                                 Ok(Some(branch)) => branch,
+                                Ok(None) => panic!("leaf must be some here"),
                                 Err(cause) => return Some(Err(cause)),
-                                _ => panic!(),
                             };
                             head.branch = Some(branch.clone());
                             branch
@@ -205,68 +194,44 @@ where
                         continue;
                     } else {
                         let index = &branch.children[next_idx];
-                        let range = match self.mode {
-                            Mode::Forward => {
-                                let before = self.offset;
-                                self.offset += index.count();
-                                before..self.offset
-                            }
-                            Mode::Backward => {
-                                let before = self.offset;
-                                self.offset -= index.count();
-                                self.offset..before
-                            }
-                        };
                         head.next_pos(&self.mode);
-                        let placeholder: FilteredChunk<T, V, E> = FilteredChunk {
+                        // move offset
+                        match self.mode {
+                            Mode::Forward => self.offset += index.count(),
+                            Mode::Backward => self.offset -= index.count(),
+                        };
+                        break FilteredChunk {
                             range,
                             data: Vec::new(),
                             extra: (self.mk_extra)(index.as_index_ref()),
                         };
-
-                        break placeholder;
                     }
                 }
 
                 Index::Leaf(index) if index.link.is_some() => {
-                    let chunk = {
-                        if self.mode == Mode::Backward {
-                            self.offset -= index.keys.count();
-                        }
-                        let range = self.offset..self.offset + index.keys.count();
-                        let mut matching: SmallVec<[_; 32]> = smallvec![true; index.keys.len()];
-                        self.query.containing(self.offset, &index, &mut matching);
-                        if matching.any() {
-                            let keys = index.select_keys(&matching);
-                            let leaf = match self.forest.load_leaf(&self.secrets, index) {
-                                Ok(Some(leaf)) => leaf,
-                                Err(cause) => return Some(Err(cause)),
-                                _ => panic!(),
-                            };
-                            let elems: Vec<V> = match leaf.as_ref().select(&matching) {
-                                Ok(i) => i,
-                                Err(e) => return Some(Err(e)),
-                            };
-                            let offset = self.offset;
-                            let triples = keys
-                                .zip(elems)
-                                .map(|((o, k), v)| (o + offset, k, v))
-                                .collect::<Vec<_>>();
-                            FilteredChunk {
-                                range,
-                                data: triples,
-                                extra: (self.mk_extra)(IndexRef::Leaf(&index)),
-                            }
-                        } else {
-                            FilteredChunk {
-                                range,
-                                data: vec![],
-                                extra: (self.mk_extra)(IndexRef::Leaf(&index)),
-                            }
-                        }
+                    let mut matching: SmallVec<[_; 32]> = smallvec![true; index.keys.len()];
+                    self.query.containing(range.start, &index, &mut matching);
+                    let data = if matching.any() {
+                        let keys = index.select_keys(&matching);
+                        let leaf = match self.forest.load_leaf(&self.secrets, index) {
+                            Ok(Some(leaf)) => leaf,
+                            Ok(None) => panic!("leaf must be some here"),
+                            Err(cause) => return Some(Err(cause)),
+                        };
+                        let elems: Vec<V> = match leaf.as_ref().select(&matching) {
+                            Ok(i) => i,
+                            Err(e) => return Some(Err(e)),
+                        };
+                        keys.zip(elems)
+                            .map(|((o, k), v)| (o + range.start, k, v))
+                            .collect::<Vec<_>>()
+                    } else {
+                        Vec::new()
                     };
-                    if self.mode == Mode::Forward {
-                        self.offset += index.keys.count();
+                    let extra = (self.mk_extra)(IndexRef::Leaf(&index));
+                    match self.mode {
+                        Mode::Backward => self.offset -= index.keys.count(),
+                        Mode::Forward => self.offset += index.keys.count(),
                     }
 
                     // Ascend to parent's node, if it exists
@@ -274,7 +239,7 @@ where
                     if let Some(last) = self.stack.last_mut() {
                         last.next_pos(&self.mode);
                     }
-                    break chunk;
+                    break FilteredChunk { range, data, extra };
                 }
 
                 // even for purged leafs and branches or ignored chunks,
@@ -290,25 +255,15 @@ where
                     if let Some(last) = self.stack.last_mut() {
                         last.next_pos(&self.mode);
                     };
-                    let range = match self.mode {
-                        Mode::Forward => {
-                            let before = self.offset;
-                            self.offset += index.count();
-                            before..self.offset
-                        }
-                        Mode::Backward => {
-                            let before = self.offset;
-                            self.offset -= index.count();
-                            self.offset..before
-                        }
+                    match self.mode {
+                        Mode::Forward => self.offset += index.count(),
+                        Mode::Backward => self.offset -= index.count(),
                     };
-
-                    let placeholder: FilteredChunk<T, V, E> = FilteredChunk {
+                    break FilteredChunk {
                         range,
                         data: vec![],
                         extra: (self.mk_extra)(index.as_index_ref()),
                     };
-                    break placeholder;
                 }
             };
         };
