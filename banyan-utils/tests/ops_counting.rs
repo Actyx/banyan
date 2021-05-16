@@ -3,13 +3,13 @@ use std::{
         atomic::{AtomicU64, Ordering},
         Arc,
     },
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use banyan::{
-    query::{AllQuery, OffsetRangeQuery},
+    query::{AllQuery, OffsetRangeQuery, Query},
     store::{BlockWriter, BranchCache, MemStore, ReadOnlyStore},
-    Config, Forest, Secrets, StreamBuilder, Transaction,
+    Config, Forest, Secrets, StreamBuilder, Transaction, Tree,
 };
 use banyan_utils::{
     tag_index::TagSet,
@@ -51,6 +51,21 @@ impl<L, S: BlockWriter<L> + Send + Sync> BlockWriter<L> for OpsCountingStore<S> 
     }
 }
 
+fn test_ops_count(
+    name: &str,
+    forest: &Forest<TT, u64, OpsCountingStore<MemStore<Sha256Digest>>>,
+    tree: &Tree<TT>,
+    query: impl Query<TT> + Clone + 'static,
+) -> (Vec<anyhow::Result<(u64, Key, u64)>>, Duration, u64) {
+    let r0 = forest.store().reads();
+    let t0 = Instant::now();
+    let xs: Vec<anyhow::Result<(u64, Key, u64)>> = forest.iter_filtered(&tree, query).collect();
+    let dt = t0.elapsed();
+    let dr = forest.store().reads() - r0;
+    println!("{} {} {}", name, dr, dt.as_micros());
+    (xs, dt, dr)
+}
+
 #[test]
 fn ops_count_1() -> anyhow::Result<()> {
     let n = 1000000;
@@ -69,33 +84,13 @@ fn ops_count_1() -> anyhow::Result<()> {
     txn.extend(&mut builder, xs)?;
     let tree = builder.snapshot();
 
-    let t0 = Instant::now();
     let r0 = store.reads();
     let xs1 = txn.collect(&tree)?;
     let r_collect = store.reads() - r0;
-    let t_collect = t0.elapsed();
 
-    let t0 = Instant::now();
-    let r0 = store.reads();
-    let xs2: Vec<_> = txn.iter_filtered(&builder.snapshot(), AllQuery).collect();
-    let r_iter = store.reads() - r0;
-    let t_iter = t0.elapsed();
-
-    let t0 = Instant::now();
-    let r0 = store.reads();
-    let xs3: Vec<_> = txn
-        .iter_filtered(&builder.snapshot(), OffsetRangeQuery::from(0..n / 10))
-        .collect();
-    let r_iter_small = store.reads() - r0;
-    let t_iter_small = t0.elapsed();
-
-    let t0 = Instant::now();
-    let r0 = store.reads();
-    let xs4: Vec<_> = txn
-        .iter_filtered(&builder.snapshot(), OffsetRangeQuery::from(0..10))
-        .collect();
-    let r_iter_tiny = store.reads() - r0;
-    let t_iter_tiny = t0.elapsed();
+    let (xs2, _, r_iter) = test_ops_count("", &txn, &tree, AllQuery);
+    let (xs3, _, r_iter_small) = test_ops_count("", &txn, &tree, OffsetRangeQuery::from(0..n / 10));
+    let (xs4, _, r_iter_tiny) = test_ops_count("", &txn, &tree, OffsetRangeQuery::from(0..10));
 
     assert!(xs1.len() as u64 == n);
     assert!(xs2.len() as u64 == n);
@@ -104,16 +99,34 @@ fn ops_count_1() -> anyhow::Result<()> {
 
     assert_eq!(r_collect, 65);
     assert_eq!(r_iter, 65);
-    assert_eq!(r_iter_small, 35);
-    assert_eq!(r_iter_tiny, 35); // this seems weird...
+    assert_eq!(r_iter_small, 10);
+    assert_eq!(r_iter_tiny, 4);
 
-    println!("{} {} {} {}", r_collect, r_iter, r_iter_small, r_iter_tiny);
-    println!(
-        "{} {} {} {}",
-        t_collect.as_micros(),
-        t_iter.as_micros(),
-        t_iter_small.as_micros(),
-        t_iter_tiny.as_micros(),
+    Ok(())
+}
+
+#[test]
+fn ops_count_2() -> anyhow::Result<()> {
+    let n = 1000000;
+    let capacity = 0;
+    let xs = (0..n)
+        .map(|i| (Key::single(i, i, TagSet::empty()), i))
+        .collect::<Vec<_>>();
+    let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
+    let store = OpsCountingStore::new(store);
+    let branch_cache = BranchCache::<TT>::new(capacity);
+    let txn = Transaction::new(
+        Forest::new(store.clone(), branch_cache.clone()),
+        store.clone(),
     );
+    let mut builder = StreamBuilder::new(Config::debug_fast(), Secrets::default());
+    txn.extend(&mut builder, xs)?;
+    let tree = builder.snapshot();
+    let (xs4, _, r_iter_tiny) = test_ops_count("", &txn, &tree, OffsetRangeQuery::from(0..10));
+
+    assert!(xs4.len() as u64 == 10);
+
+    assert_eq!(r_iter_tiny, 4);
+
     Ok(())
 }
