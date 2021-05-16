@@ -154,18 +154,16 @@ where
 
             let info = match &head.info {
                 Some(info) => info.clone(),
-                None => {
-                    match self.forest.load_node(&self.secrets, &head.index) {
-                        Ok(info) => {
-                            let info = Arc::new(info);
-                            head.info = Some(info.clone());
-                            info
-                        }
-                        Err(cause) => {
-                            return Some(Err(cause));
-                        }
+                None => match self.forest.load_node(&self.secrets, &head.index) {
+                    Ok(info) => {
+                        let info = Arc::new(info);
+                        head.info = Some(info.clone());
+                        info
                     }
-                }
+                    Err(cause) => {
+                        return Some(Err(cause));
+                    }
+                },
             };
 
             match Ok(info.as_ref()) {
