@@ -68,7 +68,7 @@ fn test_ops_count(
 
 fn main() -> anyhow::Result<()> {
     let n = 1000000;
-    let capacity = 128<<20;
+    let capacity = 128 << 20;
     let xs = (0..n)
         .map(|i| (Key::single(i, i, TagSet::empty()), i))
         .collect::<Vec<_>>();

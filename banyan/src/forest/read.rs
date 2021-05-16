@@ -15,7 +15,7 @@ use futures::{prelude::*, stream::BoxStream};
 use libipld::cbor::DagCbor;
 use smallvec::{smallvec, SmallVec};
 
-use std::{iter, ops::Range, sync::Arc, time::Instant};
+use std::{iter, ops::Range, time::Instant};
 #[derive(PartialEq)]
 enum Mode {
     Forward,
@@ -42,7 +42,7 @@ struct TraverseState<T: TreeTypes> {
     // to initialize it.
     filter: SmallVec<[bool; 64]>,
 
-    branch: Option<Arc<Branch<T>>>,
+    branch: Option<Branch<T>>,
 }
 
 impl<T: TreeTypes> TraverseState<T> {
@@ -192,9 +192,8 @@ where
                                 Err(cause) => return Some(Err(cause)),
                                 _ => panic!(),
                             };
-                            let res = Arc::new(branch);
-                            head.branch = Some(res.clone());
-                            res
+                            head.branch = Some(branch.clone());
+                            branch
                         }
                     };
 
@@ -380,9 +379,7 @@ where
         if let Some(link) = &index.link {
             let res = self.branch_cache().get(link);
             match res {
-                Some(branch) => {
-                    Ok(Some(branch))
-                },
+                Some(branch) => Ok(Some(branch)),
                 None => {
                     let branch = self.load_branch(secrets, index)?;
                     if let Some(branch) = &branch {
