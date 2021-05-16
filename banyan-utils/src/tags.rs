@@ -326,6 +326,10 @@ impl CompactSeq for KeySeq {
     fn len(&self) -> usize {
         self.tags.elements.len()
     }
+
+    fn estimated_size(&self) -> usize {
+        self.len() * 128
+    }
 }
 
 impl Summarizable<Key> for KeySeq {
