@@ -15,7 +15,7 @@ use futures::{prelude::*, stream::BoxStream};
 use libipld::cbor::DagCbor;
 use smallvec::{smallvec, SmallVec};
 
-use std::{iter, ops::Range, time::Instant};
+use std::{iter, ops::Range, sync::Arc, time::Instant};
 #[derive(PartialEq)]
 enum Mode {
     Forward,
@@ -41,6 +41,8 @@ struct TraverseState<T: TreeTypes> {
     // Branches can not have zero children, so when this is empty we know that we have
     // to initialize it.
     filter: SmallVec<[bool; 64]>,
+
+    info: Option<Arc<NodeInfo<T>>>,
 }
 
 impl<T: TreeTypes> TraverseState<T> {
@@ -49,6 +51,7 @@ impl<T: TreeTypes> TraverseState<T> {
             index,
             position: 0,
             filter: smallvec![],
+            info: None,
         }
     }
     fn is_exhausted(&self, mode: &Mode) -> bool {
@@ -149,7 +152,23 @@ where
                 continue;
             }
 
-            match self.forest.load_node(&self.secrets, &head.index) {
+            let info = match &head.info {
+                Some(info) => info.clone(),
+                None => {
+                    match self.forest.load_node(&self.secrets, &head.index) {
+                        Ok(info) => {
+                            let info = Arc::new(info);
+                            head.info = Some(info.clone());
+                            info
+                        }
+                        Err(cause) => {
+                            return Some(Err(cause));
+                        }
+                    }
+                }
+            };
+
+            match Ok(info.as_ref()) {
                 Ok(NodeInfo::Branch(index, branch)) => {
                     if head.filter.is_empty() {
                         // we hit this branch node for the first time. Apply the
