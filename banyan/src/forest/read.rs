@@ -15,7 +15,7 @@ use futures::{prelude::*, stream::BoxStream};
 use libipld::cbor::DagCbor;
 use smallvec::{smallvec, SmallVec};
 
-use std::{iter, ops::Range, sync::Arc, time::Instant};
+use std::{iter, ops::Range, time::Instant};
 #[derive(PartialEq)]
 enum Mode {
     Forward,
@@ -32,7 +32,7 @@ pub(crate) struct ForestIter<T: TreeTypes, V, R, Q: Query<T>, F> {
 }
 
 struct TraverseState<T: TreeTypes> {
-    index: Arc<Index<T>>,
+    index: Index<T>,
     // If `index` points to a branch node, `position` points to the currently
     // traversed child
     position: isize,
@@ -44,7 +44,7 @@ struct TraverseState<T: TreeTypes> {
 }
 
 impl<T: TreeTypes> TraverseState<T> {
-    fn new(index: Arc<Index<T>>) -> Self {
+    fn new(index: Index<T>) -> Self {
         Self {
             index,
             position: 0,
@@ -78,7 +78,7 @@ where
         forest: Forest<T, V, R>,
         secrets: Secrets,
         query: Q,
-        index: Arc<Index<T>>,
+        index: Index<T>,
         mk_extra: F,
     ) -> Self {
         let mode = Mode::Forward;
@@ -98,7 +98,7 @@ where
         forest: Forest<T, V, R>,
         secrets: Secrets,
         query: Q,
-        index: Arc<Index<T>>,
+        index: Index<T>,
         mk_extra: F,
     ) -> Self {
         let offset = index.count();
@@ -164,17 +164,15 @@ where
                             Mode::Backward => self.offset - index.count,
                         };
                         self.query
-                            .intersecting(start_offset, index, &mut head.filter);
+                            .intersecting(start_offset, &index, &mut head.filter);
                         debug_assert_eq!(branch.children.len(), head.filter.len());
                     }
 
                     let next_idx = head.position as usize;
                     if head.filter[next_idx] {
                         // Descend into next child
-                        self.stack.push(TraverseState::new(
-                            // TODO: clone :-( ?
-                            Arc::new(branch.children[next_idx].clone()),
-                        ));
+                        self.stack
+                            .push(TraverseState::new(branch.children[next_idx].clone()));
                         continue;
                     } else {
                         let index = &branch.children[next_idx];
@@ -207,7 +205,7 @@ where
                             self.offset -= index.keys.count();
                         }
                         let mut matching: SmallVec<[_; 32]> = smallvec![true; index.keys.len()];
-                        self.query.containing(self.offset, index, &mut matching);
+                        self.query.containing(self.offset, &index, &mut matching);
                         let keys = index.select_keys(&matching);
                         let elems: Vec<V> = match leaf.as_ref().select(&matching) {
                             Ok(i) => i,
@@ -221,7 +219,7 @@ where
                         FilteredChunk {
                             range: self.offset..self.offset + index.keys.count(),
                             data: triples,
-                            extra: (self.mk_extra)(IndexRef::Leaf(index)),
+                            extra: (self.mk_extra)(IndexRef::Leaf(&index)),
                         }
                     };
                     if self.mode == Mode::Forward {
@@ -355,25 +353,21 @@ where
 
     /// load a node, returning a structure containing the index and value for convenient matching
     #[allow(clippy::needless_lifetimes)]
-    pub(crate) fn load_node<'a>(
-        &self,
-        secrets: &Secrets,
-        index: &'a Index<T>,
-    ) -> Result<NodeInfo<'a, T>> {
+    pub(crate) fn load_node(&self, secrets: &Secrets, index: &Index<T>) -> Result<NodeInfo<T>> {
         let t0 = Instant::now();
         let result = Ok(match index {
             Index::Branch(index) => {
                 if let Some(branch) = self.load_branch_cached(secrets, index)? {
-                    NodeInfo::Branch(index, branch)
+                    NodeInfo::Branch(index.clone(), branch)
                 } else {
-                    NodeInfo::PurgedBranch(index)
+                    NodeInfo::PurgedBranch(index.clone())
                 }
             }
             Index::Leaf(index) => {
                 if let Some(leaf) = self.load_leaf(secrets, index)? {
-                    NodeInfo::Leaf(index, leaf)
+                    NodeInfo::Leaf(index.clone(), leaf)
                 } else {
-                    NodeInfo::PurgedLeaf(index)
+                    NodeInfo::PurgedLeaf(index.clone())
                 }
             }
         });
@@ -475,7 +469,7 @@ where
         &self,
         secrets: Secrets,
         query: Q,
-        index: Arc<Index<T>>,
+        index: Index<T>,
     ) -> BoxStream<'static, Result<(u64, T::Key, V)>> {
         self.stream_filtered_chunked0(secrets, query, index, &|_| {})
             .map_ok(|chunk| stream::iter(chunk.data).map(Ok))
@@ -491,7 +485,7 @@ where
         &self,
         secrets: Secrets,
         query: Q,
-        index: Arc<Index<T>>,
+        index: Index<T>,
         mk_extra: &'static F,
     ) -> BoxStream<'static, Result<FilteredChunk<T, V, E>>> {
         let iter = self.traverse0(secrets, query, index, mk_extra);
@@ -506,7 +500,7 @@ where
         &self,
         secrets: Secrets,
         query: Q,
-        index: Arc<Index<T>>,
+        index: Index<T>,
     ) -> BoxedIter<'static, Result<(u64, T::Key, V)>> {
         self.traverse0(secrets, query, index, &|_| {})
             .map(|res| match res {
@@ -520,7 +514,7 @@ where
         &self,
         secrets: Secrets,
         query: Q,
-        index: Arc<Index<T>>,
+        index: Index<T>,
     ) -> BoxedIter<'static, Result<(u64, T::Key, V)>> {
         self.traverse_rev0(secrets, query, index, &|_| {})
             .map(|res| match res {
@@ -539,7 +533,7 @@ where
         &self,
         secrets: &Secrets,
         query: Q,
-        index: Arc<Index<T>>,
+        index: Index<T>,
         mk_extra: &'static F,
     ) -> BoxStream<'static, Result<FilteredChunk<T, V, E>>> {
         let iter = self.traverse_rev0(secrets.clone(), query, index, mk_extra);

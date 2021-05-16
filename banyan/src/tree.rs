@@ -12,23 +12,23 @@ use anyhow::Result;
 use core::fmt;
 use futures::prelude::*;
 use libipld::cbor::DagCbor;
-use std::{collections::BTreeMap, fmt::Debug, iter, sync::Arc, usize};
+use std::{collections::BTreeMap, fmt::Debug, iter, usize};
 use tracing::*;
 
 #[derive(Clone)]
-pub struct Tree<T: TreeTypes>(Option<(Arc<Index<T>>, Secrets, u64)>);
+pub struct Tree<T: TreeTypes>(Option<(Index<T>, Secrets, u64)>);
 
 impl<T: TreeTypes> Tree<T> {
-    pub(crate) fn new(root: Arc<Index<T>>, secrets: Secrets, offset: u64) -> Self {
+    pub(crate) fn new(root: Index<T>, secrets: Secrets, offset: u64) -> Self {
         Self(Some((root, secrets, offset)))
     }
 
-    pub(crate) fn into_inner(self) -> Option<(Arc<Index<T>>, Secrets, u64)> {
+    pub(crate) fn into_inner(self) -> Option<(Index<T>, Secrets, u64)> {
         self.0
     }
 
     pub fn as_index_ref(&self) -> Option<&Index<T>> {
-        self.0.as_ref().map(|(r, _, _)| r.as_ref())
+        self.0.as_ref().map(|(r, _, _)| r)
     }
 
     pub fn link(&self) -> Option<T::Link> {
@@ -61,7 +61,7 @@ impl<T: TreeTypes> Tree<T> {
     }
 
     /// root of a non-empty tree
-    pub fn index(&self) -> Option<&Arc<Index<T>>> {
+    pub fn index(&self) -> Option<&Index<T>> {
         self.0.as_ref().map(|(r, _, _)| r)
     }
 
@@ -131,7 +131,7 @@ impl<
         // we pass in a predicate that makes the nodes sealed, since we don't care
         let (index, byte_range) = self.load_branch_from_link(&secrets, |_, _| true, link)?;
         // store the offset with the snapshot. Snapshots are immutable, so this won't change.
-        Ok(Tree::new(Arc::new(index), secrets, byte_range.end))
+        Ok(Tree::new(index, secrets, byte_range.end))
     }
 
     /// dumps the tree structure
@@ -162,7 +162,7 @@ impl<
         &self,
         secrets: Secrets,
         query: Q,
-        index: Arc<Index<T>>,
+        index: Index<T>,
         mk_extra: &'static F,
     ) -> BoxedIter<'static, Result<FilteredChunk<T, V, E>>> {
         ForestIter::new(self.clone(), secrets, query, index, mk_extra).boxed()
@@ -176,7 +176,7 @@ impl<
         &self,
         secrets: Secrets,
         query: Q,
-        index: Arc<Index<T>>,
+        index: Index<T>,
         mk_extra: &'static F,
     ) -> BoxedIter<'static, Result<FilteredChunk<T, V, E>>> {
         ForestIter::new_rev(self.clone(), secrets, query, index, mk_extra).boxed()
@@ -186,8 +186,8 @@ impl<
         &self,
         secrets: Secrets,
         query: Q,
-        index: Arc<Index<T>>,
-    ) -> BoxedIter<'static, Result<Arc<Index<T>>>> {
+        index: Index<T>,
+    ) -> BoxedIter<'static, Result<Index<T>>> {
         IndexIter::new(self.clone(), secrets, query, index).boxed()
     }
 
@@ -195,8 +195,8 @@ impl<
         &self,
         secrets: Secrets,
         query: Q,
-        index: Arc<Index<T>>,
-    ) -> BoxedIter<'static, Result<Arc<Index<T>>>> {
+        index: Index<T>,
+    ) -> BoxedIter<'static, Result<Index<T>>> {
         IndexIter::new_rev(self.clone(), secrets, query, index).boxed()
     }
 
@@ -243,7 +243,7 @@ impl<
         Ok(if let Some((index, secrets, _)) = &tree.0 {
             self.left_roots0(secrets, index)?
                 .into_iter()
-                .map(|x| Tree::new(Arc::new(x), secrets.clone(), u64::max_value()))
+                .map(|x| Tree::new(x, secrets.clone(), u64::max_value()))
                 .collect()
         } else {
             Vec::new()
@@ -319,7 +319,7 @@ impl<
         &self,
         tree: &Tree<T>,
         query: impl Query<T> + Clone + 'static,
-    ) -> impl Iterator<Item = Result<Arc<Index<T>>>> + 'static {
+    ) -> impl Iterator<Item = Result<Index<T>>> + 'static {
         match &tree.0 {
             Some((index, secrets, _)) => self
                 .index_iter0(secrets.clone(), query, index.clone())
@@ -335,7 +335,7 @@ impl<
         &self,
         tree: &Tree<T>,
         query: impl Query<T> + Clone + 'static,
-    ) -> impl Iterator<Item = Result<Arc<Index<T>>>> + 'static {
+    ) -> impl Iterator<Item = Result<Index<T>>> + 'static {
         match &tree.0 {
             Some((index, secrets, _)) => self
                 .index_iter_rev0(secrets.clone(), query, index.clone())

@@ -1,8 +1,5 @@
 use core::fmt;
-use std::{
-    ops::{Deref, DerefMut},
-    sync::Arc,
-};
+use std::ops::{Deref, DerefMut};
 
 use crate::{
     forest::{Config, Secrets, TreeTypes},
@@ -81,7 +78,7 @@ impl StreamBuilderState {
 ///
 /// Most of the logic except for handling the empty case is implemented in the forest
 pub struct StreamBuilder<T: TreeTypes> {
-    root: Option<Arc<Index<T>>>,
+    root: Option<Index<T>>,
     state: StreamBuilderState,
 }
 
@@ -149,7 +146,7 @@ impl<T: TreeTypes> StreamBuilder<T> {
     }
 
     pub fn as_index_ref(&self) -> Option<&Index<T>> {
-        self.root.as_ref().map(|arc| arc.as_ref())
+        self.root.as_ref()
     }
 
     pub fn level(&self) -> i32 {
@@ -173,7 +170,7 @@ impl<T: TreeTypes> StreamBuilder<T> {
 
     /// root of a non-empty tree
     pub fn index(&self) -> Option<&Index<T>> {
-        self.root.as_ref().map(|x| x.as_ref())
+        self.root.as_ref()
     }
 
     /// Modify a StreamBuilder and roll back the changes if the operation was not successful
@@ -192,14 +189,11 @@ impl<T: TreeTypes> StreamBuilder<T> {
     }
 
     pub(crate) fn new_from_index(root: Option<Index<T>>, state: StreamBuilderState) -> Self {
-        Self {
-            root: root.map(Arc::new),
-            state,
-        }
+        Self { root, state }
     }
 
     pub(crate) fn set_index(&mut self, index: Option<Index<T>>) {
-        self.root = index.map(Arc::new)
+        self.root = index
     }
 }
 

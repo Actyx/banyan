@@ -8,7 +8,6 @@ use anyhow::Result;
 use core::fmt::Debug;
 use libipld::cbor::DagCbor;
 use smallvec::{smallvec, SmallVec};
-use std::sync::Arc;
 
 #[derive(PartialEq)]
 enum Mode {
@@ -26,7 +25,7 @@ pub(crate) struct IndexIter<T: TreeTypes, V, R, Q: Query<T>> {
 }
 
 struct TraverseState<T: TreeTypes> {
-    index: Arc<Index<T>>,
+    index: Index<T>,
     // If `index` points to a branch node, `position` points to the currently
     // traversed child
     position: isize,
@@ -38,7 +37,7 @@ struct TraverseState<T: TreeTypes> {
 }
 
 impl<T: TreeTypes> TraverseState<T> {
-    fn new(index: Arc<Index<T>>) -> Self {
+    fn new(index: Index<T>) -> Self {
         Self {
             index,
             position: 0,
@@ -70,7 +69,7 @@ where
         forest: Forest<T, V, R>,
         secrets: Secrets,
         query: Q,
-        index: Arc<Index<T>>,
+        index: Index<T>,
     ) -> Self {
         let mode = Mode::Forward;
         let stack = smallvec![TraverseState::new(index)];
@@ -88,7 +87,7 @@ where
         forest: Forest<T, V, R>,
         secrets: Secrets,
         query: Q,
-        index: Arc<Index<T>>,
+        index: Index<T>,
     ) -> Self {
         let offset = index.count();
         let mode = Mode::Backward;
@@ -112,7 +111,7 @@ where
     R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static,
     Q: Query<T> + Clone + Send + 'static,
 {
-    type Item = Result<Arc<Index<T>>>;
+    type Item = Result<Index<T>>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let res = loop {
@@ -150,7 +149,7 @@ where
                             Mode::Backward => self.offset - index.count,
                         };
                         self.query
-                            .intersecting(start_offset, index, &mut head.filter);
+                            .intersecting(start_offset, &index, &mut head.filter);
                         debug_assert_eq!(branch.children.len(), head.filter.len());
 
                         break head.index.clone();
@@ -159,9 +158,8 @@ where
                     let next_idx = head.position as usize;
                     if head.filter[next_idx] {
                         // Descend into next child
-                        self.stack.push(TraverseState::new(Arc::new(
-                            branch.children[next_idx].clone(),
-                        )));
+                        self.stack
+                            .push(TraverseState::new(branch.children[next_idx].clone()));
                         continue;
                     } else {
                         let index = &branch.children[next_idx];
