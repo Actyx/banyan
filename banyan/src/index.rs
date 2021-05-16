@@ -184,13 +184,25 @@ impl<T: TreeTypes> BranchIndex<T> {
 }
 
 /// enum for a leaf or branch index
-#[derive(Debug, From, DagCbor)]
+#[derive(Debug, DagCbor)]
 #[ipld(repr = "kinded")]
 pub enum Index<T: TreeTypes> {
     #[ipld(repr = "value")]
-    Leaf(LeafIndex<T>),
+    Leaf(Arc<LeafIndex<T>>),
     #[ipld(repr = "value")]
-    Branch(BranchIndex<T>),
+    Branch(Arc<BranchIndex<T>>),
+}
+
+impl<T: TreeTypes> From<LeafIndex<T>> for Index<T> {
+    fn from(value: LeafIndex<T>) -> Self {
+        Index::Leaf(Arc::new(value))
+    }
+}
+
+impl<T: TreeTypes> From<BranchIndex<T>> for Index<T> {
+    fn from(value: BranchIndex<T>) -> Self {
+        Index::Branch(Arc::new(value))
+    }
 }
 
 /// enum for a leaf or branch index
@@ -327,18 +339,18 @@ impl AsRef<ZstdDagCborSeq> for Leaf {
 
 #[derive(Debug)]
 /// enum that combines index and corresponding data
-pub enum NodeInfo<'a, T: TreeTypes> {
+pub enum NodeInfo<T: TreeTypes> {
     // Branch with index and data
-    Branch(&'a BranchIndex<T>, Branch<T>),
+    Branch(Arc<BranchIndex<T>>, Branch<T>),
     /// Leaf with index and data
-    Leaf(&'a LeafIndex<T>, Leaf),
+    Leaf(Arc<LeafIndex<T>>, Leaf),
     /// Purged branch, with just the index
-    PurgedBranch(&'a BranchIndex<T>),
+    PurgedBranch(Arc<BranchIndex<T>>),
     /// Purged leaf, with just the index
-    PurgedLeaf(&'a LeafIndex<T>),
+    PurgedLeaf(Arc<LeafIndex<T>>),
 }
 
-impl<T: TreeTypes> Display for NodeInfo<'_, T> {
+impl<T: TreeTypes> Display for NodeInfo<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             NodeInfo::Leaf(index, _) => {

@@ -367,7 +367,7 @@ where
         }
         match index {
             Index::Branch(index) => {
-                let mut index = index.clone();
+                let mut index = index.as_ref().clone();
                 // only do the check unless we are already purged
                 let mut matching = vec![true; index.summaries.len()];
                 query.intersecting(offset, &index, &mut matching);
@@ -402,7 +402,7 @@ where
             }
             Index::Leaf(index) => {
                 // only do the check unless we are already purged
-                let mut index = index.clone();
+                let mut index = index.as_ref().clone();
                 if index.sealed && index.link.is_some() && *level >= 0 {
                     let mut matching = vec![true; index.keys.len()];
                     query.containing(offset, &index, &mut matching);
@@ -429,7 +429,7 @@ where
             Index::Branch(index) => {
                 // important not to hit the cache here!
                 let branch = self.load_branch(stream.secrets(), index);
-                let mut index = index.clone();
+                let mut index = index.as_ref().clone();
                 match branch {
                     Ok(Some(node)) => {
                         let mut children = node.children.to_vec();
@@ -464,7 +464,7 @@ where
                 Ok(index.into())
             }
             Index::Leaf(index) => {
-                let mut index = index.clone();
+                let mut index = index.as_ref().clone();
                 // important not to hit the cache here!
                 if let Err(cause) = self.load_leaf(stream.secrets(), &index) {
                     let link_txt = index.link.map(|x| x.to_string()).unwrap_or_default();

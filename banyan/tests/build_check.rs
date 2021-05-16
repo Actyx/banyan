@@ -148,7 +148,7 @@ fn iter_index(xs: Vec<(Key, u64)>) -> anyhow::Result<bool> {
 
     // should visit all indices
     let cnt = actual.iter().fold(0, |acc, idx| {
-        if let Index::Leaf(l) = idx.as_ref() {
+        if let Index::Leaf(l) = idx {
             acc + l.keys().count() as u64
         } else {
             acc
@@ -514,7 +514,7 @@ fn deep_tree_traversal_no_stack_overflow() -> anyhow::Result<()> {
 
 #[test]
 fn leaf_index_wire_format() -> anyhow::Result<()> {
-    let index: Index<TT> = Index::Leaf(LeafIndex {
+    let index: Index<TT> = LeafIndex {
         sealed: true,
         value_bytes: 1234,
         keys: KeySeq(vec![Key(1), Key(2)]),
@@ -522,7 +522,8 @@ fn leaf_index_wire_format() -> anyhow::Result<()> {
             Cid::from_str("bafyreihtx752fmf3zafbys5dtr4jxohb53yi3qtzfzf6wd5274jwtn5agu")?
                 .try_into()?,
         ),
-    });
+    }
+    .into();
     let serialized = DagCborCodec.encode(&index)?;
     let expected = from_cbor_me(
         r#"
@@ -555,7 +556,7 @@ A4                                      # map(4)
 
 #[test]
 fn branch_index_wire_format() -> anyhow::Result<()> {
-    let index: Index<TT> = Index::Branch(BranchIndex {
+    let index: Index<TT> = BranchIndex {
         count: 36784,
         level: 3,
         sealed: true,
@@ -566,7 +567,8 @@ fn branch_index_wire_format() -> anyhow::Result<()> {
             Cid::from_str("bafyreihtx752fmf3zafbys5dtr4jxohb53yi3qtzfzf6wd5274jwtn5agu")?
                 .try_into()?,
         ),
-    });
+    }
+    .into();
     let serialized = DagCborCodec.encode(&index)?;
     let expected = from_cbor_me(
         r#"
