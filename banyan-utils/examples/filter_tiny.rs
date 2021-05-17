@@ -1,3 +1,5 @@
+//! Example for filtering a small number of events out of a rather large banyan tree
+//! Finding the needle in the haystack. Mostly for using cargo flamegraph.
 use std::{
     sync::{
         atomic::{AtomicU64, Ordering},
