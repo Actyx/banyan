@@ -118,25 +118,13 @@ where
             mode,
         }
     }
-}
 
-impl<T: TreeTypes, V, R, Q, E, F> Iterator for ForestIter<T, V, R, Q, F>
-where
-    T: TreeTypes + 'static,
-    V: DagCbor + Clone + Send + Sync + Debug + 'static,
-    R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static,
-    Q: Query<T> + Clone + Send + 'static,
-    E: Send + 'static,
-    F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
-{
-    type Item = Result<FilteredChunk<T, V, E>>;
-
-    fn next(&mut self) -> Option<Self::Item> {
+    fn next_fallible(&mut self) -> Result<Option<FilteredChunk<T, V, E>>> {
         let res: FilteredChunk<T, V, E> = loop {
             let head = match self.stack.last_mut() {
                 Some(i) => i,
                 // Nothing to do ..
-                _ => return None,
+                _ => return Ok(None),
             };
 
             //  Branch is exhausted: Ascend.
@@ -175,12 +163,10 @@ where
                     let branch = match &head.branch {
                         Some(branch) => branch.clone(),
                         None => {
-                            let branch = match self.forest.load_branch_cached(&self.secrets, index)
-                            {
-                                Ok(Some(branch)) => branch,
-                                Ok(None) => panic!("leaf must be some here"),
-                                Err(cause) => return Some(Err(cause)),
-                            };
+                            let branch = self
+                                .forest
+                                .load_branch_cached(&self.secrets, index)?
+                                .expect("leaf must be some here");
                             head.branch = Some(branch.clone());
                             branch
                         }
@@ -213,15 +199,11 @@ where
                     self.query.containing(range.start, &index, &mut matching);
                     let data = if matching.any() {
                         let keys = index.select_keys(&matching);
-                        let leaf = match self.forest.load_leaf(&self.secrets, index) {
-                            Ok(Some(leaf)) => leaf,
-                            Ok(None) => panic!("leaf must be some here"),
-                            Err(cause) => return Some(Err(cause)),
-                        };
-                        let elems: Vec<V> = match leaf.as_ref().select(&matching) {
-                            Ok(i) => i,
-                            Err(e) => return Some(Err(e)),
-                        };
+                        let leaf = self
+                            .forest
+                            .load_leaf(&self.secrets, index)?
+                            .expect("leaf must be some here");
+                        let elems: Vec<V> = leaf.as_ref().select(&matching)?;
                         keys.zip(elems)
                             .map(|((o, k), v)| (o + range.start, k, v))
                             .collect::<Vec<_>>()
@@ -267,7 +249,30 @@ where
                 }
             };
         };
-        Some(Ok(res))
+        Ok(Some(res))
+    }
+}
+
+impl<T: TreeTypes, V, R, Q, E, F> Iterator for ForestIter<T, V, R, Q, F>
+where
+    T: TreeTypes + 'static,
+    V: DagCbor + Clone + Send + Sync + Debug + 'static,
+    R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static,
+    Q: Query<T> + Clone + Send + 'static,
+    E: Send + 'static,
+    F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
+{
+    type Item = Result<FilteredChunk<T, V, E>>;
+
+    fn next(&mut self) -> Option<<Self as Iterator>::Item> {
+        match self.next_fallible() {
+            Ok(value) => value.map(Ok),
+            Err(cause) => {
+                // ensure we are done after the error
+                self.stack.clear();
+                Some(Err(cause))
+            }
+        }
     }
 }
 

@@ -104,29 +104,3 @@ fn ops_count_1() -> anyhow::Result<()> {
 
     Ok(())
 }
-
-#[test]
-fn ops_count_2() -> anyhow::Result<()> {
-    let n = 1000000;
-    let capacity = 0;
-    let xs = (0..n)
-        .map(|i| (Key::single(i, i, TagSet::empty()), i))
-        .collect::<Vec<_>>();
-    let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
-    let store = OpsCountingStore::new(store);
-    let branch_cache = BranchCache::<TT>::new(capacity);
-    let txn = Transaction::new(
-        Forest::new(store.clone(), branch_cache.clone()),
-        store.clone(),
-    );
-    let mut builder = StreamBuilder::new(Config::debug_fast(), Secrets::default());
-    txn.extend(&mut builder, xs)?;
-    let tree = builder.snapshot();
-    let (xs4, _, r_iter_tiny) = test_ops_count("", &txn, &tree, OffsetRangeQuery::from(0..10));
-
-    assert!(xs4.len() as u64 == 10);
-
-    assert_eq!(r_iter_tiny, 4);
-
-    Ok(())
-}
