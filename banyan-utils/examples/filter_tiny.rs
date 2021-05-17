@@ -82,7 +82,8 @@ fn main() -> anyhow::Result<()> {
     let config = Config {
         target_leaf_size: 1 << 14,
         max_leaf_count: 1 << 12,
-        max_branch_count: 8,
+        max_key_branches: 8,
+        max_summary_branches: 8,
         zstd_level: 10,
         max_uncompressed_leaf_size: 16 * 1024 * 1024,
     };

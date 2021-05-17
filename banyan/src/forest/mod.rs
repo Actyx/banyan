@@ -3,7 +3,7 @@ use super::index::*;
 use crate::store::{BlockWriter, BranchCache, ReadOnlyStore};
 use core::{fmt::Debug, hash::Hash, iter::FromIterator, marker::PhantomData, ops::Range};
 use libipld::cbor::DagCbor;
-use std::{fmt::Display, sync::Arc};
+use std::{fmt::Display, sync::Arc, usize};
 mod index_iter;
 mod read;
 mod stream;
@@ -167,12 +167,12 @@ impl Default for Secrets {
 #[derive(Debug, Clone)]
 /// Configuration for a forest. Includes settings for when a node is considered full
 pub struct Config {
-    /// maximum number of values in a leaf
+    /// maximum number of children in a level>0 branch that contains summaries
+    pub max_summary_branches: u64,
+    /// maximum number of children in a level==0 branch that contains key sequences
+    pub max_key_branches: u64,
+    /// maximum number of values in a leaf that contains value sequences
     pub max_leaf_count: u64,
-    /// maximum number of children in a branch
-    pub max_branch_count: u64,
-    /// zstd level to use for compression
-    pub zstd_level: i32,
     /// rough maximum compressed bytes of a leaf. If a node has more bytes than this, it is considered full.
     ///
     /// note that this might overshoot due to the fact that the zstd encoder has internal state, and it is not possible
@@ -181,6 +181,8 @@ pub struct Config {
     /// Maximum uncompressed size of leafs. This is limited to prevent accidentally creating
     /// decompression bombs.
     pub max_uncompressed_leaf_size: u64,
+    /// zstd level to use for compression
+    pub zstd_level: i32,
 }
 
 impl Config {
@@ -191,7 +193,8 @@ impl Config {
         Self {
             target_leaf_size: 10000,
             max_leaf_count: 10,
-            max_branch_count: 4,
+            max_key_branches: 4,
+            max_summary_branches: 4,
             zstd_level: 10,
             max_uncompressed_leaf_size: 16 * 1024 * 1024,
         }
@@ -202,9 +205,18 @@ impl Config {
         Self {
             target_leaf_size: 1 << 14,
             max_leaf_count: 1 << 14,
-            max_branch_count: 32,
+            max_summary_branches: 32,
+            max_key_branches: 4,
             zstd_level: 10,
             max_uncompressed_leaf_size: 16 * 1024 * 1024,
+        }
+    }
+
+    pub fn max_branch_count(&self, level: u32) -> usize {
+        if level == 0 {
+            self.max_key_branches as usize
+        } else {
+            self.max_summary_branches as usize
         }
     }
 
@@ -226,7 +238,7 @@ impl Config {
             return false;
         }
         // we must be full
-        items.len() as u64 >= self.max_branch_count
+        items.len() >= self.max_branch_count(level)
     }
 }
 

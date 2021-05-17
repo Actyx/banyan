@@ -122,8 +122,7 @@ where
             .iter()
             .map(|child| child.summarize())
             .collect::<Vec<_>>();
-        while from.peek().is_some() && ((children.len() as u64) < stream.config().max_branch_count)
-        {
+        while from.peek().is_some() && (children.len() < stream.config().max_branch_count(level)) {
             let child = self.fill_node(level - 1, from, stream)?;
             let summary = child.summarize();
             summaries.push(summary);
@@ -486,8 +485,8 @@ where
 /// This can be either a sealed node at the start, or an unsealed node at the end
 fn find_valid_branch<T: TreeTypes>(config: &Config, children: &[Index<T>]) -> BranchResult {
     assert!(!children.is_empty());
-    let max_branch_count = config.max_branch_count as usize;
     let level = children[0].level();
+    let max_branch_count = config.max_branch_count(level);
     let pos = children
         .iter()
         .position(|x| x.level() < level)
