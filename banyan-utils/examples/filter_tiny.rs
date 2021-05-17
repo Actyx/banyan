@@ -51,6 +51,7 @@ impl<L, S: BlockWriter<L> + Send + Sync> BlockWriter<L> for OpsCountingStore<S> 
     }
 }
 
+#[allow(clippy::clippy::type_complexity)]
 fn test_ops_count(
     name: &str,
     forest: &Forest<TT, u64, OpsCountingStore<MemStore<Sha256Digest>>>,
@@ -75,10 +76,7 @@ fn main() -> anyhow::Result<()> {
     let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
     let store = OpsCountingStore::new(store);
     let branch_cache = BranchCache::<TT>::new(capacity);
-    let txn = Transaction::new(
-        Forest::new(store.clone(), branch_cache.clone()),
-        store.clone(),
-    );
+    let txn = Transaction::new(Forest::new(store.clone(), branch_cache), store);
     let config = Config {
         target_leaf_size: 1 << 14,
         max_leaf_count: 1 << 12,
