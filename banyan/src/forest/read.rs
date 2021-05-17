@@ -7,7 +7,7 @@ use crate::{
     query::Query,
     store::ReadOnlyStore,
     store::ZstdDagCborSeq,
-    util::{BoxedIter, IterExt},
+    util::{BoolSliceExt, BoxedIter, IterExt},
 };
 use anyhow::{anyhow, Result};
 use core::fmt::Debug;
@@ -41,6 +41,8 @@ struct TraverseState<T: TreeTypes> {
     // Branches can not have zero children, so when this is empty we know that we have
     // to initialize it.
     filter: SmallVec<[bool; 64]>,
+    // Option to cache a branch to prevent hammering the branch cache
+    branch: Option<Branch<T>>,
 }
 
 impl<T: TreeTypes> TraverseState<T> {
@@ -49,6 +51,7 @@ impl<T: TreeTypes> TraverseState<T> {
             index,
             position: 0,
             filter: smallvec![],
+            branch: None,
         }
     }
     fn is_exhausted(&self, mode: &Mode) -> bool {
@@ -115,25 +118,13 @@ where
             mode,
         }
     }
-}
 
-impl<T: TreeTypes, V, R, Q, E, F> Iterator for ForestIter<T, V, R, Q, F>
-where
-    T: TreeTypes + 'static,
-    V: DagCbor + Clone + Send + Sync + Debug + 'static,
-    R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static,
-    Q: Query<T> + Clone + Send + 'static,
-    E: Send + 'static,
-    F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
-{
-    type Item = Result<FilteredChunk<T, V, E>>;
-
-    fn next(&mut self) -> Option<Self::Item> {
+    fn next_fallible(&mut self) -> Result<Option<FilteredChunk<T, V, E>>> {
         let res: FilteredChunk<T, V, E> = loop {
             let head = match self.stack.last_mut() {
                 Some(i) => i,
                 // Nothing to do ..
-                _ => return None,
+                _ => return Ok(None),
             };
 
             //  Branch is exhausted: Ascend.
@@ -149,24 +140,37 @@ where
                 continue;
             }
 
-            match self.forest.load_node(&self.secrets, &head.index) {
-                Ok(NodeInfo::Branch(index, branch)) => {
+            // calculate the range in advance
+            let range = match self.mode {
+                Mode::Forward => self.offset..self.offset.saturating_add(head.index.count()),
+                Mode::Backward => self.offset.saturating_sub(head.index.count())..self.offset,
+            };
+
+            match &head.index {
+                Index::Branch(index) if index.link.is_some() => {
                     if head.filter.is_empty() {
                         // we hit this branch node for the first time. Apply the
                         // query on its children and store it
                         head.filter = smallvec![true; index.summaries.len()];
                         head.position = match self.mode {
                             Mode::Forward => 0,
-                            Mode::Backward => branch.children.len() as isize - 1,
-                        };
-                        let start_offset = match self.mode {
-                            Mode::Forward => self.offset,
-                            Mode::Backward => self.offset - index.count,
+                            Mode::Backward => index.summaries.len() as isize - 1,
                         };
                         self.query
-                            .intersecting(start_offset, &index, &mut head.filter);
-                        debug_assert_eq!(branch.children.len(), head.filter.len());
+                            .intersecting(range.start, &index, &mut head.filter);
                     }
+
+                    let branch = match &head.branch {
+                        Some(branch) => branch.clone(),
+                        None => {
+                            let branch = self
+                                .forest
+                                .load_branch_cached(&self.secrets, index)?
+                                .expect("leaf must be some here");
+                            head.branch = Some(branch.clone());
+                            branch
+                        }
+                    };
 
                     let next_idx = head.position as usize;
                     if head.filter[next_idx] {
@@ -176,54 +180,40 @@ where
                         continue;
                     } else {
                         let index = &branch.children[next_idx];
-                        let range = match self.mode {
-                            Mode::Forward => {
-                                let before = self.offset;
-                                self.offset += index.count();
-                                before..self.offset
-                            }
-                            Mode::Backward => {
-                                let before = self.offset;
-                                self.offset -= index.count();
-                                self.offset..before
-                            }
-                        };
                         head.next_pos(&self.mode);
-                        let placeholder: FilteredChunk<T, V, E> = FilteredChunk {
+                        // move offset
+                        match self.mode {
+                            Mode::Forward => self.offset += index.count(),
+                            Mode::Backward => self.offset -= index.count(),
+                        };
+                        break FilteredChunk {
                             range,
                             data: Vec::new(),
                             extra: (self.mk_extra)(index.as_index_ref()),
                         };
-
-                        break placeholder;
                     }
                 }
 
-                Ok(NodeInfo::Leaf(index, leaf)) => {
-                    let chunk = {
-                        if self.mode == Mode::Backward {
-                            self.offset -= index.keys.count();
-                        }
-                        let mut matching: SmallVec<[_; 32]> = smallvec![true; index.keys.len()];
-                        self.query.containing(self.offset, &index, &mut matching);
+                Index::Leaf(index) if index.link.is_some() => {
+                    let mut matching: SmallVec<[_; 32]> = smallvec![true; index.keys.len()];
+                    self.query.containing(range.start, &index, &mut matching);
+                    let data = if matching.any() {
                         let keys = index.select_keys(&matching);
-                        let elems: Vec<V> = match leaf.as_ref().select(&matching) {
-                            Ok(i) => i,
-                            Err(e) => return Some(Err(e)),
-                        };
-                        let offset = self.offset;
-                        let triples = keys
-                            .zip(elems)
-                            .map(|((o, k), v)| (o + offset, k, v))
-                            .collect::<Vec<_>>();
-                        FilteredChunk {
-                            range: self.offset..self.offset + index.keys.count(),
-                            data: triples,
-                            extra: (self.mk_extra)(IndexRef::Leaf(&index)),
-                        }
+                        let leaf = self
+                            .forest
+                            .load_leaf(&self.secrets, index)?
+                            .expect("leaf must be some here");
+                        let elems: Vec<V> = leaf.as_ref().select(&matching)?;
+                        keys.zip(elems)
+                            .map(|((o, k), v)| (o + range.start, k, v))
+                            .collect::<Vec<_>>()
+                    } else {
+                        Vec::new()
                     };
-                    if self.mode == Mode::Forward {
-                        self.offset += index.keys.count();
+                    let extra = (self.mk_extra)(IndexRef::Leaf(&index));
+                    match self.mode {
+                        Mode::Backward => self.offset -= index.keys.count(),
+                        Mode::Forward => self.offset += index.keys.count(),
                     }
 
                     // Ascend to parent's node, if it exists
@@ -231,7 +221,7 @@ where
                     if let Some(last) = self.stack.last_mut() {
                         last.next_pos(&self.mode);
                     }
-                    break chunk;
+                    break FilteredChunk { range, data, extra };
                 }
 
                 // even for purged leafs and branches or ignored chunks,
@@ -240,37 +230,49 @@ where
                 // the caller can find out if we skipped purged parts of the
                 // tree by using an appropriate mk_extra fn, or check
                 // `data.len()`.
-                Ok(_) => {
+                _ => {
                     let TraverseState { index, .. } = self.stack.pop().expect("not empty");
                     // Ascend to parent's node. This might be none in case the
                     // tree's root node is a `PurgedBranch`.
                     if let Some(last) = self.stack.last_mut() {
                         last.next_pos(&self.mode);
                     };
-                    let range = match self.mode {
-                        Mode::Forward => {
-                            let before = self.offset;
-                            self.offset += index.count();
-                            before..self.offset
-                        }
-                        Mode::Backward => {
-                            let before = self.offset;
-                            self.offset -= index.count();
-                            self.offset..before
-                        }
+                    match self.mode {
+                        Mode::Forward => self.offset += index.count(),
+                        Mode::Backward => self.offset -= index.count(),
                     };
-
-                    let placeholder: FilteredChunk<T, V, E> = FilteredChunk {
+                    break FilteredChunk {
                         range,
-                        data: Vec::new(),
+                        data: vec![],
                         extra: (self.mk_extra)(index.as_index_ref()),
                     };
-                    break placeholder;
                 }
-                Err(e) => return Some(Err(e)),
             };
         };
-        Some(Ok(res))
+        Ok(Some(res))
+    }
+}
+
+impl<T: TreeTypes, V, R, Q, E, F> Iterator for ForestIter<T, V, R, Q, F>
+where
+    T: TreeTypes + 'static,
+    V: DagCbor + Clone + Send + Sync + Debug + 'static,
+    R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static,
+    Q: Query<T> + Clone + Send + 'static,
+    E: Send + 'static,
+    F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
+{
+    type Item = Result<FilteredChunk<T, V, E>>;
+
+    fn next(&mut self) -> Option<<Self as Iterator>::Item> {
+        match self.next_fallible() {
+            Ok(value) => value.map(Ok),
+            Err(cause) => {
+                // ensure we are done after the error
+                self.stack.clear();
+                Some(Err(cause))
+            }
+        }
     }
 }
 
@@ -351,8 +353,7 @@ where
         }
     }
 
-    /// load a node, returning a structure containing the index and value for convenient matching
-    #[allow(clippy::needless_lifetimes)]
+    /// load a node, returning a structure containing the index and value for convenient matching    
     pub(crate) fn load_node(&self, secrets: &Secrets, index: &Index<T>) -> Result<NodeInfo<T>> {
         let t0 = Instant::now();
         let result = Ok(match index {

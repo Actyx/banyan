@@ -6,7 +6,7 @@ use libipld::{
     codec::{Decode, Encode},
     Cid, DagCbor,
 };
-use multihash::MultihashDigest;
+use multihash::{Code, MultihashDigest};
 use serde::{Deserialize, Serialize};
 use std::{
     convert::{TryFrom, TryInto},
@@ -37,6 +37,11 @@ impl Encode<DagCborCodec> for Sha256Digest {
 impl Sha256Digest {
     pub fn new(data: &[u8]) -> Self {
         let mh = multihash::Code::Sha2_256.digest(data);
+        Sha256Digest(mh.digest().try_into().unwrap())
+    }
+
+    pub fn digest(data: &[u8]) -> Self {
+        let mh = Code::Sha2_256.digest(data);
         Sha256Digest(mh.digest().try_into().unwrap())
     }
 }
@@ -320,6 +325,10 @@ impl CompactSeq for KeySeq {
 
     fn len(&self) -> usize {
         self.tags.elements.len()
+    }
+
+    fn estimated_size(&self) -> usize {
+        self.len() * 128
     }
 }
 

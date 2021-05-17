@@ -207,4 +207,11 @@ impl<T: TreeTypes> BranchCache<T> {
             tracing::warn!("Adding {} to cache failed: {}", link, e);
         }
     }
+
+    pub fn reset(&self, capacity: NonZeroUsize) {
+        if let Some(cache) = self.0.as_ref() {
+            let mut cache = cache.lock();
+            *cache = WeightCache::new(capacity);
+        }
+    }
 }

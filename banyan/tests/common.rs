@@ -101,10 +101,10 @@ where
 {
     let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
     let forest = txn(store, 1000);
-    let mut tree = StreamBuilder::<TT>::debug();
-    forest.extend(&mut tree, xs)?;
-    forest.assert_invariants(&tree)?;
-    Ok((tree.snapshot(), forest))
+    let mut builder = StreamBuilder::<TT>::debug();
+    forest.extend(&mut builder, xs)?;
+    forest.assert_invariants(&builder)?;
+    Ok((builder.snapshot(), forest))
 }
 
 /// Extract all links from a tree
