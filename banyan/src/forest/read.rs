@@ -41,7 +41,7 @@ struct TraverseState<T: TreeTypes> {
     // Branches can not have zero children, so when this is empty we know that we have
     // to initialize it.
     filter: SmallVec<[bool; 64]>,
-
+    // Option to cache a branch to prevent hammering the branch cache
     branch: Option<Branch<T>>,
 }
 
