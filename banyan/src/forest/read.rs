@@ -231,6 +231,11 @@ where
                     let mut matching: SmallVec<[_; 32]> = smallvec![true; index.keys.len()];
                     self.query.containing(range.start, &index, &mut matching);
                     let data = if matching.any() {
+                        let offsets = matching
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, m)| **m)
+                            .map(|(i, _)| i as u64);
                         let keys = index.select_keys(&matching);
                         tracing::debug!("loading leaf {:?}", range);
                         let leaf = self
@@ -238,7 +243,9 @@ where
                             .load_leaf(&self.secrets, index)?
                             .expect("leaf must be some here");
                         let elems: Vec<V> = leaf.as_ref().select(&matching)?;
-                        keys.zip(elems)
+                        offsets
+                            .zip(keys)
+                            .zip(elems)
                             .map(|((o, k), v)| (o + range.start, k, v))
                             .collect::<Vec<_>>()
                     } else {
