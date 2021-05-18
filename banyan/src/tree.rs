@@ -5,7 +5,6 @@ use crate::{
         Config, FilteredChunk, Forest, ForestIter, IndexIter, Secrets, Transaction, TreeTypes,
     },
     store::BlockWriter,
-    util::BoxedIter,
 };
 use crate::{query::Query, store::ReadOnlyStore, util::IterExt, StreamBuilder, StreamBuilderState};
 use anyhow::Result;
@@ -164,8 +163,8 @@ impl<
         query: Q,
         index: Index<T>,
         mk_extra: &'static F,
-    ) -> BoxedIter<'static, Result<FilteredChunk<(u64, T::Key, V), E>>> {
-        ForestIter::new(self.clone(), secrets, query, index, mk_extra).boxed()
+    ) -> impl Iterator<Item = Result<FilteredChunk<(u64, T::Key, V), E>>> {
+        ForestIter::new(self.clone(), secrets, query, index, mk_extra)
     }
 
     pub(crate) fn traverse_rev0<
@@ -178,8 +177,8 @@ impl<
         query: Q,
         index: Index<T>,
         mk_extra: &'static F,
-    ) -> BoxedIter<'static, Result<FilteredChunk<(u64, T::Key, V), E>>> {
-        ForestIter::new_rev(self.clone(), secrets, query, index, mk_extra).boxed()
+    ) -> impl Iterator<Item = Result<FilteredChunk<(u64, T::Key, V), E>>> {
+        ForestIter::new_rev(self.clone(), secrets, query, index, mk_extra)
     }
 
     fn index_iter0<Q: Query<T> + Clone + Send + 'static>(
@@ -187,8 +186,8 @@ impl<
         secrets: Secrets,
         query: Q,
         index: Index<T>,
-    ) -> BoxedIter<'static, Result<Index<T>>> {
-        IndexIter::new(self.clone(), secrets, query, index).boxed()
+    ) -> impl Iterator<Item = Result<Index<T>>> {
+        IndexIter::new(self.clone(), secrets, query, index)
     }
 
     fn index_iter_rev0<Q: Query<T> + Clone + Send + 'static>(
@@ -196,8 +195,8 @@ impl<
         secrets: Secrets,
         query: Q,
         index: Index<T>,
-    ) -> BoxedIter<'static, Result<Index<T>>> {
-        IndexIter::new_rev(self.clone(), secrets, query, index).boxed()
+    ) -> impl Iterator<Item = Result<Index<T>>> {
+        IndexIter::new_rev(self.clone(), secrets, query, index)
     }
 
     pub(crate) fn dump_graph0<S>(
@@ -323,7 +322,6 @@ impl<
         match &tree.0 {
             Some((index, secrets, _)) => self
                 .index_iter0(secrets.clone(), query, index.clone())
-                .boxed()
                 .left_iter(),
             None => iter::empty().right_iter(),
         }
@@ -339,7 +337,6 @@ impl<
         match &tree.0 {
             Some((index, secrets, _)) => self
                 .index_iter_rev0(secrets.clone(), query, index.clone())
-                .boxed()
                 .left_iter(),
             None => iter::empty().right_iter(),
         }

@@ -7,7 +7,7 @@ use crate::{
     query::Query,
     store::ReadOnlyStore,
     store::ZstdDagCborSeq,
-    util::{BoolSliceExt, BoxedIter, IterExt},
+    util::{BoolSliceExt, IterExt},
 };
 use anyhow::{anyhow, Result};
 use core::fmt::Debug;
@@ -526,28 +526,26 @@ where
         secrets: Secrets,
         query: Q,
         index: Index<T>,
-    ) -> BoxedIter<'static, Result<(u64, T::Key, V)>> {
+    ) -> impl Iterator<Item = Result<(u64, T::Key, V)>> {
         self.traverse0(secrets, query, index, &|_| {})
             .map(|res| match res {
                 Ok(chunk) => chunk.data.into_iter().map(Ok).left_iter(),
                 Err(cause) => iter::once(Err(cause)).right_iter(),
             })
             .flatten()
-            .boxed()
     }
     pub(crate) fn iter_filtered_reverse0<Q: Query<T> + Clone + Send + 'static>(
         &self,
         secrets: Secrets,
         query: Q,
         index: Index<T>,
-    ) -> BoxedIter<'static, Result<(u64, T::Key, V)>> {
+    ) -> impl Iterator<Item = Result<(u64, T::Key, V)>> {
         self.traverse_rev0(secrets, query, index, &|_| {})
             .map(|res| match res {
                 Ok(chunk) => chunk.data.into_iter().map(Ok).left_iter(),
                 Err(cause) => iter::once(Err(cause)).right_iter(),
             })
             .flatten()
-            .boxed()
     }
 
     pub(crate) fn stream_filtered_chunked_reverse0<

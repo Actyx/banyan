@@ -48,7 +48,7 @@ pub trait TreeTypes: Debug + Send + Sync + Clone + 'static {
 pub struct ForestInner<T: TreeTypes, V, R> {
     pub(crate) store: R,
     pub(crate) branch_cache: BranchCache<T>,
-    pub(crate) _tt: PhantomData<(T, V, R)>,
+    pub(crate) _tt: PhantomData<V>,
 }
 
 #[derive(Debug)]
