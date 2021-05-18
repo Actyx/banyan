@@ -122,7 +122,7 @@ where
     /// common code for early returns. Pop a state from the stack and completely skip the index.
     ///
     /// this can only be called before the index is partially processed.
-    fn skip(&mut self, range: Range<u64>) -> FilteredChunk<T, V, E> {
+    fn skip(&mut self, range: Range<u64>) -> FilteredChunk<(u64, T::Key, V), E> {
         let TraverseState { index, .. } = self.stack.pop().expect("not empty");
         // Ascend to parent's node. This might be none in case the
         // tree's root node is a `PurgedBranch`.
@@ -140,7 +140,7 @@ where
         }
     }
 
-    fn next_fallible(&mut self) -> Result<Option<FilteredChunk<T, V, E>>> {
+    fn next_fallible(&mut self) -> Result<Option<FilteredChunk<(u64, T::Key, V), E>>> {
         Ok(Some(loop {
             let head = match self.stack.last_mut() {
                 Some(i) => i,
@@ -231,22 +231,22 @@ where
                     let mut matching: SmallVec<[_; 32]> = smallvec![true; index.keys.len()];
                     self.query.containing(range.start, &index, &mut matching);
                     let data = if matching.any() {
-                        let offsets = matching
-                            .iter()
-                            .enumerate()
-                            .filter(|(_, m)| **m)
-                            .map(|(i, _)| i as u64);
-                        let keys = index.select_keys(&matching);
                         tracing::debug!("loading leaf {:?}", range);
                         let leaf = self
                             .forest
                             .load_leaf(&self.secrets, index)?
                             .expect("leaf must be some here");
+                        let offsets = matching
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, m)| **m)
+                            .map(|(i, _)| range.start + i as u64);
+                        let keys = index.select_keys(&matching);
                         let elems: Vec<V> = leaf.as_ref().select(&matching)?;
                         offsets
                             .zip(keys)
                             .zip(elems)
-                            .map(|((o, k), v)| (o + range.start, k, v))
+                            .map(|((o, k), v)| (o, k, v))
                             .collect::<Vec<_>>()
                     } else {
                         Vec::new()
@@ -286,7 +286,7 @@ where
     E: Send + 'static,
     F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
 {
-    type Item = Result<FilteredChunk<T, V, E>>;
+    type Item = Result<FilteredChunk<(u64, T::Key, V), E>>;
 
     fn next(&mut self) -> Option<<Self as Iterator>::Item> {
         match self.next_fallible() {
@@ -512,7 +512,7 @@ where
         query: Q,
         index: Index<T>,
         mk_extra: &'static F,
-    ) -> BoxStream<'static, Result<FilteredChunk<T, V, E>>> {
+    ) -> BoxStream<'static, Result<FilteredChunk<(u64, T::Key, V), E>>> {
         let iter = self.traverse0(secrets, query, index, mk_extra);
         stream::unfold(iter, |mut iter| async move {
             iter.next().map(|res| (res, iter))
@@ -560,7 +560,7 @@ where
         query: Q,
         index: Index<T>,
         mk_extra: &'static F,
-    ) -> BoxStream<'static, Result<FilteredChunk<T, V, E>>> {
+    ) -> BoxStream<'static, Result<FilteredChunk<(u64, T::Key, V), E>>> {
         let iter = self.traverse_rev0(secrets.clone(), query, index, mk_extra);
         stream::unfold(iter, |mut iter| async move {
             iter.next().map(|res| (res, iter))

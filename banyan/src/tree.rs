@@ -164,7 +164,7 @@ impl<
         query: Q,
         index: Index<T>,
         mk_extra: &'static F,
-    ) -> BoxedIter<'static, Result<FilteredChunk<T, V, E>>> {
+    ) -> BoxedIter<'static, Result<FilteredChunk<(u64, T::Key, V), E>>> {
         ForestIter::new(self.clone(), secrets, query, index, mk_extra).boxed()
     }
 
@@ -178,7 +178,7 @@ impl<
         query: Q,
         index: Index<T>,
         mk_extra: &'static F,
-    ) -> BoxedIter<'static, Result<FilteredChunk<T, V, E>>> {
+    ) -> BoxedIter<'static, Result<FilteredChunk<(u64, T::Key, V), E>>> {
         ForestIter::new_rev(self.clone(), secrets, query, index, mk_extra).boxed()
     }
 
@@ -388,7 +388,7 @@ impl<
         tree: &Tree<T>,
         query: Q,
         mk_extra: &'static F,
-    ) -> impl Iterator<Item = Result<FilteredChunk<T, V, E>>> + 'static
+    ) -> impl Iterator<Item = Result<FilteredChunk<(u64, T::Key, V), E>>> + 'static
     where
         Q: Query<T> + Send + Clone + 'static,
         E: Send + 'static,
@@ -407,7 +407,7 @@ impl<
         tree: &Tree<T>,
         query: Q,
         mk_extra: &'static F,
-    ) -> impl Iterator<Item = Result<FilteredChunk<T, V, E>>> + 'static
+    ) -> impl Iterator<Item = Result<FilteredChunk<(u64, T::Key, V), E>>> + 'static
     where
         Q: Query<T> + Send + Clone + 'static,
         E: Send + 'static,
@@ -426,7 +426,7 @@ impl<
         tree: &Tree<T>,
         query: Q,
         mk_extra: &'static F,
-    ) -> impl Stream<Item = Result<FilteredChunk<T, V, E>>> + 'static
+    ) -> impl Stream<Item = Result<FilteredChunk<(u64, T::Key, V), E>>> + 'static
     where
         Q: Query<T> + Send + Clone + 'static,
         E: Send + 'static,
@@ -445,7 +445,7 @@ impl<
         tree: &Tree<T>,
         query: Q,
         mk_extra: &'static F,
-    ) -> impl Stream<Item = Result<FilteredChunk<T, V, E>>> + 'static
+    ) -> impl Stream<Item = Result<FilteredChunk<(u64, T::Key, V), E>>> + 'static
     where
         Q: Query<T> + Send + Clone + 'static,
         E: Send + 'static,

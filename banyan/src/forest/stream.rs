@@ -49,7 +49,7 @@ impl<
         trees: S,
         range: RangeInclusive<u64>,
         mk_extra: &'static F,
-    ) -> impl Stream<Item = anyhow::Result<FilteredChunk<T, V, E>>> + Send + 'static
+    ) -> impl Stream<Item = anyhow::Result<FilteredChunk<(u64, T::Key, V), E>>> + Send + 'static
     where
         Q: Query<T> + Clone + Send + 'static,
         E: Send + 'static,
@@ -102,7 +102,7 @@ impl<
         range: RangeInclusive<u64>,
         mk_extra: &'static F,
         thread_pool: ThreadPool,
-    ) -> impl Stream<Item = anyhow::Result<FilteredChunk<T, V, E>>> + Send + 'static
+    ) -> impl Stream<Item = anyhow::Result<FilteredChunk<(u64, T::Key, V), E>>> + Send + 'static
     where
         Q: Query<T> + Clone + Send + 'static,
         E: Send + 'static,
@@ -148,7 +148,7 @@ impl<
         trees: S,
         range: RangeInclusive<u64>,
         mk_extra: &'static F,
-    ) -> impl Stream<Item = anyhow::Result<FilteredChunk<T, V, E>>> + Send + 'static
+    ) -> impl Stream<Item = anyhow::Result<FilteredChunk<(u64, T::Key, V), E>>> + Send + 'static
     where
         Q: Query<T> + Clone + Send + 'static,
         E: Send + 'static,
