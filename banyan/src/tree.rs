@@ -1,9 +1,7 @@
 //! creation and traversal of banyan trees
 use super::index::*;
 use crate::{
-    forest::{
-        Config, FilteredChunk, Forest, ForestIter, IndexIter, Secrets, Transaction, TreeTypes,
-    },
+    forest::{Config, FilteredChunk, Forest, IndexIter, Secrets, Transaction, TreeIter, TreeTypes},
     store::BlockWriter,
 };
 use crate::{query::Query, store::ReadOnlyStore, util::IterExt, StreamBuilder, StreamBuilderState};
@@ -164,7 +162,7 @@ impl<
         index: Index<T>,
         mk_extra: &'static F,
     ) -> impl Iterator<Item = Result<FilteredChunk<(u64, T::Key, V), E>>> {
-        ForestIter::new(self.clone(), secrets, query, index, mk_extra)
+        TreeIter::new(self.clone(), secrets, query, index, mk_extra)
     }
 
     pub(crate) fn traverse_rev0<
@@ -178,7 +176,7 @@ impl<
         index: Index<T>,
         mk_extra: &'static F,
     ) -> impl Iterator<Item = Result<FilteredChunk<(u64, T::Key, V), E>>> {
-        ForestIter::new_rev(self.clone(), secrets, query, index, mk_extra)
+        TreeIter::new_rev(self.clone(), secrets, query, index, mk_extra)
     }
 
     fn index_iter0<Q: Query<T> + Clone + Send + 'static>(

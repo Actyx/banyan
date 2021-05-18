@@ -21,7 +21,7 @@ enum Mode {
     Forward,
     Backward,
 }
-pub(crate) struct ForestIter<T: TreeTypes, V, R, Q: Query<T>, F> {
+pub(crate) struct TreeIter<T: TreeTypes, V, R, Q, F> {
     forest: Forest<T, V, R>,
     secrets: Secrets,
     offset: u64,
@@ -68,7 +68,7 @@ impl<T: TreeTypes> TraverseState<T> {
     }
 }
 
-impl<T: TreeTypes, V, R, Q, E, F> ForestIter<T, V, R, Q, F>
+impl<T: TreeTypes, V, R, Q, E, F> TreeIter<T, V, R, Q, F>
 where
     T: TreeTypes + 'static,
     V: DagCbor + Clone + Send + Sync + Debug + 'static,
@@ -221,7 +221,7 @@ where
                         };
                         break FilteredChunk {
                             range,
-                            data: Vec::new(),
+                            data: vec![],
                             extra: (self.mk_extra)(index.as_index_ref()),
                         };
                     }
@@ -277,7 +277,7 @@ where
     }
 }
 
-impl<T: TreeTypes, V, R, Q, E, F> Iterator for ForestIter<T, V, R, Q, F>
+impl<T: TreeTypes, V, R, Q, E, F> Iterator for TreeIter<T, V, R, Q, F>
 where
     T: TreeTypes + 'static,
     V: DagCbor + Clone + Send + Sync + Debug + 'static,
