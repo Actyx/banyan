@@ -62,7 +62,7 @@ where
             stream.config().zstd_level,
             stream.config().target_leaf_size,
             stream.config().max_uncompressed_leaf_size,
-            stream.config().max_leaf_count as usize,
+            stream.config().max_leaf_count,
         )?;
         let value_bytes = data.compressed().len() as u64;
         let encrypted = data.into_encrypted(&stream.value_key().clone(), &mut stream.offset)?;
@@ -100,6 +100,7 @@ where
         stream: &mut StreamBuilderState,
         mode: CreateMode,
     ) -> Result<BranchIndex<T>> {
+        assert!(level > 0);
         assert!(
             children.iter().all(|child| child.level() < level),
             "All children must be below the level of the branch to be created."
@@ -118,11 +119,16 @@ where
                 "If there are children, at least one must be directly below the branch to be created."
             );
         }
+        let max_branch_count = if level == 1 {
+            stream.config().max_key_branches
+        } else {
+            stream.config().max_summary_branches
+        };
         let mut summaries = children
             .iter()
             .map(|child| child.summarize())
             .collect::<Vec<_>>();
-        while from.peek().is_some() && (children.len() < stream.config().max_branch_count(level)) {
+        while from.peek().is_some() && (children.len() < max_branch_count) {
             let child = self.fill_node(level - 1, from, stream)?;
             let summary = child.summarize();
             summaries.push(summary);
@@ -484,19 +490,27 @@ where
 /// Find a valid branch in an array of children.
 /// This can be either a sealed node at the start, or an unsealed node at the end
 fn find_valid_branch<T: TreeTypes>(config: &Config, children: &[Index<T>]) -> BranchResult {
+    assert!(children.len() > 1);
+    assert!(is_sorted(children.iter().map(|x| x.level()).rev()));
     assert!(!children.is_empty());
-    let level = children[0].level();
-    let max_branch_count = config.max_branch_count(level);
+    let first_level = children[0].level();
+    let max_count = if first_level == 0 {
+        // we are at level 1, so use max_key_branches
+        config.max_key_branches
+    } else {
+        // we are at level >1, so use max_summary_branches
+        config.max_summary_branches
+    };
     let pos = children
         .iter()
-        .position(|x| x.level() < level)
+        .position(|x| x.level() < first_level)
         .unwrap_or(children.len());
-    if pos >= max_branch_count {
+    if pos >= max_count {
         // sequence starts with roots that we can turn into a sealed node
-        BranchResult::Sealed(max_branch_count)
+        BranchResult::Sealed(max_count)
     } else if pos == children.len() || pos == children.len() - 1 {
         // sequence is something we can turn into an unsealed node
-        BranchResult::Unsealed(max_branch_count.min(children.len()))
+        BranchResult::Unsealed(max_count.min(children.len()))
     } else {
         // remove first pos and recurse
         BranchResult::Skip(pos)

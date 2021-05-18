@@ -101,14 +101,12 @@ impl ZstdDagCborSeq {
         from: &mut iter::Peekable<impl Iterator<Item = (K, V)>>,
         keys: &mut Vec<K>,
         zstd_level: i32,
-        compressed_size: u64,
-        uncompressed_size: u64,
+        compressed_size: usize,
+        uncompressed_size: usize,
         max_keys: usize,
     ) -> anyhow::Result<(Self, bool)> {
         let mut links = BTreeSet::new();
         let t0 = Instant::now();
-        let compressed_size = compressed_size as usize;
-        let uncompressed_size = uncompressed_size as usize;
         let mut encoder = zstd::Encoder::new(Vec::new(), zstd_level)?;
         // decompress into the encoder, if necessary
         //
@@ -444,7 +442,7 @@ mod tests {
         data: Vec<Vec<u8>>,
         seed: u64,
     ) -> anyhow::Result<bool> {
-        let bytes = u64::try_from(data.iter().map(|x| x.len()).sum::<usize>())?;
+        let bytes = data.iter().map(|x| x.len()).sum::<usize>();
         let target_size = bytes / 2;
         let initial = ZstdDagCborSeq::single(&first, 0)?;
         let mut iter = data.iter().cloned().enumerate().peekable();
@@ -485,8 +483,7 @@ mod tests {
             return Ok(false);
         }
         //
-        if decompressed.len() < data.len() && (u64::try_from(za.compressed().len())?) < target_size
-        {
+        if decompressed.len() < data.len() && za.compressed().len() < target_size {
             return Ok(false);
         }
         Ok(true)
