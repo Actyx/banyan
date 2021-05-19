@@ -167,11 +167,11 @@ impl Default for Secrets {
 #[derive(Debug, Clone)]
 /// Configuration for a forest. Includes settings for when a node is considered full
 pub struct Config {
-    /// maximum number of children in a level>0 branch that contains summaries
+    /// maximum number of children in a level>1 branch that contains summaries
     pub max_summary_branches: usize,
-    /// maximum number of children in a level==0 branch that contains key sequences
+    /// maximum number of children in a level 1 branch that contains key sequences
     pub max_key_branches: usize,
-    /// maximum number of values in a leaf that contains value sequences
+    /// maximum number of values in a level 0 leaf that contains value sequences
     pub max_leaf_count: usize,
     /// rough maximum compressed bytes of a leaf. If a node has more bytes than this, it is considered full.
     ///

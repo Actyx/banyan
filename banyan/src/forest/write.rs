@@ -493,6 +493,7 @@ fn find_valid_branch<T: TreeTypes>(config: &Config, children: &[Index<T>]) -> Br
     assert!(children.len() > 1);
     assert!(is_sorted(children.iter().map(|x| x.level()).rev()));
     assert!(!children.is_empty());
+    // this is the level of the first child, not the level of the branch to be created
     let first_level = children[0].level();
     let max_count = if first_level == 0 {
         // we are at level 1, so use max_key_branches
