@@ -1,6 +1,6 @@
 use crate::{
     forest::{BranchResult, Config, CreateMode, Forest, Transaction, TreeTypes},
-    index::{zip_with_offset_ref, NodeInfo2},
+    index::{zip_with_offset_ref, NodeInfo},
     store::{BlockWriter, ReadOnlyStore},
     StreamBuilderState,
 };
@@ -292,15 +292,15 @@ where
             return Ok(index.clone());
         }
         let secrets = stream.secrets().clone();
-        Ok(match self.load_node_2(&secrets, index) {
-            NodeInfo2::Leaf(index, mut leaf) => {
+        Ok(match self.load_node(&secrets, index) {
+            NodeInfo::Leaf(index, mut leaf) => {
                 tracing::debug!("extending existing leaf");
                 let leaf = leaf.load()?;
                 let keys = index.keys.clone();
                 self.extend_leaf(leaf.as_ref().compressed(), Some(keys), from, stream)?
                     .into()
             }
-            NodeInfo2::Branch(index, mut branch) => {
+            NodeInfo::Branch(index, mut branch) => {
                 tracing::debug!("extending existing branch");
                 let branch = branch.load()?;
                 let mut children = branch.children.to_vec();
@@ -311,7 +311,7 @@ where
                 self.extend_branch(children, index.level, from, stream, CreateMode::Packed)?
                     .into()
             }
-            NodeInfo2::PurgedBranch(_) | NodeInfo2::PurgedLeaf(_) => {
+            NodeInfo::PurgedBranch(_) | NodeInfo::PurgedLeaf(_) => {
                 // purged nodes can not be extended
                 index.clone()
             }

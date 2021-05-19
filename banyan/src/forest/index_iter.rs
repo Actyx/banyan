@@ -135,7 +135,11 @@ where
             }
 
             match self.forest.load_node(&self.secrets, &head.index) {
-                Ok(NodeInfo::Branch(index, branch)) => {
+                NodeInfo::Branch(index, mut branch) => {
+                    let branch = match branch.load() {
+                        Ok(branch) => branch,
+                        Err(cause) => return Some(Err(cause)),
+                    };
                     if head.filter.is_empty() {
                         // we hit this branch node for the first time. Apply the
                         // query on its children and store it
@@ -175,7 +179,7 @@ where
                     }
                 }
 
-                Ok(NodeInfo::Leaf(index, _)) => {
+                NodeInfo::Leaf(index, _) => {
                     match self.mode {
                         Mode::Forward => {
                             self.offset += index.keys.count();
@@ -194,7 +198,7 @@ where
 
                 // even for purged leafs and branches or ignored chunks,
                 // produce a placeholder.
-                Ok(_) => {
+                _ => {
                     let TraverseState { index, .. } = self.stack.pop().expect("not empty");
                     // Ascend to parent's node. This might be none in case the
                     // tree's root node is a `PurgedBranch`.
@@ -211,7 +215,6 @@ where
                     };
                     break index;
                 }
-                Err(e) => return Some(Err(e)),
             };
         };
         Some(Ok(res))

@@ -143,7 +143,7 @@ impl<
     pub fn dump_graph<S>(
         &self,
         tree: &Tree<T>,
-        f: impl Fn((usize, &NodeInfo2<T, V, R>)) -> S + Clone,
+        f: impl Fn((usize, &NodeInfo<T, V, R>)) -> S + Clone,
     ) -> Result<(GraphEdges, GraphNodes<S>)> {
         match &tree.0 {
             Some((index, secrets, _)) => self.dump_graph0(secrets, None, 0, index, f),
@@ -203,17 +203,17 @@ impl<
         parent_id: Option<usize>,
         next_id: usize,
         index: &Index<T>,
-        f: impl Fn((usize, &NodeInfo2<T, V, R>)) -> S + Clone,
+        f: impl Fn((usize, &NodeInfo<T, V, R>)) -> S + Clone,
     ) -> Result<(GraphEdges, GraphNodes<S>)> {
         let mut edges = vec![];
         let mut nodes: BTreeMap<usize, S> = Default::default();
 
-        let node = self.load_node_2(secrets, index);
+        let node = self.load_node(secrets, index);
         if let Some(p) = parent_id {
             edges.push((p, next_id));
         }
         nodes.insert(next_id, f((next_id, &node)));
-        if let NodeInfo2::Branch(_, mut branch) = node {
+        if let NodeInfo::Branch(_, mut branch) = node {
             let branch = branch.load()?;
             let mut cur = next_id;
             for x in branch.children.iter() {

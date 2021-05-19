@@ -111,14 +111,14 @@ where
     R: ReadOnlyStore<TT::Link> + Clone + Send + Sync + 'static,
 {
     let (edges, nodes) = forest.dump_graph(&tree, |(id, node)| match node {
-        banyan::index::NodeInfo2::Branch(idx, _) | banyan::index::NodeInfo2::PurgedBranch(idx) => {
+        banyan::index::NodeInfo::Branch(idx, _) | banyan::index::NodeInfo::PurgedBranch(idx) => {
             NodeDescriptor::Branch {
                 level: idx.level as usize,
                 id,
                 sealed: idx.sealed,
             }
         }
-        banyan::index::NodeInfo2::Leaf(idx, _) | banyan::index::NodeInfo2::PurgedLeaf(idx) => {
+        banyan::index::NodeInfo::Leaf(idx, _) | banyan::index::NodeInfo::PurgedLeaf(idx) => {
             NodeDescriptor::Leaf {
                 id,
                 items: idx.keys().fold(0, |acc, _| acc + 1),

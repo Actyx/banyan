@@ -2,7 +2,7 @@ use super::{BranchCache, Config, FilteredChunk, Forest, Secrets, TreeTypes};
 use crate::{
     index::{
         deserialize_compressed, Branch, BranchIndex, BranchLoader, CompactSeq, Index, IndexRef,
-        Leaf, LeafIndex, LeafLoader, NodeInfo, NodeInfo2,
+        Leaf, LeafIndex, LeafLoader, NodeInfo,
     },
     query::Query,
     store::ReadOnlyStore,
@@ -377,44 +377,22 @@ where
         }
     }
 
-    pub(crate) fn load_node_2<'a>(
-        &'a self,
-        secrets: &'a Secrets,
-        index: &'a Index<T>,
-    ) -> NodeInfo2<'a, T, V, R> {
+    pub(crate) fn load_node(&self, secrets: &Secrets, index: &Index<T>) -> NodeInfo<T, V, R> {
         match index {
             Index::Branch(index) => match index.link {
-                Some(_link) => NodeInfo2::Branch(index, BranchLoader::new(self, secrets, index)),
-                None => NodeInfo2::PurgedBranch(index),
+                Some(_link) => NodeInfo::Branch(
+                    index.clone(),
+                    BranchLoader::new(self, secrets, index.clone()),
+                ),
+                None => NodeInfo::PurgedBranch(index.clone()),
             },
             Index::Leaf(index) => match index.link {
-                Some(_link) => NodeInfo2::Leaf(index, LeafLoader::new(self, secrets, index)),
-                None => NodeInfo2::PurgedLeaf(index),
+                Some(_link) => {
+                    NodeInfo::Leaf(index.clone(), LeafLoader::new(self, secrets, index.clone()))
+                }
+                None => NodeInfo::PurgedLeaf(index.clone()),
             },
         }
-    }
-
-    /// load a node, returning a structure containing the index and value for convenient matching    
-    pub(crate) fn load_node(&self, secrets: &Secrets, index: &Index<T>) -> Result<NodeInfo<T>> {
-        let t0 = Instant::now();
-        let result = Ok(match index {
-            Index::Branch(index) => {
-                if let Some(branch) = self.load_branch_cached(secrets, index)? {
-                    NodeInfo::Branch(index.clone(), branch)
-                } else {
-                    NodeInfo::PurgedBranch(index.clone())
-                }
-            }
-            Index::Leaf(index) => {
-                if let Some(leaf) = self.load_leaf(secrets, index)? {
-                    NodeInfo::Leaf(index.clone(), leaf)
-                } else {
-                    NodeInfo::PurgedLeaf(index.clone())
-                }
-            }
-        });
-        tracing::debug!("load_node {}", t0.elapsed().as_secs_f64());
-        result
     }
 
     /// load a branch given a branch index
@@ -444,8 +422,8 @@ where
         if offset >= index.count() {
             return Ok(None);
         }
-        match self.load_node_2(stream, index) {
-            NodeInfo2::Branch(_, mut info) => {
+        match self.load_node(stream, index) {
+            NodeInfo::Branch(_, mut info) => {
                 let node = info.load()?;
                 for child in node.children.iter() {
                     if offset < child.count() {
@@ -456,13 +434,13 @@ where
                 }
                 Err(anyhow!("index out of bounds: {}", offset))
             }
-            NodeInfo2::Leaf(index, mut info) => {
+            NodeInfo::Leaf(index, mut info) => {
                 let k = index.keys.get(offset as usize).unwrap();
                 let leaf = info.load()?;
                 let v = leaf.child_at::<V>(offset)?;
                 Ok(Some((k, v)))
             }
-            NodeInfo2::PurgedBranch(_) | NodeInfo2::PurgedLeaf(_) => Ok(None),
+            NodeInfo::PurgedBranch(_) | NodeInfo::PurgedLeaf(_) => Ok(None),
         }
     }
 
@@ -476,8 +454,8 @@ where
         if offset >= index.count() {
             return Ok(());
         }
-        match self.load_node_2(stream, index) {
-            NodeInfo2::Branch(_, mut node) => {
+        match self.load_node(stream, index) {
+            NodeInfo::Branch(_, mut node) => {
                 for child in node.load()?.children.iter() {
                     if offset < child.count() {
                         self.collect0(stream, child, offset, into)?;
@@ -485,19 +463,19 @@ where
                     offset = offset.saturating_sub(child.count());
                 }
             }
-            NodeInfo2::Leaf(index, mut node) => {
+            NodeInfo::Leaf(index, mut node) => {
                 let vs = node.load()?.as_ref().items::<V>()?;
                 let ks = index.keys.to_vec();
                 for (k, v) in ks.into_iter().zip(vs.into_iter()).skip(offset as usize) {
                     into.push(Some((k, v)));
                 }
             }
-            NodeInfo2::PurgedLeaf(index) => {
+            NodeInfo::PurgedLeaf(index) => {
                 for _ in offset..index.keys.count() {
                     into.push(None);
                 }
             }
-            NodeInfo2::PurgedBranch(index) => {
+            NodeInfo::PurgedBranch(index) => {
                 for _ in offset..index.count {
                     into.push(None);
                 }
@@ -586,8 +564,8 @@ where
     }
 
     pub(crate) fn dump0(&self, secrets: &Secrets, index: &Index<T>, prefix: &str) -> Result<()> {
-        match self.load_node_2(secrets, index) {
-            NodeInfo2::Branch(index, mut branch) => {
+        match self.load_node(secrets, index) {
+            NodeInfo::Branch(index, mut branch) => {
                 let branch = branch.load()?;
                 println!(
                     "{}Branch(count={}, key_bytes={}, value_bytes={}, sealed={}, link={}, children={})",
@@ -661,14 +639,14 @@ where
         if !index.sealed() {
             *level = (*level).min((index.level() as i32) - 1);
         }
-        match self.load_node_2(secrets, index) {
-            NodeInfo2::Leaf(index, mut leaf) => {
+        match self.load_node(secrets, index) {
+            NodeInfo::Leaf(index, mut leaf) => {
                 let leaf = leaf.load()?;
                 let value_count = leaf.as_ref().count()?;
                 let key_count = index.keys.count();
                 check!(value_count == key_count);
             }
-            NodeInfo2::Branch(index, mut branch) => {
+            NodeInfo::Branch(index, mut branch) => {
                 let branch = branch.load()?;
                 check!(branch.count() == index.summaries.count());
                 for child in &branch.children.to_vec() {
@@ -688,10 +666,10 @@ where
                     self.check_invariants0(secrets, config, child, level, msgs)?;
                 }
             }
-            NodeInfo2::PurgedBranch(_) => {
+            NodeInfo::PurgedBranch(_) => {
                 // not possible to check invariants since the data to compare to is gone
             }
-            NodeInfo2::PurgedLeaf(_) => {
+            NodeInfo::PurgedLeaf(_) => {
                 // not possible to check invariants since the data to compare to is gone
             }
         };
@@ -701,7 +679,7 @@ where
     /// Checks if a node is packed to the left
     pub(crate) fn is_packed0(&self, secrets: &Secrets, index: &Index<T>) -> Result<bool> {
         Ok(
-            if let NodeInfo2::Branch(index, mut branch) = self.load_node_2(secrets, index) {
+            if let NodeInfo::Branch(index, mut branch) = self.load_node(secrets, index) {
                 if index.sealed {
                     // sealed nodes, for themselves, are packed
                     true
