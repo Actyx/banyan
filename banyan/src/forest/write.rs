@@ -301,7 +301,7 @@ where
             }
             NodeInfo::Branch(index, branch) => {
                 tracing::debug!("extending existing branch");
-                let branch = branch.load()?;
+                let branch = branch.load_cached()?;
                 let mut children = branch.children.to_vec();
                 if let Some(last_child) = children.last_mut() {
                     *last_child =

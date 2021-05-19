@@ -192,7 +192,7 @@ where
                     let branch = match &head.branch {
                         Some(branch) => branch.clone(),
                         None => {
-                            let branch = branch.load()?.clone();
+                            let branch = branch.load_cached()?.clone();
                             head.branch = Some(branch.clone());
                             branch
                         }
@@ -351,29 +351,6 @@ where
     }
 
     /// load a branch given a branch index, from the cache
-    pub(crate) fn load_branch_cached(
-        &self,
-        secrets: &Secrets,
-        index: &BranchIndex<T>,
-    ) -> Result<Option<Branch<T>>> {
-        if let Some(link) = &index.link {
-            let res = self.branch_cache().get(link);
-            match res {
-                Some(branch) => Ok(Some(branch)),
-                None => {
-                    let branch = self.load_branch(secrets, index)?;
-                    if let Some(branch) = &branch {
-                        self.branch_cache().put(*link, branch.clone());
-                    }
-                    Ok(branch)
-                }
-            }
-        } else {
-            Ok(None)
-        }
-    }
-
-    /// load a branch given a branch index, from the cache
     pub(crate) fn load_branch_cached_from_link(
         &self,
         secrets: &Secrets,
@@ -450,7 +427,7 @@ where
         }
         match self.load_node(stream, index) {
             NodeInfo::Branch(_, info) => {
-                let node = info.load()?;
+                let node = info.load_cached()?;
                 for child in node.children.iter() {
                     if offset < child.count() {
                         return self.get0(stream, child, offset);
@@ -482,7 +459,7 @@ where
         }
         match self.load_node(stream, index) {
             NodeInfo::Branch(_, node) => {
-                for child in node.load()?.children.iter() {
+                for child in node.load_cached()?.children.iter() {
                     if offset < child.count() {
                         self.collect0(stream, child, offset, into)?;
                     }
@@ -594,7 +571,7 @@ where
     pub(crate) fn dump0(&self, secrets: &Secrets, index: &Index<T>, prefix: &str) -> Result<()> {
         match self.load_node(secrets, index) {
             NodeInfo::Branch(index, branch) => {
-                let branch = branch.load()?;
+                let branch = branch.load_cached()?;
                 println!(
                     "{}Branch(count={}, key_bytes={}, value_bytes={}, sealed={}, link={}, children={})",
                     prefix,
@@ -627,7 +604,7 @@ where
 
     fn roots0(
         &self,
-        stream: &Secrets,
+        secrets: &Secrets,
         index: &Index<T>,
         level: &mut i32,
         res: &mut Vec<Index<T>>,
@@ -638,9 +615,10 @@ where
         } else {
             *level = (*level).min(index.level() as i32 - 1);
             if let Index::Branch(b) = index {
-                if let Some(branch) = self.load_branch(stream, b)? {
+                if let Some(link) = b.link {
+                    let branch = self.load_branch_from_link(secrets, &link)?;
                     for child in branch.children.iter() {
-                        self.roots0(stream, child, level, res)?;
+                        self.roots0(secrets, child, level, res)?;
                     }
                 }
             }
@@ -675,7 +653,7 @@ where
                 check!(value_count == key_count);
             }
             NodeInfo::Branch(index, branch) => {
-                let branch = branch.load()?;
+                let branch = branch.load_cached()?;
                 check!(branch.count() == index.summaries.count());
                 for child in &branch.children.to_vec() {
                     if index.sealed {
@@ -711,7 +689,7 @@ where
                 if index.sealed {
                     // sealed nodes, for themselves, are packed
                     true
-                } else if let Some((last, rest)) = branch.load()?.children.split_last() {
+                } else if let Some((last, rest)) = branch.load_cached()?.children.split_last() {
                     // for the first n-1 children, they must all be sealed and at exactly 1 level below
                     let first_ok = rest
                         .iter()

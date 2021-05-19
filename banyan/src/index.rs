@@ -351,9 +351,13 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> BranchLoader<T, R> {
         }
     }
 
-    pub fn load(&self) -> anyhow::Result<Branch<T>> {
+    pub fn load_cached(&self) -> anyhow::Result<Branch<T>> {
         self.forest
             .load_branch_cached_from_link(&self.secrets, &self.link)
+    }
+
+    pub fn load(&self) -> anyhow::Result<Branch<T>> {
+        self.forest.load_branch_from_link(&self.secrets, &self.link)
     }
 }
 

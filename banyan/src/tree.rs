@@ -210,7 +210,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
         }
         nodes.insert(next_id, f((next_id, &node)));
         if let NodeInfo::Branch(_, branch) = node {
-            let branch = branch.load()?;
+            let branch = branch.load_cached()?;
             let mut cur = next_id;
             for x in branch.children.iter() {
                 let (mut e, mut n) =
@@ -245,10 +245,11 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
     }
 
     /// leftmost branches of the tree as separate trees
-    fn left_roots0(&self, stream: &Secrets, index: &Index<T>) -> Result<Vec<Index<T>>> {
+    fn left_roots0(&self, secrets: &Secrets, index: &Index<T>) -> Result<Vec<Index<T>>> {
         let mut result = if let Index::Branch(branch) = index {
-            if let Some(branch) = self.load_branch_cached(stream, branch)? {
-                self.left_roots0(stream, branch.first_child())?
+            if let Some(link) = branch.link {
+                let branch = self.load_branch_cached_from_link(secrets, &link)?;
+                self.left_roots0(secrets, branch.first_child())?
             } else {
                 Vec::new()
             }

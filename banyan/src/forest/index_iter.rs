@@ -127,7 +127,7 @@ where
 
             match self.forest.load_node(&self.secrets, &head.index) {
                 NodeInfo::Branch(index, branch) => {
-                    let branch = match branch.load() {
+                    let branch = match branch.load_cached() {
                         Ok(branch) => branch,
                         Err(cause) => return Some(Err(cause)),
                     };
