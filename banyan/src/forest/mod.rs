@@ -167,20 +167,22 @@ impl Default for Secrets {
 #[derive(Debug, Clone)]
 /// Configuration for a forest. Includes settings for when a node is considered full
 pub struct Config {
-    /// maximum number of values in a leaf
-    pub max_leaf_count: u64,
-    /// maximum number of children in a branch
-    pub max_branch_count: u64,
-    /// zstd level to use for compression
-    pub zstd_level: i32,
+    /// maximum number of children in a level>1 branch that contains summaries
+    pub max_summary_branches: usize,
+    /// maximum number of children in a level 1 branch that contains key sequences
+    pub max_key_branches: usize,
+    /// maximum number of values in a level 0 leaf that contains value sequences
+    pub max_leaf_count: usize,
     /// rough maximum compressed bytes of a leaf. If a node has more bytes than this, it is considered full.
     ///
     /// note that this might overshoot due to the fact that the zstd encoder has internal state, and it is not possible
     /// to flush after each value without losing compression efficiency. The overshoot is bounded though.
-    pub target_leaf_size: u64,
+    pub target_leaf_size: usize,
     /// Maximum uncompressed size of leafs. This is limited to prevent accidentally creating
     /// decompression bombs.
-    pub max_uncompressed_leaf_size: u64,
+    pub max_uncompressed_leaf_size: usize,
+    /// zstd level to use for compression
+    pub zstd_level: i32,
 }
 
 impl Config {
@@ -191,7 +193,8 @@ impl Config {
         Self {
             target_leaf_size: 10000,
             max_leaf_count: 10,
-            max_branch_count: 4,
+            max_key_branches: 4,
+            max_summary_branches: 4,
             zstd_level: 10,
             max_uncompressed_leaf_size: 16 * 1024 * 1024,
         }
@@ -202,21 +205,16 @@ impl Config {
         Self {
             target_leaf_size: 1 << 14,
             max_leaf_count: 1 << 14,
-            max_branch_count: 32,
+            max_summary_branches: 32,
+            max_key_branches: 32,
             zstd_level: 10,
             max_uncompressed_leaf_size: 16 * 1024 * 1024,
         }
     }
 
-    /// predicate to determine if a leaf is sealed, based on the config
+    /// predicate to determine if a branch is sealed, based on the config
     pub fn branch_sealed<T: TreeTypes>(&self, items: &[Index<T>], level: u32) -> bool {
-        // a branch with less than 2 children is never considered sealed.
-        // if we ever get this a branch that is too large despite having just 1 child,
-        // we should just panic.
-        // must have at least 2 children
-        if items.len() < 2 {
-            return false;
-        }
+        assert!(level > 0);
         // all children must be sealed
         if items.iter().any(|x| !x.sealed()) {
             return false;
@@ -225,8 +223,24 @@ impl Config {
         if items.iter().any(|x| x.level() != level - 1) {
             return false;
         }
-        // we must be full
-        items.len() as u64 >= self.max_branch_count
+        if level == 1 {
+            // if we are at level 1, our children are level 0 children,
+            // so we use max_key_branches
+            items.len() >= self.max_key_branches
+        } else {
+            // if we are at level > 1, our children are level >0 children,
+            // so we use max_summary_branches
+            items.len() >= self.max_summary_branches
+        }
+    }
+
+    pub fn validate(&self) -> anyhow::Result<()> {
+        anyhow::ensure!(self.max_summary_branches > 1);
+        anyhow::ensure!(self.max_key_branches > 0);
+        anyhow::ensure!(self.target_leaf_size > 0 && self.target_leaf_size <= 1024 * 1024);
+        anyhow::ensure!(self.max_uncompressed_leaf_size <= 16 * 1024 * 1024);
+        anyhow::ensure!(self.zstd_level >= 1 && self.zstd_level <= 22);
+        Ok(())
     }
 }
 

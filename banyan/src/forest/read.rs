@@ -119,8 +119,29 @@ where
         }
     }
 
+    /// common code for early returns. Pop a state from the stack and completely skip the index.
+    ///
+    /// this can only be called before the index is partially processed.
+    fn skip(&mut self, range: Range<u64>) -> FilteredChunk<T, V, E> {
+        let TraverseState { index, .. } = self.stack.pop().expect("not empty");
+        // Ascend to parent's node. This might be none in case the
+        // tree's root node is a `PurgedBranch`.
+        if let Some(last) = self.stack.last_mut() {
+            last.next_pos(&self.mode);
+        };
+        match self.mode {
+            Mode::Forward => self.offset += index.count(),
+            Mode::Backward => self.offset -= index.count(),
+        };
+        FilteredChunk {
+            range,
+            data: vec![],
+            extra: (self.mk_extra)(index.as_index_ref()),
+        }
+    }
+
     fn next_fallible(&mut self) -> Result<Option<FilteredChunk<T, V, E>>> {
-        let res: FilteredChunk<T, V, E> = loop {
+        Ok(Some(loop {
             let head = match self.stack.last_mut() {
                 Some(i) => i,
                 // Nothing to do ..
@@ -158,15 +179,27 @@ where
                         };
                         self.query
                             .intersecting(range.start, &index, &mut head.filter);
+
+                        // important early return - if not a single bit matches, there is no
+                        // need to go into the individual children.
+                        if !head.filter.any() {
+                            break self.skip(range);
+                        }
                     }
 
                     let branch = match &head.branch {
                         Some(branch) => branch.clone(),
                         None => {
+                            tracing::debug!(
+                                "loading branch {:?} {} {}",
+                                range,
+                                index.level,
+                                index.summaries().count()
+                            );
                             let branch = self
                                 .forest
                                 .load_branch_cached(&self.secrets, index)?
-                                .expect("leaf must be some here");
+                                .expect("branch must be some here");
                             head.branch = Some(branch.clone());
                             branch
                         }
@@ -198,13 +231,21 @@ where
                     let mut matching: SmallVec<[_; 32]> = smallvec![true; index.keys.len()];
                     self.query.containing(range.start, &index, &mut matching);
                     let data = if matching.any() {
+                        let offsets = matching
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, m)| **m)
+                            .map(|(i, _)| i as u64);
                         let keys = index.select_keys(&matching);
+                        tracing::debug!("loading leaf {:?}", range);
                         let leaf = self
                             .forest
                             .load_leaf(&self.secrets, index)?
                             .expect("leaf must be some here");
                         let elems: Vec<V> = leaf.as_ref().select(&matching)?;
-                        keys.zip(elems)
+                        offsets
+                            .zip(keys)
+                            .zip(elems)
                             .map(|((o, k), v)| (o + range.start, k, v))
                             .collect::<Vec<_>>()
                     } else {
@@ -230,26 +271,9 @@ where
                 // the caller can find out if we skipped purged parts of the
                 // tree by using an appropriate mk_extra fn, or check
                 // `data.len()`.
-                _ => {
-                    let TraverseState { index, .. } = self.stack.pop().expect("not empty");
-                    // Ascend to parent's node. This might be none in case the
-                    // tree's root node is a `PurgedBranch`.
-                    if let Some(last) = self.stack.last_mut() {
-                        last.next_pos(&self.mode);
-                    };
-                    match self.mode {
-                        Mode::Forward => self.offset += index.count(),
-                        Mode::Backward => self.offset -= index.count(),
-                    };
-                    break FilteredChunk {
-                        range,
-                        data: vec![],
-                        extra: (self.mk_extra)(index.as_index_ref()),
-                    };
-                }
+                _ => break self.skip(range),
             };
-        };
-        Ok(Some(res))
+        }))
     }
 }
 
@@ -548,7 +572,8 @@ where
         match self.load_node(secrets, index)? {
             NodeInfo::Branch(index, branch) => {
                 println!(
-                    "Branch(count={}, key_bytes={}, value_bytes={}, sealed={}, link={}, children={})",
+                    "{}Branch(count={}, key_bytes={}, value_bytes={}, sealed={}, link={}, children={})",
+                    prefix,
                     index.count,
                     index.key_bytes,
                     index.value_bytes,

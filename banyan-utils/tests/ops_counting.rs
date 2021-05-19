@@ -69,6 +69,14 @@ fn test_ops_count(
 
 #[test]
 fn ops_count_1() -> anyhow::Result<()> {
+    let config = Config {
+        target_leaf_size: 1 << 14,
+        max_leaf_count: 1 << 14,
+        max_summary_branches: 32,
+        max_key_branches: 4,
+        max_uncompressed_leaf_size: 16 * 1024 * 1024,
+        zstd_level: 10,
+    };
     let n = 1000000;
     let capacity = 0;
     let xs = (0..n)
@@ -78,27 +86,31 @@ fn ops_count_1() -> anyhow::Result<()> {
     let store = OpsCountingStore::new(store);
     let branch_cache = BranchCache::<TT>::new(capacity);
     let txn = Transaction::new(Forest::new(store.clone(), branch_cache), store.clone());
-    let mut builder = StreamBuilder::new(Config::debug_fast(), Secrets::default());
+    let mut builder = StreamBuilder::new(config, Secrets::default());
     txn.extend(&mut builder, xs)?;
     let tree = builder.snapshot();
 
+    let t0 = Instant::now();
     let r0 = store.reads();
     let xs1 = txn.collect(&tree)?;
     let r_collect = store.reads() - r0;
+    println!("collect {} {}", r_collect, t0.elapsed().as_micros());
 
-    let (xs2, _, r_iter) = test_ops_count("", &txn, &tree, AllQuery);
-    let (xs3, _, r_iter_small) = test_ops_count("", &txn, &tree, OffsetRangeQuery::from(0..n / 10));
-    let (xs4, _, r_iter_tiny) = test_ops_count("", &txn, &tree, OffsetRangeQuery::from(0..10));
+    let (xs2, _, r_iter) = test_ops_count("iter   ", &txn, &tree, AllQuery);
+    let (xs3, _, r_iter_small) =
+        test_ops_count("small  ", &txn, &tree, OffsetRangeQuery::from(0..n / 10));
+    let (xs4, _, r_iter_tiny) =
+        test_ops_count("tiny   ", &txn, &tree, OffsetRangeQuery::from(0..10));
 
     assert!(xs1.len() as u64 == n);
     assert!(xs2.len() as u64 == n);
     assert!(xs3.len() as u64 == n / 10);
     assert!(xs4.len() as u64 == 10);
 
-    assert_eq!(r_collect, 65);
-    assert_eq!(r_iter, 65);
+    assert_eq!(r_collect, 79);
+    assert_eq!(r_iter, 79);
     assert_eq!(r_iter_small, 10);
-    assert_eq!(r_iter_tiny, 4);
+    assert_eq!(r_iter_tiny, 3);
 
     Ok(())
 }

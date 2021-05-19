@@ -84,15 +84,9 @@ pub trait CompactSeq: DagCbor {
         (0..self.len()).map(move |i| self.get(i).unwrap()).collect()
     }
     /// utility function to select some items for a compactseq.
-    fn select(&self, bits: &[bool]) -> Vec<(u64, Self::Item)> {
+    fn select(&self, bits: &[bool]) -> Vec<Self::Item> {
         (0..self.len())
-            .filter_map(move |i| {
-                if bits[i] {
-                    Some((i as u64, self.get(i).unwrap()))
-                } else {
-                    None
-                }
-            })
+            .filter_map(move |i| if bits[i] { self.get(i) } else { None })
             .collect()
     }
     /// number of elements as an u64, for convenience
@@ -139,7 +133,7 @@ impl<T: TreeTypes> LeafIndex<T> {
     pub fn keys(&self) -> impl Iterator<Item = T::Key> {
         self.keys.to_vec().into_iter()
     }
-    pub fn select_keys(&self, bits: &[bool]) -> impl Iterator<Item = (u64, T::Key)> {
+    pub fn select_keys(&self, bits: &[bool]) -> impl Iterator<Item = T::Key> {
         self.keys.select(bits).into_iter()
     }
 }
