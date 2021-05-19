@@ -146,7 +146,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
     }
 
     pub(crate) fn traverse0<
-        Q: Query<T> + Clone + Send + 'static,
+        Q: Query<T>,
         V: BanyanValue,
         E: Send + 'static,
         F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
@@ -161,7 +161,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
     }
 
     pub(crate) fn traverse_rev0<
-        Q: Query<T> + Clone + Send + 'static,
+        Q: Query<T>,
         V: BanyanValue,
         E: Send + 'static,
         F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
@@ -383,7 +383,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
         mk_extra: &'static F,
     ) -> impl Iterator<Item = Result<FilteredChunk<(u64, T::Key, V), E>>> + 'static
     where
-        Q: Query<T> + Send + Clone + 'static,
+        Q: Query<T>,
         V: BanyanValue,
         E: Send + 'static,
         F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
@@ -403,7 +403,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
         mk_extra: &'static F,
     ) -> impl Iterator<Item = Result<FilteredChunk<(u64, T::Key, V), E>>> + 'static
     where
-        Q: Query<T> + Send + Clone + 'static,
+        Q: Query<T>,
         V: BanyanValue,
         E: Send + 'static,
         F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
@@ -423,7 +423,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
         mk_extra: &'static F,
     ) -> impl Stream<Item = Result<FilteredChunk<(u64, T::Key, V), E>>> + 'static
     where
-        Q: Query<T> + Send + Clone + 'static,
+        Q: Query<T>,
         V: BanyanValue,
         E: Send + 'static,
         F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
@@ -443,7 +443,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
         mk_extra: &'static F,
     ) -> impl Stream<Item = Result<FilteredChunk<(u64, T::Key, V), E>>> + 'static
     where
-        Q: Query<T> + Send + Clone + 'static,
+        Q: Query<T>,
         V: BanyanValue,
         E: Send + 'static,
         F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,

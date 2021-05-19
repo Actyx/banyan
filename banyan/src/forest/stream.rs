@@ -23,7 +23,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
         trees: S,
     ) -> impl Stream<Item = anyhow::Result<(u64, T::Key, V)>> + Send
     where
-        Q: Query<T> + Clone + 'static,
+        Q: Query<T> + Clone,
         S: Stream<Item = Tree<T, V>> + Send + 'static,
         V: BanyanValue,
     {
@@ -47,7 +47,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
     ) -> impl Stream<Item = anyhow::Result<FilteredChunk<(u64, T::Key, V), E>>> + Send + 'static
     where
         S: Stream<Item = Tree<T, V>> + Send + 'static,
-        Q: Query<T> + Clone + Send + 'static,
+        Q: Query<T> + Clone,
         V: BanyanValue,
         E: Send + 'static,
         F: Send + Sync + 'static + Fn(IndexRef<T>) -> E,
@@ -101,7 +101,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
     ) -> impl Stream<Item = anyhow::Result<FilteredChunk<(u64, T::Key, V), E>>> + Send + 'static
     where
         S: Stream<Item = Tree<T, V>> + Send + 'static,
-        Q: Query<T> + Clone + Send + 'static,
+        Q: Query<T> + Clone,
         V: BanyanValue,
         E: Send + 'static,
         F: Send + Sync + 'static + Fn(IndexRef<T>) -> E,
@@ -148,7 +148,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
     ) -> impl Stream<Item = anyhow::Result<FilteredChunk<(u64, T::Key, V), E>>> + Send + 'static
     where
         S: Stream<Item = Tree<T, V>> + Send + 'static,
-        Q: Query<T> + Clone + Send + 'static,
+        Q: Query<T> + Clone,
         V: BanyanValue,
         E: Send + 'static,
         F: Send + Sync + 'static + Fn(IndexRef<T>) -> E,

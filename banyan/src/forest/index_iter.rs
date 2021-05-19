@@ -60,7 +60,7 @@ impl<T, R, Q> IndexIter<T, R, Q>
 where
     T: TreeTypes,
     R: ReadOnlyStore<T::Link>,
-    Q: Query<T> + Clone + Send + 'static,
+    Q: Query<T>,
 {
     pub(crate) fn new(forest: Forest<T, R>, secrets: Secrets, query: Q, index: Index<T>) -> Self {
         let mode = Mode::Forward;
@@ -100,7 +100,7 @@ impl<T, R, Q> Iterator for IndexIter<T, R, Q>
 where
     T: TreeTypes,
     R: ReadOnlyStore<T::Link>,
-    Q: Query<T> + Clone + Send + 'static,
+    Q: Query<T>,
 {
     type Item = Result<Index<T>>;
 

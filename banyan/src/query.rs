@@ -14,20 +14,20 @@ use std::{fmt::Debug, ops::RangeBounds, sync::Arc};
 /// A query
 ///
 /// Queries work on compact value sequences instead of individual values for efficiency.
-pub trait Query<T: TreeTypes>: Debug + Send + Sync {
+pub trait Query<T: TreeTypes>: Debug + Send + Sync + 'static {
     /// a bitvec with `x.data.count()` elements, where each value is a bool indicating if the query *does* match
     fn containing(&self, offset: u64, _index: &LeafIndex<T>, res: &mut [bool]);
     /// a bitvec with `x.data.count()` elements, where each value is a bool indicating if the query *can* match
     fn intersecting(&self, offset: u64, _index: &BranchIndex<T>, res: &mut [bool]);
 }
 
-pub trait QueryExt<'a, TT> {
+pub trait QueryExt<TT> {
     /// box a query by wrapping it in an Arc. This can be used to make a large or non-cloneable query cheaply cloneable.
-    fn boxed(self) -> Arc<dyn Query<TT> + 'a>;
+    fn boxed(self) -> Arc<dyn Query<TT>>;
 }
 
-impl<'a, TT: TreeTypes, Q: Query<TT> + 'static> QueryExt<'a, TT> for Q {
-    fn boxed(self) -> Arc<dyn Query<TT> + 'a> {
+impl<'a, TT: TreeTypes, Q: Query<TT> + 'static> QueryExt<TT> for Q {
+    fn boxed(self) -> Arc<dyn Query<TT>> {
         Arc::new(self)
     }
 }
@@ -52,7 +52,9 @@ impl<R: RangeBounds<u64>> From<R> for OffsetRangeQuery<R> {
     }
 }
 
-impl<T: TreeTypes, R: RangeBounds<u64> + Debug + Sync + Send> Query<T> for OffsetRangeQuery<R> {
+impl<T: TreeTypes, R: RangeBounds<u64> + Debug + Sync + Send + 'static> Query<T>
+    for OffsetRangeQuery<R>
+{
     fn containing(&self, mut offset: u64, index: &LeafIndex<T>, res: &mut [bool]) {
         let range = offset..offset + index.keys.count();
         // shortcut test

@@ -73,7 +73,7 @@ where
     T: TreeTypes,
     V: BanyanValue,
     R: ReadOnlyStore<T::Link>,
-    Q: Query<T> + Clone + Send + 'static,
+    Q: Query<T>,
     E: Send + 'static,
     F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
 {
@@ -273,7 +273,7 @@ where
     T: TreeTypes,
     V: BanyanValue,
     R: ReadOnlyStore<T::Link>,
-    Q: Query<T> + Clone + Send + 'static,
+    Q: Query<T>,
     E: Send + 'static,
     F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
 {
@@ -492,7 +492,7 @@ where
     /// Convenience method to stream filtered.
     ///
     /// Implemented in terms of stream_filtered_chunked
-    pub(crate) fn stream_filtered0<Q: Query<T> + Clone + 'static, V: BanyanValue>(
+    pub(crate) fn stream_filtered0<Q: Query<T>, V: BanyanValue>(
         &self,
         secrets: Secrets,
         query: Q,
@@ -506,7 +506,7 @@ where
 
     #[allow(clippy::clippy::type_complexity)]
     pub(crate) fn stream_filtered_chunked0<
-        Q: Query<T> + Clone + Send + 'static,
+        Q: Query<T>,
         V: BanyanValue,
         E: Send + 'static,
         F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
@@ -525,7 +525,7 @@ where
     }
 
     /// Convenience method to iterate filtered.
-    pub(crate) fn iter_filtered0<Q: Query<T> + Clone + Send + 'static, V: BanyanValue>(
+    pub(crate) fn iter_filtered0<Q: Query<T>, V: BanyanValue>(
         &self,
         secrets: Secrets,
         query: Q,
@@ -538,7 +538,7 @@ where
             })
             .flatten()
     }
-    pub(crate) fn iter_filtered_reverse0<Q: Query<T> + Clone + Send + 'static, V: BanyanValue>(
+    pub(crate) fn iter_filtered_reverse0<Q: Query<T>, V: BanyanValue>(
         &self,
         secrets: Secrets,
         query: Q,
@@ -554,7 +554,7 @@ where
 
     #[allow(clippy::clippy::type_complexity)]
     pub(crate) fn stream_filtered_chunked_reverse0<
-        Q: Query<T> + Clone + Send + 'static,
+        Q: Query<T>,
         V: BanyanValue,
         E: Send + 'static,
         F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
