@@ -21,7 +21,7 @@ use std::{iter, time::Instant};
 /// basic random access append only tree
 impl<T, R, W> Transaction<T, R, W>
 where
-    T: TreeTypes + 'static,
+    T: TreeTypes,
     R: ReadOnlyStore<T::Link> + Clone,
     W: BlockWriter<T::Link> + 'static,
 {

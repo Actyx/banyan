@@ -58,7 +58,7 @@ impl<T: TreeTypes> TraverseState<T> {
 
 impl<T, R, Q> IndexIter<T, R, Q>
 where
-    T: TreeTypes + 'static,
+    T: TreeTypes,
     R: ReadOnlyStore<T::Link> + Clone,
     Q: Query<T> + Clone + Send + 'static,
 {
@@ -98,7 +98,7 @@ where
 
 impl<T, R, Q> Iterator for IndexIter<T, R, Q>
 where
-    T: TreeTypes + 'static,
+    T: TreeTypes,
     R: ReadOnlyStore<T::Link> + Clone,
     Q: Query<T> + Clone + Send + 'static,
 {

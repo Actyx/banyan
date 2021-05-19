@@ -3,6 +3,7 @@ use anyhow::anyhow;
 use anyhow::Result;
 use core::hash::Hash;
 use fnv::FnvHashMap;
+use libipld::cbor::DagCbor;
 use parking_lot::Mutex;
 use std::{
     num::NonZeroUsize,
@@ -19,6 +20,10 @@ use crate::{
     index::{Branch, CompactSeq, Index},
     TreeTypes,
 };
+
+pub trait BanyanValue: DagCbor + Send + 'static {}
+
+impl<T: DagCbor + Send + Sync + 'static> BanyanValue for T {}
 
 pub trait BlockWriter<L>: Send + Sync {
     /// adds a block to a temporary staging area

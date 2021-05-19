@@ -5,8 +5,8 @@ use crate::{
         Leaf, LeafIndex, LeafLoader, NodeInfo,
     },
     query::Query,
-    store::ReadOnlyStore,
     store::ZstdDagCborSeq,
+    store::{BanyanValue, ReadOnlyStore},
     util::{BoolSliceExt, IterExt},
 };
 use anyhow::{anyhow, Result};
@@ -70,8 +70,8 @@ impl<T: TreeTypes> TraverseState<T> {
 
 impl<T: TreeTypes, V, R, Q, E, F> TreeIter<T, V, R, Q, F>
 where
-    T: TreeTypes + 'static,
-    V: DagCbor + Send + 'static,
+    T: TreeTypes,
+    V: BanyanValue,
     R: ReadOnlyStore<T::Link> + Clone,
     Q: Query<T> + Clone + Send + 'static,
     E: Send + 'static,
@@ -269,8 +269,8 @@ where
 
 impl<T: TreeTypes, V, R, Q, E, F> Iterator for TreeIter<T, V, R, Q, F>
 where
-    T: TreeTypes + 'static,
-    V: DagCbor + Send + 'static,
+    T: TreeTypes,
+    V: BanyanValue,
     R: ReadOnlyStore<T::Link> + Clone,
     Q: Query<T> + Clone + Send + 'static,
     E: Send + 'static,
@@ -293,7 +293,7 @@ where
 /// basic random access append only tree
 impl<T, R> Forest<T, R>
 where
-    T: TreeTypes + 'static,
+    T: TreeTypes,
     R: ReadOnlyStore<T::Link> + Clone,
 {
     pub fn store(&self) -> &R {
@@ -513,10 +513,7 @@ where
     /// Convenience method to stream filtered.
     ///
     /// Implemented in terms of stream_filtered_chunked
-    pub(crate) fn stream_filtered0<
-        Q: Query<T> + Clone + 'static,
-        V: DagCbor + Send + 'static,
-    >(
+    pub(crate) fn stream_filtered0<Q: Query<T> + Clone + 'static, V: BanyanValue>(
         &self,
         secrets: Secrets,
         query: Q,
@@ -530,7 +527,7 @@ where
 
     pub(crate) fn stream_filtered_chunked0<
         Q: Query<T> + Clone + Send + 'static,
-        V: DagCbor + Send + 'static,
+        V: BanyanValue,
         E: Send + 'static,
         F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
     >(
@@ -548,10 +545,7 @@ where
     }
 
     /// Convenience method to iterate filtered.
-    pub(crate) fn iter_filtered0<
-        Q: Query<T> + Clone + Send + 'static,
-        V: DagCbor + Send + 'static,
-    >(
+    pub(crate) fn iter_filtered0<Q: Query<T> + Clone + Send + 'static, V: BanyanValue>(
         &self,
         secrets: Secrets,
         query: Q,
@@ -564,10 +558,7 @@ where
             })
             .flatten()
     }
-    pub(crate) fn iter_filtered_reverse0<
-        Q: Query<T> + Clone + Send + 'static,
-        V: DagCbor + Send + 'static,
-    >(
+    pub(crate) fn iter_filtered_reverse0<Q: Query<T> + Clone + Send + 'static, V: BanyanValue>(
         &self,
         secrets: Secrets,
         query: Q,
@@ -583,7 +574,7 @@ where
 
     pub(crate) fn stream_filtered_chunked_reverse0<
         Q: Query<T> + Clone + Send + 'static,
-        V: DagCbor + Send + 'static,
+        V: BanyanValue,
         E: Send + 'static,
         F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
     >(

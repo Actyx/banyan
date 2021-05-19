@@ -2,13 +2,12 @@
 use super::index::*;
 use crate::{
     forest::{Config, FilteredChunk, Forest, IndexIter, Secrets, Transaction, TreeIter, TreeTypes},
-    store::BlockWriter,
+    store::{BanyanValue, BlockWriter},
 };
 use crate::{query::Query, store::ReadOnlyStore, util::IterExt, StreamBuilder, StreamBuilderState};
 use anyhow::Result;
 use core::fmt;
 use futures::prelude::*;
-use libipld::cbor::DagCbor;
 use std::{collections::BTreeMap, iter, marker::PhantomData, usize};
 use tracing::*;
 
@@ -148,7 +147,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link> + Clone> Forest<T, R> {
 
     pub(crate) fn traverse0<
         Q: Query<T> + Clone + Send + 'static,
-        V: DagCbor + Send + 'static,
+        V: BanyanValue,
         E: Send + 'static,
         F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
     >(
@@ -163,7 +162,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link> + Clone> Forest<T, R> {
 
     pub(crate) fn traverse_rev0<
         Q: Query<T> + Clone + Send + 'static,
-        V: DagCbor + Send + 'static,
+        V: BanyanValue,
         E: Send + 'static,
         F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
     >(
@@ -295,7 +294,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link> + Clone> Forest<T, R> {
         Ok(())
     }
 
-    pub fn stream_filtered<V: DagCbor + Send + 'static>(
+    pub fn stream_filtered<V: BanyanValue>(
         &self,
         tree: &Tree<T, V>,
         query: impl Query<T> + Clone + 'static,
@@ -338,7 +337,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link> + Clone> Forest<T, R> {
         }
     }
 
-    pub fn iter_filtered<V: DagCbor + Send + 'static>(
+    pub fn iter_filtered<V: BanyanValue>(
         &self,
         tree: &Tree<T, V>,
         query: impl Query<T> + Clone + 'static,
@@ -351,7 +350,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link> + Clone> Forest<T, R> {
         }
     }
 
-    pub fn iter_filtered_reverse<V: DagCbor + Send + 'static>(
+    pub fn iter_filtered_reverse<V: BanyanValue>(
         &self,
         tree: &Tree<T, V>,
         query: impl Query<T> + Clone + 'static,
@@ -364,7 +363,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link> + Clone> Forest<T, R> {
         }
     }
 
-    pub fn iter_from<V: DagCbor + Send + 'static>(
+    pub fn iter_from<V: BanyanValue>(
         &self,
         tree: &Tree<T, V>,
     ) -> impl Iterator<Item = Result<(u64, T::Key, V)>> + 'static {
@@ -384,7 +383,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link> + Clone> Forest<T, R> {
     ) -> impl Iterator<Item = Result<FilteredChunk<(u64, T::Key, V), E>>> + 'static
     where
         Q: Query<T> + Send + Clone + 'static,
-        V: DagCbor + Send + 'static,
+        V: BanyanValue,
         E: Send + 'static,
         F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
     {
@@ -404,7 +403,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link> + Clone> Forest<T, R> {
     ) -> impl Iterator<Item = Result<FilteredChunk<(u64, T::Key, V), E>>> + 'static
     where
         Q: Query<T> + Send + Clone + 'static,
-        V: DagCbor + Send + 'static,
+        V: BanyanValue,
         E: Send + 'static,
         F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
     {
@@ -424,7 +423,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link> + Clone> Forest<T, R> {
     ) -> impl Stream<Item = Result<FilteredChunk<(u64, T::Key, V), E>>> + 'static
     where
         Q: Query<T> + Send + Clone + 'static,
-        V: DagCbor + Send + 'static,
+        V: BanyanValue,
         E: Send + 'static,
         F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
     {
@@ -444,7 +443,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link> + Clone> Forest<T, R> {
     ) -> impl Stream<Item = Result<FilteredChunk<(u64, T::Key, V), E>>> + 'static
     where
         Q: Query<T> + Send + Clone + 'static,
-        V: DagCbor + Send + 'static,
+        V: BanyanValue,
         E: Send + 'static,
         F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
     {
@@ -461,7 +460,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link> + Clone> Forest<T, R> {
     /// returns Ok(None) when offset is larger than count, or when hitting a purged
     /// part of the tree. Returns an error when part of the tree should be there, but could
     /// not be read.
-    pub fn get<V: DagCbor + Send + 'static>(
+    pub fn get<V: BanyanValue>(
         &self,
         tree: &Tree<T, V>,
         offset: u64,
@@ -474,16 +473,13 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link> + Clone> Forest<T, R> {
 
     /// Collects all elements from a stream. Might produce an OOM for large streams.
     #[allow(clippy::type_complexity)]
-    pub fn collect<V: DagCbor + Send + 'static>(
-        &self,
-        tree: &Tree<T, V>,
-    ) -> Result<Vec<Option<(T::Key, V)>>> {
+    pub fn collect<V: BanyanValue>(&self, tree: &Tree<T, V>) -> Result<Vec<Option<(T::Key, V)>>> {
         self.collect_from(tree, 0)
     }
 
     /// Collects all elements from the given offset. Might produce an OOM for large streams.
     #[allow(clippy::type_complexity)]
-    pub fn collect_from<V: DagCbor + Send + 'static>(
+    pub fn collect_from<V: BanyanValue>(
         &self,
         tree: &Tree<T, V>,
         offset: u64,
@@ -496,11 +492,8 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link> + Clone> Forest<T, R> {
     }
 }
 
-impl<
-        T: TreeTypes,
-        R: ReadOnlyStore<T::Link> + Clone,
-        W: BlockWriter<T::Link> + 'static,
-    > Transaction<T, R, W>
+impl<T: TreeTypes, R: ReadOnlyStore<T::Link> + Clone, W: BlockWriter<T::Link> + 'static>
+    Transaction<T, R, W>
 {
     pub(crate) fn tree_from_roots<V>(
         &self,
@@ -523,10 +516,7 @@ impl<
     /// Likewise, sealed subtrees or leafs will be reused if possible.
     ///
     /// ![packing illustration](https://ipfs.io/ipfs/QmaEDTjHSdCKyGQ3cFMCf73kE67NvffLA5agquLW5qSEVn/packing.jpg)
-    pub fn pack<V: DagCbor + Send + 'static>(
-        &self,
-        tree: &mut StreamBuilder<T, V>,
-    ) -> Result<()> {
+    pub fn pack<V: BanyanValue>(&self, tree: &mut StreamBuilder<T, V>) -> Result<()> {
         let initial = tree.snapshot();
         let roots = self.roots(tree)?;
         self.tree_from_roots(roots, tree)?;
@@ -540,7 +530,7 @@ impl<
     }
 
     /// append a single element. This is just a shortcut for extend.
-    pub fn push<V: DagCbor + Send + 'static>(
+    pub fn push<V: BanyanValue>(
         &mut self,
         tree: &mut StreamBuilder<T, V>,
         key: T::Key,
@@ -556,7 +546,7 @@ impl<
     where
         I: IntoIterator<Item = (T::Key, V)>,
         I::IntoIter: Send,
-        V: DagCbor + Send + 'static,
+        V: BanyanValue,
     {
         let mut from = from.into_iter().peekable();
         if from.peek().is_none() {
@@ -587,7 +577,7 @@ impl<
     where
         I: IntoIterator<Item = (T::Key, V)>,
         I::IntoIter: Send,
-        V: DagCbor + Send + 'static,
+        V: BanyanValue,
     {
         let index = tree.as_index_ref().cloned();
         let index = self.extend_unpacked0(index.as_ref(), from, tree.state_mut())?;

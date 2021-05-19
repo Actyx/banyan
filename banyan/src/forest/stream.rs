@@ -1,7 +1,7 @@
 //! helper methods to stream trees
 use crate::{
     index::IndexRef,
-    store::ReadOnlyStore,
+    store::{BanyanValue, ReadOnlyStore},
     tree::Tree,
     util::{take_until_condition, ToStreamExt},
 };
@@ -10,13 +10,10 @@ use super::{FilteredChunk, Forest, TreeTypes};
 use crate::query::*;
 use futures::executor::ThreadPool;
 use futures::prelude::*;
-use libipld::cbor::DagCbor;
 use std::sync::atomic::Ordering;
 use std::{ops::RangeInclusive, sync::atomic::AtomicU64, sync::Arc};
 
-impl<T: TreeTypes + 'static, R: ReadOnlyStore<T::Link> + Clone>
-    Forest<T, R>
-{
+impl<T: TreeTypes, R: ReadOnlyStore<T::Link> + Clone> Forest<T, R> {
     /// Given a sequence of roots, will stream matching events in ascending order indefinitely.
     ///
     /// This is implemented by calling stream_trees_chunked and just flattening the chunks.
@@ -28,7 +25,7 @@ impl<T: TreeTypes + 'static, R: ReadOnlyStore<T::Link> + Clone>
     where
         Q: Query<T> + Clone + 'static,
         S: Stream<Item = Tree<T, V>> + Send + 'static,
-        V: DagCbor + Send + 'static,
+        V: BanyanValue,
     {
         self.stream_trees_chunked(query, trees, 0..=u64::max_value(), &|_| ())
             .map_ok(|chunk| stream::iter(chunk.data.into_iter().map(Ok)))
@@ -51,7 +48,7 @@ impl<T: TreeTypes + 'static, R: ReadOnlyStore<T::Link> + Clone>
     where
         S: Stream<Item = Tree<T, V>> + Send + 'static,
         Q: Query<T> + Clone + Send + 'static,
-        V: DagCbor + Send + 'static,
+        V: BanyanValue,
         E: Send + 'static,
         F: Send + Sync + 'static + Fn(IndexRef<T>) -> E,
     {
@@ -105,7 +102,7 @@ impl<T: TreeTypes + 'static, R: ReadOnlyStore<T::Link> + Clone>
     where
         S: Stream<Item = Tree<T, V>> + Send + 'static,
         Q: Query<T> + Clone + Send + 'static,
-        V: DagCbor + Send + 'static,
+        V: BanyanValue,
         E: Send + 'static,
         F: Send + Sync + 'static + Fn(IndexRef<T>) -> E,
     {
@@ -152,7 +149,7 @@ impl<T: TreeTypes + 'static, R: ReadOnlyStore<T::Link> + Clone>
     where
         S: Stream<Item = Tree<T, V>> + Send + 'static,
         Q: Query<T> + Clone + Send + 'static,
-        V: DagCbor + Send + 'static,
+        V: BanyanValue,
         E: Send + 'static,
         F: Send + Sync + 'static + Fn(IndexRef<T>) -> E,
     {
