@@ -103,7 +103,7 @@ impl<T: TreeTypes, V> fmt::Display for Tree<T, V> {
 pub type GraphEdges = Vec<(usize, usize)>;
 pub type GraphNodes<S> = BTreeMap<usize, S>;
 
-impl<T: TreeTypes, R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static> Forest<T, R> {
+impl<T: TreeTypes, R: ReadOnlyStore<T::Link> + Clone> Forest<T, R> {
     pub fn load_stream_builder<V>(
         &self,
         secrets: Secrets,
@@ -498,7 +498,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static> Fo
 
 impl<
         T: TreeTypes,
-        R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static,
+        R: ReadOnlyStore<T::Link> + Clone,
         W: BlockWriter<T::Link> + 'static,
     > Transaction<T, R, W>
 {

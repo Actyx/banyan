@@ -134,7 +134,7 @@ where
 
 /// Takes a hash to a dagcbor encoded blob, and write it as dag-json to `writer`,
 /// each item separated by newlines.
-pub fn dump_json<Link>(
+pub fn dump_json<Link: 'static>(
     store: ArcReadOnlyStore<Link>,
     hash: Link,
     value_key: chacha20::Key,

@@ -59,7 +59,7 @@ impl<T: TreeTypes> TraverseState<T> {
 impl<T, R, Q> IndexIter<T, R, Q>
 where
     T: TreeTypes + 'static,
-    R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static,
+    R: ReadOnlyStore<T::Link> + Clone,
     Q: Query<T> + Clone + Send + 'static,
 {
     pub(crate) fn new(forest: Forest<T, R>, secrets: Secrets, query: Q, index: Index<T>) -> Self {
@@ -99,7 +99,7 @@ where
 impl<T, R, Q> Iterator for IndexIter<T, R, Q>
 where
     T: TreeTypes + 'static,
-    R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static,
+    R: ReadOnlyStore<T::Link> + Clone,
     Q: Query<T> + Clone + Send + 'static,
 {
     type Item = Result<Index<T>>;

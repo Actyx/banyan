@@ -36,13 +36,13 @@ impl<L> BlockWriter<L> for ArcBlockWriter<L> {
     }
 }
 
-pub trait ReadOnlyStore<L> {
+pub trait ReadOnlyStore<L>: Send + Sync + 'static {
     fn get(&self, link: &L) -> Result<Box<[u8]>>;
 }
 
-pub type ArcReadOnlyStore<L> = Arc<dyn ReadOnlyStore<L> + Send + Sync + 'static>;
+pub type ArcReadOnlyStore<L> = Arc<dyn ReadOnlyStore<L>>;
 
-impl<L> ReadOnlyStore<L> for ArcReadOnlyStore<L> {
+impl<L: 'static> ReadOnlyStore<L> for ArcReadOnlyStore<L> {
     fn get(&self, link: &L) -> Result<Box<[u8]>> {
         self.as_ref().get(link)
     }
@@ -140,7 +140,7 @@ impl<L: Eq + Hash + Copy> MemStore<L> {
     }
 }
 
-impl<L: Eq + Hash + Copy> ReadOnlyStore<L> for MemStore<L> {
+impl<L: Eq + Hash + Copy + Send + Sync + 'static> ReadOnlyStore<L> for MemStore<L> {
     fn get(&self, link: &L) -> anyhow::Result<Box<[u8]>> {
         if let Some(value) = self.get0(link) {
             Ok(value)

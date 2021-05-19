@@ -343,7 +343,7 @@ pub struct BranchLoader<T: TreeTypes, R> {
     branch: Option<Branch<T>>,
 }
 
-impl<T: TreeTypes, R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static> BranchLoader<T, R> {
+impl<T: TreeTypes, R: ReadOnlyStore<T::Link> + Clone> BranchLoader<T, R> {
     pub fn new(forest: &Forest<T, R>, secrets: &Secrets, link: T::Link) -> Self {
         Self {
             forest: forest.clone(),
@@ -374,7 +374,7 @@ pub struct LeafLoader<T: TreeTypes, R> {
     leaf: Option<Leaf>,
 }
 
-impl<T: TreeTypes, R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static> LeafLoader<T, R> {
+impl<T: TreeTypes, R: ReadOnlyStore<T::Link> + Clone> LeafLoader<T, R> {
     pub fn new(forest: &Forest<T, R>, secrets: &Secrets, link: T::Link) -> Self {
         Self {
             forest: forest.clone(),

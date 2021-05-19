@@ -22,7 +22,7 @@ use std::{iter, time::Instant};
 impl<T, R, W> Transaction<T, R, W>
 where
     T: TreeTypes + 'static,
-    R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static,
+    R: ReadOnlyStore<T::Link> + Clone,
     W: BlockWriter<T::Link> + 'static,
 {
     pub fn read(&self) -> &Forest<T, R> {

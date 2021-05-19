@@ -72,7 +72,7 @@ impl<T: TreeTypes, V, R, Q, E, F> TreeIter<T, V, R, Q, F>
 where
     T: TreeTypes + 'static,
     V: DagCbor + Send + 'static,
-    R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static,
+    R: ReadOnlyStore<T::Link> + Clone,
     Q: Query<T> + Clone + Send + 'static,
     E: Send + 'static,
     F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
@@ -271,7 +271,7 @@ impl<T: TreeTypes, V, R, Q, E, F> Iterator for TreeIter<T, V, R, Q, F>
 where
     T: TreeTypes + 'static,
     V: DagCbor + Send + 'static,
-    R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static,
+    R: ReadOnlyStore<T::Link> + Clone,
     Q: Query<T> + Clone + Send + 'static,
     E: Send + 'static,
     F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
@@ -294,7 +294,7 @@ where
 impl<T, R> Forest<T, R>
 where
     T: TreeTypes + 'static,
-    R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static,
+    R: ReadOnlyStore<T::Link> + Clone,
 {
     pub fn store(&self) -> &R {
         &self.0.store

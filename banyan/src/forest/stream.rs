@@ -14,7 +14,7 @@ use libipld::cbor::DagCbor;
 use std::sync::atomic::Ordering;
 use std::{ops::RangeInclusive, sync::atomic::AtomicU64, sync::Arc};
 
-impl<T: TreeTypes + 'static, R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static>
+impl<T: TreeTypes + 'static, R: ReadOnlyStore<T::Link> + Clone>
     Forest<T, R>
 {
     /// Given a sequence of roots, will stream matching events in ascending order indefinitely.
