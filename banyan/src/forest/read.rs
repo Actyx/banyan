@@ -142,6 +142,7 @@ where
         }
     }
 
+    #[allow(clippy::type_complexity)]
     fn next_fallible(&mut self) -> Result<Option<FilteredChunk<(u64, T::Key, V), E>>> {
         Ok(Some(loop {
             let head = match self.stack.last_mut() {
@@ -276,6 +277,7 @@ where
     E: Send + 'static,
     F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
 {
+    #[allow(clippy::type_complexity)]
     type Item = Result<FilteredChunk<(u64, T::Key, V), E>>;
 
     fn next(&mut self) -> Option<<Self as Iterator>::Item> {
