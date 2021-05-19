@@ -71,7 +71,7 @@ impl<T: TreeTypes> TraverseState<T> {
 impl<T: TreeTypes, V, R, Q, E, F> TreeIter<T, V, R, Q, F>
 where
     T: TreeTypes + 'static,
-    V: DagCbor + Clone + Send + 'static,
+    V: DagCbor + Send + 'static,
     R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static,
     Q: Query<T> + Clone + Send + 'static,
     E: Send + 'static,
@@ -270,7 +270,7 @@ where
 impl<T: TreeTypes, V, R, Q, E, F> Iterator for TreeIter<T, V, R, Q, F>
 where
     T: TreeTypes + 'static,
-    V: DagCbor + Clone + Send + 'static,
+    V: DagCbor + Send + 'static,
     R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static,
     Q: Query<T> + Clone + Send + 'static,
     E: Send + 'static,
@@ -515,7 +515,7 @@ where
     /// Implemented in terms of stream_filtered_chunked
     pub(crate) fn stream_filtered0<
         Q: Query<T> + Clone + 'static,
-        V: DagCbor + Clone + Send + 'static,
+        V: DagCbor + Send + 'static,
     >(
         &self,
         secrets: Secrets,
@@ -530,7 +530,7 @@ where
 
     pub(crate) fn stream_filtered_chunked0<
         Q: Query<T> + Clone + Send + 'static,
-        V: DagCbor + Clone + Send + 'static,
+        V: DagCbor + Send + 'static,
         E: Send + 'static,
         F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
     >(
@@ -550,7 +550,7 @@ where
     /// Convenience method to iterate filtered.
     pub(crate) fn iter_filtered0<
         Q: Query<T> + Clone + Send + 'static,
-        V: DagCbor + Clone + Send + 'static,
+        V: DagCbor + Send + 'static,
     >(
         &self,
         secrets: Secrets,
@@ -566,7 +566,7 @@ where
     }
     pub(crate) fn iter_filtered_reverse0<
         Q: Query<T> + Clone + Send + 'static,
-        V: DagCbor + Clone + Send + 'static,
+        V: DagCbor + Send + 'static,
     >(
         &self,
         secrets: Secrets,
@@ -583,7 +583,7 @@ where
 
     pub(crate) fn stream_filtered_chunked_reverse0<
         Q: Query<T> + Clone + Send + 'static,
-        V: DagCbor + Clone + Send + 'static,
+        V: DagCbor + Send + 'static,
         E: Send + 'static,
         F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
     >(

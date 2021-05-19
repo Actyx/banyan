@@ -28,7 +28,7 @@ impl<T: TreeTypes + 'static, R: ReadOnlyStore<T::Link> + Clone + Send + Sync + '
     where
         Q: Query<T> + Clone + 'static,
         S: Stream<Item = Tree<T, V>> + Send + 'static,
-        V: DagCbor + Clone + Send + 'static,
+        V: DagCbor + Send + 'static,
     {
         self.stream_trees_chunked(query, trees, 0..=u64::max_value(), &|_| ())
             .map_ok(|chunk| stream::iter(chunk.data.into_iter().map(Ok)))
@@ -51,7 +51,7 @@ impl<T: TreeTypes + 'static, R: ReadOnlyStore<T::Link> + Clone + Send + Sync + '
     where
         S: Stream<Item = Tree<T, V>> + Send + 'static,
         Q: Query<T> + Clone + Send + 'static,
-        V: DagCbor + Clone + Send + 'static,
+        V: DagCbor + Send + 'static,
         E: Send + 'static,
         F: Send + Sync + 'static + Fn(IndexRef<T>) -> E,
     {
@@ -105,7 +105,7 @@ impl<T: TreeTypes + 'static, R: ReadOnlyStore<T::Link> + Clone + Send + Sync + '
     where
         S: Stream<Item = Tree<T, V>> + Send + 'static,
         Q: Query<T> + Clone + Send + 'static,
-        V: DagCbor + Clone + Send + 'static,
+        V: DagCbor + Send + 'static,
         E: Send + 'static,
         F: Send + Sync + 'static + Fn(IndexRef<T>) -> E,
     {
@@ -152,7 +152,7 @@ impl<T: TreeTypes + 'static, R: ReadOnlyStore<T::Link> + Clone + Send + Sync + '
     where
         S: Stream<Item = Tree<T, V>> + Send + 'static,
         Q: Query<T> + Clone + Send + 'static,
-        V: DagCbor + Clone + Send + 'static,
+        V: DagCbor + Send + 'static,
         E: Send + 'static,
         F: Send + Sync + 'static + Fn(IndexRef<T>) -> E,
     {

@@ -148,7 +148,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static> Fo
 
     pub(crate) fn traverse0<
         Q: Query<T> + Clone + Send + 'static,
-        V: DagCbor + Clone + Send + 'static,
+        V: DagCbor + Send + 'static,
         E: Send + 'static,
         F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
     >(
@@ -163,7 +163,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static> Fo
 
     pub(crate) fn traverse_rev0<
         Q: Query<T> + Clone + Send + 'static,
-        V: DagCbor + Clone + Send + 'static,
+        V: DagCbor + Send + 'static,
         E: Send + 'static,
         F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
     >(
@@ -295,7 +295,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static> Fo
         Ok(())
     }
 
-    pub fn stream_filtered<V: DagCbor + Clone + Send + 'static>(
+    pub fn stream_filtered<V: DagCbor + Send + 'static>(
         &self,
         tree: &Tree<T, V>,
         query: impl Query<T> + Clone + 'static,
@@ -338,7 +338,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static> Fo
         }
     }
 
-    pub fn iter_filtered<V: DagCbor + Clone + Send + 'static>(
+    pub fn iter_filtered<V: DagCbor + Send + 'static>(
         &self,
         tree: &Tree<T, V>,
         query: impl Query<T> + Clone + 'static,
@@ -351,7 +351,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static> Fo
         }
     }
 
-    pub fn iter_filtered_reverse<V: DagCbor + Clone + Send + 'static>(
+    pub fn iter_filtered_reverse<V: DagCbor + Send + 'static>(
         &self,
         tree: &Tree<T, V>,
         query: impl Query<T> + Clone + 'static,
@@ -364,7 +364,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static> Fo
         }
     }
 
-    pub fn iter_from<V: DagCbor + Clone + Send + 'static>(
+    pub fn iter_from<V: DagCbor + Send + 'static>(
         &self,
         tree: &Tree<T, V>,
     ) -> impl Iterator<Item = Result<(u64, T::Key, V)>> + 'static {
@@ -384,7 +384,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static> Fo
     ) -> impl Iterator<Item = Result<FilteredChunk<(u64, T::Key, V), E>>> + 'static
     where
         Q: Query<T> + Send + Clone + 'static,
-        V: DagCbor + Clone + Send + 'static,
+        V: DagCbor + Send + 'static,
         E: Send + 'static,
         F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
     {
@@ -404,7 +404,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static> Fo
     ) -> impl Iterator<Item = Result<FilteredChunk<(u64, T::Key, V), E>>> + 'static
     where
         Q: Query<T> + Send + Clone + 'static,
-        V: DagCbor + Clone + Send + 'static,
+        V: DagCbor + Send + 'static,
         E: Send + 'static,
         F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
     {
@@ -424,7 +424,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static> Fo
     ) -> impl Stream<Item = Result<FilteredChunk<(u64, T::Key, V), E>>> + 'static
     where
         Q: Query<T> + Send + Clone + 'static,
-        V: DagCbor + Clone + Send + 'static,
+        V: DagCbor + Send + 'static,
         E: Send + 'static,
         F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
     {
@@ -444,7 +444,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static> Fo
     ) -> impl Stream<Item = Result<FilteredChunk<(u64, T::Key, V), E>>> + 'static
     where
         Q: Query<T> + Send + Clone + 'static,
-        V: DagCbor + Clone + Send + 'static,
+        V: DagCbor + Send + 'static,
         E: Send + 'static,
         F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
     {
@@ -461,7 +461,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static> Fo
     /// returns Ok(None) when offset is larger than count, or when hitting a purged
     /// part of the tree. Returns an error when part of the tree should be there, but could
     /// not be read.
-    pub fn get<V: DagCbor + Clone + Send + 'static>(
+    pub fn get<V: DagCbor + Send + 'static>(
         &self,
         tree: &Tree<T, V>,
         offset: u64,
@@ -474,7 +474,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static> Fo
 
     /// Collects all elements from a stream. Might produce an OOM for large streams.
     #[allow(clippy::type_complexity)]
-    pub fn collect<V: DagCbor + Clone + Send + 'static>(
+    pub fn collect<V: DagCbor + Send + 'static>(
         &self,
         tree: &Tree<T, V>,
     ) -> Result<Vec<Option<(T::Key, V)>>> {
@@ -483,7 +483,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static> Fo
 
     /// Collects all elements from the given offset. Might produce an OOM for large streams.
     #[allow(clippy::type_complexity)]
-    pub fn collect_from<V: DagCbor + Clone + Send + 'static>(
+    pub fn collect_from<V: DagCbor + Send + 'static>(
         &self,
         tree: &Tree<T, V>,
         offset: u64,
@@ -523,7 +523,7 @@ impl<
     /// Likewise, sealed subtrees or leafs will be reused if possible.
     ///
     /// ![packing illustration](https://ipfs.io/ipfs/QmaEDTjHSdCKyGQ3cFMCf73kE67NvffLA5agquLW5qSEVn/packing.jpg)
-    pub fn pack<V: DagCbor + Clone + Send + 'static>(
+    pub fn pack<V: DagCbor + Send + 'static>(
         &self,
         tree: &mut StreamBuilder<T, V>,
     ) -> Result<()> {
@@ -540,7 +540,7 @@ impl<
     }
 
     /// append a single element. This is just a shortcut for extend.
-    pub fn push<V: DagCbor + Clone + Send + 'static>(
+    pub fn push<V: DagCbor + Send + 'static>(
         &mut self,
         tree: &mut StreamBuilder<T, V>,
         key: T::Key,
@@ -556,7 +556,7 @@ impl<
     where
         I: IntoIterator<Item = (T::Key, V)>,
         I::IntoIter: Send,
-        V: DagCbor + Clone + Send + 'static,
+        V: DagCbor + Send + 'static,
     {
         let mut from = from.into_iter().peekable();
         if from.peek().is_none() {
@@ -587,7 +587,7 @@ impl<
     where
         I: IntoIterator<Item = (T::Key, V)>,
         I::IntoIter: Send,
-        V: DagCbor + Clone + Send + 'static,
+        V: DagCbor + Send + 'static,
     {
         let index = tree.as_index_ref().cloned();
         let index = self.extend_unpacked0(index.as_ref(), from, tree.state_mut())?;
