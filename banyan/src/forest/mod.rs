@@ -226,11 +226,11 @@ impl Config {
         if level == 1 {
             // if we are at level 1, our children are level 0 children,
             // so we use max_key_branches
-            items.len() >= self.max_key_branches as usize
+            items.len() >= self.max_key_branches
         } else {
             // if we are at level > 1, our children are level >0 children,
             // so we use max_summary_branches
-            items.len() >= self.max_summary_branches as usize
+            items.len() >= self.max_summary_branches
         }
     }
 
