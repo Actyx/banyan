@@ -10,25 +10,25 @@ use crate::{
     util::{BoolSliceExt, IterExt},
 };
 use anyhow::{anyhow, Result};
-use core::fmt::Debug;
 use futures::{prelude::*, stream::BoxStream};
 use libipld::cbor::DagCbor;
 use smallvec::{smallvec, SmallVec};
 
-use std::{iter, ops::Range, time::Instant};
+use std::{iter, marker::PhantomData, ops::Range, time::Instant};
 #[derive(PartialEq)]
 enum Mode {
     Forward,
     Backward,
 }
 pub(crate) struct TreeIter<T: TreeTypes, V, R, Q, F> {
-    forest: Forest<T, V, R>,
+    forest: Forest<T, R>,
     secrets: Secrets,
     offset: u64,
     query: Q,
     mk_extra: F,
     stack: SmallVec<[TraverseState<T>; 5]>,
     mode: Mode,
+    _v: PhantomData<V>,
 }
 
 struct TraverseState<T: TreeTypes> {
@@ -71,14 +71,14 @@ impl<T: TreeTypes> TraverseState<T> {
 impl<T: TreeTypes, V, R, Q, E, F> TreeIter<T, V, R, Q, F>
 where
     T: TreeTypes + 'static,
-    V: DagCbor + Clone + Send + Sync + Debug + 'static,
+    V: DagCbor + Clone + Send + 'static,
     R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static,
     Q: Query<T> + Clone + Send + 'static,
     E: Send + 'static,
     F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
 {
     pub(crate) fn new(
-        forest: Forest<T, V, R>,
+        forest: Forest<T, R>,
         secrets: Secrets,
         query: Q,
         index: Index<T>,
@@ -95,10 +95,11 @@ where
             mk_extra,
             stack,
             mode,
+            _v: PhantomData,
         }
     }
     pub(crate) fn new_rev(
-        forest: Forest<T, V, R>,
+        forest: Forest<T, R>,
         secrets: Secrets,
         query: Q,
         index: Index<T>,
@@ -116,6 +117,7 @@ where
             mk_extra,
             stack,
             mode,
+            _v: PhantomData,
         }
     }
 
@@ -268,7 +270,7 @@ where
 impl<T: TreeTypes, V, R, Q, E, F> Iterator for TreeIter<T, V, R, Q, F>
 where
     T: TreeTypes + 'static,
-    V: DagCbor + Clone + Send + Sync + Debug + 'static,
+    V: DagCbor + Clone + Send + 'static,
     R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static,
     Q: Query<T> + Clone + Send + 'static,
     E: Send + 'static,
@@ -289,10 +291,9 @@ where
 }
 
 /// basic random access append only tree
-impl<T, V, R> Forest<T, V, R>
+impl<T, R> Forest<T, R>
 where
     T: TreeTypes + 'static,
-    V: DagCbor + Clone + Send + Sync + Debug + 'static,
     R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static,
 {
     pub fn store(&self) -> &R {
@@ -405,7 +406,7 @@ where
         result
     }
 
-    pub(crate) fn load_node(&self, secrets: &Secrets, index: &Index<T>) -> NodeInfo<T, V, R> {
+    pub(crate) fn load_node(&self, secrets: &Secrets, index: &Index<T>) -> NodeInfo<T, R> {
         match index {
             Index::Branch(index) => match index.link {
                 Some(link) => {
@@ -438,7 +439,7 @@ where
         result
     }
 
-    pub(crate) fn get0(
+    pub(crate) fn get0<V: DagCbor>(
         &self,
         stream: &Secrets,
         index: &Index<T>,
@@ -469,7 +470,7 @@ where
         }
     }
 
-    pub(crate) fn collect0(
+    pub(crate) fn collect0<V: DagCbor>(
         &self,
         stream: &Secrets,
         index: &Index<T>,
@@ -512,7 +513,10 @@ where
     /// Convenience method to stream filtered.
     ///
     /// Implemented in terms of stream_filtered_chunked
-    pub(crate) fn stream_filtered0<Q: Query<T> + Clone + 'static>(
+    pub(crate) fn stream_filtered0<
+        Q: Query<T> + Clone + 'static,
+        V: DagCbor + Clone + Send + 'static,
+    >(
         &self,
         secrets: Secrets,
         query: Q,
@@ -526,6 +530,7 @@ where
 
     pub(crate) fn stream_filtered_chunked0<
         Q: Query<T> + Clone + Send + 'static,
+        V: DagCbor + Clone + Send + 'static,
         E: Send + 'static,
         F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
     >(
@@ -543,7 +548,10 @@ where
     }
 
     /// Convenience method to iterate filtered.
-    pub(crate) fn iter_filtered0<Q: Query<T> + Clone + Send + 'static>(
+    pub(crate) fn iter_filtered0<
+        Q: Query<T> + Clone + Send + 'static,
+        V: DagCbor + Clone + Send + 'static,
+    >(
         &self,
         secrets: Secrets,
         query: Q,
@@ -556,7 +564,10 @@ where
             })
             .flatten()
     }
-    pub(crate) fn iter_filtered_reverse0<Q: Query<T> + Clone + Send + 'static>(
+    pub(crate) fn iter_filtered_reverse0<
+        Q: Query<T> + Clone + Send + 'static,
+        V: DagCbor + Clone + Send + 'static,
+    >(
         &self,
         secrets: Secrets,
         query: Q,
@@ -572,6 +583,7 @@ where
 
     pub(crate) fn stream_filtered_chunked_reverse0<
         Q: Query<T> + Clone + Send + 'static,
+        V: DagCbor + Clone + Send + 'static,
         E: Send + 'static,
         F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
     >(

@@ -56,8 +56,8 @@ impl<L, S: BlockWriter<L> + Send + Sync> BlockWriter<L> for OpsCountingStore<S> 
 #[allow(clippy::clippy::type_complexity)]
 fn test_ops_count(
     name: &str,
-    forest: &Forest<TT, u64, OpsCountingStore<MemStore<Sha256Digest>>>,
-    tree: &Tree<TT>,
+    forest: &Forest<TT, OpsCountingStore<MemStore<Sha256Digest>>>,
+    tree: &Tree<TT, u64>,
     query: impl Query<TT> + Clone + 'static,
 ) -> (Vec<anyhow::Result<(u64, Key, u64)>>, Duration, u64) {
     let r0 = forest.store().reads();

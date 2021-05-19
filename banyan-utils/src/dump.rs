@@ -101,8 +101,8 @@ impl<'a> dot::GraphWalk<'a, Node<'a>, Edge<'a>> for ForestWithTree {
 }
 
 pub fn graph<TT, V, R>(
-    forest: &Forest<TT, V, R>,
-    tree: &Tree<TT>,
+    forest: &Forest<TT, R>,
+    tree: &Tree<TT, V>,
     mut out: impl std::io::Write,
 ) -> anyhow::Result<()>
 where

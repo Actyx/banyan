@@ -9,15 +9,15 @@ use anyhow::Result;
 use core::fmt;
 use futures::prelude::*;
 use libipld::cbor::DagCbor;
-use std::{collections::BTreeMap, fmt::Debug, iter, usize};
+use std::{collections::BTreeMap, iter, marker::PhantomData, usize};
 use tracing::*;
 
 #[derive(Clone)]
-pub struct Tree<T: TreeTypes>(Option<(Index<T>, Secrets, u64)>);
+pub struct Tree<T: TreeTypes, V>(Option<(Index<T>, Secrets, u64)>, PhantomData<V>);
 
-impl<T: TreeTypes> Tree<T> {
+impl<T: TreeTypes, V> Tree<T, V> {
     pub(crate) fn new(root: Index<T>, secrets: Secrets, offset: u64) -> Self {
-        Self(Some((root, secrets, offset)))
+        Self(Some((root, secrets, offset)), PhantomData)
     }
 
     pub(crate) fn into_inner(self) -> Option<(Index<T>, Secrets, u64)> {
@@ -67,13 +67,13 @@ impl<T: TreeTypes> Tree<T> {
     }
 }
 
-impl<T: TreeTypes> Default for Tree<T> {
+impl<T: TreeTypes, V> Default for Tree<T, V> {
     fn default() -> Self {
-        Self(None)
+        Self(None, PhantomData)
     }
 }
 
-impl<T: TreeTypes> fmt::Debug for Tree<T> {
+impl<T: TreeTypes, V> fmt::Debug for Tree<T, V> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.0 {
             Some((root, ..)) => f
@@ -91,7 +91,7 @@ impl<T: TreeTypes> fmt::Debug for Tree<T> {
     }
 }
 
-impl<T: TreeTypes> fmt::Display for Tree<T> {
+impl<T: TreeTypes, V> fmt::Display for Tree<T, V> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.0 {
             Some((root, ..)) => write!(f, "{:?}", root.link(),),
@@ -103,18 +103,13 @@ impl<T: TreeTypes> fmt::Display for Tree<T> {
 pub type GraphEdges = Vec<(usize, usize)>;
 pub type GraphNodes<S> = BTreeMap<usize, S>;
 
-impl<
-        T: TreeTypes,
-        V: DagCbor + Clone + Send + Sync + Debug + 'static,
-        R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static,
-    > Forest<T, V, R>
-{
-    pub fn load_stream_builder(
+impl<T: TreeTypes, R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static> Forest<T, R> {
+    pub fn load_stream_builder<V>(
         &self,
         secrets: Secrets,
         config: Config,
         link: T::Link,
-    ) -> Result<StreamBuilder<T>> {
+    ) -> Result<StreamBuilder<T, V>> {
         let (index, byte_range) = self.create_index_from_link(
             &secrets,
             |items, level| config.branch_sealed(items, level),
@@ -124,7 +119,7 @@ impl<
         Ok(StreamBuilder::new_from_index(Some(index), state))
     }
 
-    pub fn load_tree(&self, secrets: Secrets, link: T::Link) -> Result<Tree<T>> {
+    pub fn load_tree<V>(&self, secrets: Secrets, link: T::Link) -> Result<Tree<T, V>> {
         // we pass in a predicate that makes the nodes sealed, since we don't care
         let (index, byte_range) = self.create_index_from_link(&secrets, |_, _| true, link)?;
         // store the offset with the snapshot. Snapshots are immutable, so this won't change.
@@ -132,7 +127,7 @@ impl<
     }
 
     /// dumps the tree structure
-    pub fn dump(&self, tree: &Tree<T>) -> Result<()> {
+    pub fn dump<V>(&self, tree: &Tree<T, V>) -> Result<()> {
         match &tree.0 {
             Some((index, secrets, _)) => self.dump0(secrets, index, ""),
             None => Ok(()),
@@ -140,10 +135,10 @@ impl<
     }
 
     /// dumps the tree structure
-    pub fn dump_graph<S>(
+    pub fn dump_graph<S, V>(
         &self,
-        tree: &Tree<T>,
-        f: impl Fn((usize, &NodeInfo<T, V, R>)) -> S + Clone,
+        tree: &Tree<T, V>,
+        f: impl Fn((usize, &NodeInfo<T, R>)) -> S + Clone,
     ) -> Result<(GraphEdges, GraphNodes<S>)> {
         match &tree.0 {
             Some((index, secrets, _)) => self.dump_graph0(secrets, None, 0, index, f),
@@ -153,6 +148,7 @@ impl<
 
     pub(crate) fn traverse0<
         Q: Query<T> + Clone + Send + 'static,
+        V: DagCbor + Clone + Send + 'static,
         E: Send + 'static,
         F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
     >(
@@ -167,6 +163,7 @@ impl<
 
     pub(crate) fn traverse_rev0<
         Q: Query<T> + Clone + Send + 'static,
+        V: DagCbor + Clone + Send + 'static,
         E: Send + 'static,
         F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
     >(
@@ -203,7 +200,7 @@ impl<
         parent_id: Option<usize>,
         next_id: usize,
         index: &Index<T>,
-        f: impl Fn((usize, &NodeInfo<T, V, R>)) -> S + Clone,
+        f: impl Fn((usize, &NodeInfo<T, R>)) -> S + Clone,
     ) -> Result<(GraphEdges, GraphNodes<S>)> {
         let mut edges = vec![];
         let mut nodes: BTreeMap<usize, S> = Default::default();
@@ -229,7 +226,7 @@ impl<
     }
 
     /// sealed roots of the tree
-    pub fn roots(&self, tree: &StreamBuilder<T>) -> Result<Vec<Index<T>>> {
+    pub fn roots<V>(&self, tree: &StreamBuilder<T, V>) -> Result<Vec<Index<T>>> {
         match tree.index() {
             Some(index) => self.roots_impl(tree.state().secrets(), index),
             None => Ok(Vec::new()),
@@ -237,7 +234,7 @@ impl<
     }
 
     /// leftmost branches of the tree as separate trees
-    pub fn left_roots(&self, tree: &Tree<T>) -> Result<Vec<Tree<T>>> {
+    pub fn left_roots<V>(&self, tree: &Tree<T, V>) -> Result<Vec<Tree<T, V>>> {
         Ok(if let Some((index, secrets, _)) = &tree.0 {
             self.left_roots0(secrets, index)?
                 .into_iter()
@@ -263,7 +260,7 @@ impl<
         Ok(result)
     }
 
-    pub fn check_invariants(&self, tree: &StreamBuilder<T>) -> Result<Vec<String>> {
+    pub fn check_invariants<V>(&self, tree: &StreamBuilder<T, V>) -> Result<Vec<String>> {
         let mut msgs = Vec::new();
         if let Some(root) = tree.index() {
             let mut level = i32::max_value();
@@ -278,7 +275,7 @@ impl<
         Ok(msgs)
     }
 
-    pub fn is_packed(&self, tree: &Tree<T>) -> Result<bool> {
+    pub fn is_packed<V>(&self, tree: &Tree<T, V>) -> Result<bool> {
         if let Some((root, secrets, _)) = &tree.0 {
             self.is_packed0(secrets, &root)
         } else {
@@ -286,7 +283,7 @@ impl<
         }
     }
 
-    pub fn assert_invariants(&self, tree: &StreamBuilder<T>) -> Result<()> {
+    pub fn assert_invariants<V>(&self, tree: &StreamBuilder<T, V>) -> Result<()> {
         let msgs = self.check_invariants(tree)?;
         if !msgs.is_empty() {
             let invariants = msgs.join(",");
@@ -298,9 +295,9 @@ impl<
         Ok(())
     }
 
-    pub fn stream_filtered(
+    pub fn stream_filtered<V: DagCbor + Clone + Send + 'static>(
         &self,
-        tree: &Tree<T>,
+        tree: &Tree<T, V>,
         query: impl Query<T> + Clone + 'static,
     ) -> impl Stream<Item = Result<(u64, T::Key, V)>> + 'static {
         match &tree.0 {
@@ -313,9 +310,9 @@ impl<
 
     /// Returns an iterator yielding all indexes that have values matching the
     /// provided query.
-    pub fn iter_index(
+    pub fn iter_index<V>(
         &self,
-        tree: &Tree<T>,
+        tree: &Tree<T, V>,
         query: impl Query<T> + Clone + 'static,
     ) -> impl Iterator<Item = Result<Index<T>>> + 'static {
         match &tree.0 {
@@ -328,9 +325,9 @@ impl<
 
     /// Returns an iterator yielding all indexes that have values matching the
     /// provided query in reverse order.
-    pub fn iter_index_reverse(
+    pub fn iter_index_reverse<V>(
         &self,
-        tree: &Tree<T>,
+        tree: &Tree<T, V>,
         query: impl Query<T> + Clone + 'static,
     ) -> impl Iterator<Item = Result<Index<T>>> + 'static {
         match &tree.0 {
@@ -341,9 +338,9 @@ impl<
         }
     }
 
-    pub fn iter_filtered(
+    pub fn iter_filtered<V: DagCbor + Clone + Send + 'static>(
         &self,
-        tree: &Tree<T>,
+        tree: &Tree<T, V>,
         query: impl Query<T> + Clone + 'static,
     ) -> impl Iterator<Item = Result<(u64, T::Key, V)>> + 'static {
         match &tree.0 {
@@ -354,9 +351,9 @@ impl<
         }
     }
 
-    pub fn iter_filtered_reverse(
+    pub fn iter_filtered_reverse<V: DagCbor + Clone + Send + 'static>(
         &self,
-        tree: &Tree<T>,
+        tree: &Tree<T, V>,
         query: impl Query<T> + Clone + 'static,
     ) -> impl Iterator<Item = Result<(u64, T::Key, V)>> + 'static {
         match &tree.0 {
@@ -367,9 +364,9 @@ impl<
         }
     }
 
-    pub fn iter_from(
+    pub fn iter_from<V: DagCbor + Clone + Send + 'static>(
         &self,
-        tree: &Tree<T>,
+        tree: &Tree<T, V>,
     ) -> impl Iterator<Item = Result<(u64, T::Key, V)>> + 'static {
         match &tree.0 {
             Some((index, secrets, _)) => self
@@ -379,14 +376,15 @@ impl<
         }
     }
 
-    pub fn iter_filtered_chunked<Q, E, F>(
+    pub fn iter_filtered_chunked<Q, V, E, F>(
         &self,
-        tree: &Tree<T>,
+        tree: &Tree<T, V>,
         query: Q,
         mk_extra: &'static F,
     ) -> impl Iterator<Item = Result<FilteredChunk<(u64, T::Key, V), E>>> + 'static
     where
         Q: Query<T> + Send + Clone + 'static,
+        V: DagCbor + Clone + Send + 'static,
         E: Send + 'static,
         F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
     {
@@ -398,14 +396,15 @@ impl<
         }
     }
 
-    pub fn iter_filtered_chunked_reverse<Q, E, F>(
+    pub fn iter_filtered_chunked_reverse<Q, V, E, F>(
         &self,
-        tree: &Tree<T>,
+        tree: &Tree<T, V>,
         query: Q,
         mk_extra: &'static F,
     ) -> impl Iterator<Item = Result<FilteredChunk<(u64, T::Key, V), E>>> + 'static
     where
         Q: Query<T> + Send + Clone + 'static,
+        V: DagCbor + Clone + Send + 'static,
         E: Send + 'static,
         F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
     {
@@ -417,14 +416,15 @@ impl<
         }
     }
 
-    pub fn stream_filtered_chunked<Q, E, F>(
+    pub fn stream_filtered_chunked<Q, V, E, F>(
         &self,
-        tree: &Tree<T>,
+        tree: &Tree<T, V>,
         query: Q,
         mk_extra: &'static F,
     ) -> impl Stream<Item = Result<FilteredChunk<(u64, T::Key, V), E>>> + 'static
     where
         Q: Query<T> + Send + Clone + 'static,
+        V: DagCbor + Clone + Send + 'static,
         E: Send + 'static,
         F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
     {
@@ -436,14 +436,15 @@ impl<
         }
     }
 
-    pub fn stream_filtered_chunked_reverse<Q, E, F>(
+    pub fn stream_filtered_chunked_reverse<Q, V, E, F>(
         &self,
-        tree: &Tree<T>,
+        tree: &Tree<T, V>,
         query: Q,
         mk_extra: &'static F,
     ) -> impl Stream<Item = Result<FilteredChunk<(u64, T::Key, V), E>>> + 'static
     where
         Q: Query<T> + Send + Clone + 'static,
+        V: DagCbor + Clone + Send + 'static,
         E: Send + 'static,
         F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
     {
@@ -460,7 +461,11 @@ impl<
     /// returns Ok(None) when offset is larger than count, or when hitting a purged
     /// part of the tree. Returns an error when part of the tree should be there, but could
     /// not be read.
-    pub fn get(&self, tree: &Tree<T>, offset: u64) -> Result<Option<(T::Key, V)>> {
+    pub fn get<V: DagCbor + Clone + Send + 'static>(
+        &self,
+        tree: &Tree<T, V>,
+        offset: u64,
+    ) -> Result<Option<(T::Key, V)>> {
         Ok(match &tree.0 {
             Some((index, secrets, _)) => self.get0(secrets, index, offset)?,
             None => None,
@@ -469,13 +474,20 @@ impl<
 
     /// Collects all elements from a stream. Might produce an OOM for large streams.
     #[allow(clippy::type_complexity)]
-    pub fn collect(&self, tree: &Tree<T>) -> Result<Vec<Option<(T::Key, V)>>> {
+    pub fn collect<V: DagCbor + Clone + Send + 'static>(
+        &self,
+        tree: &Tree<T, V>,
+    ) -> Result<Vec<Option<(T::Key, V)>>> {
         self.collect_from(tree, 0)
     }
 
     /// Collects all elements from the given offset. Might produce an OOM for large streams.
     #[allow(clippy::type_complexity)]
-    pub fn collect_from(&self, tree: &Tree<T>, offset: u64) -> Result<Vec<Option<(T::Key, V)>>> {
+    pub fn collect_from<V: DagCbor + Clone + Send + 'static>(
+        &self,
+        tree: &Tree<T, V>,
+        offset: u64,
+    ) -> Result<Vec<Option<(T::Key, V)>>> {
         let mut res = Vec::new();
         if let Some((index, secrets, _)) = &tree.0 {
             self.collect0(secrets, index, offset, &mut res)?;
@@ -486,15 +498,14 @@ impl<
 
 impl<
         T: TreeTypes,
-        V: DagCbor + Clone + Send + Sync + Debug + 'static,
         R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static,
         W: BlockWriter<T::Link> + 'static,
-    > Transaction<T, V, R, W>
+    > Transaction<T, R, W>
 {
-    pub(crate) fn tree_from_roots(
+    pub(crate) fn tree_from_roots<V>(
         &self,
         mut roots: Vec<Index<T>>,
-        stream: &mut StreamBuilder<T>,
+        stream: &mut StreamBuilder<T, V>,
     ) -> Result<()> {
         assert!(roots.iter().all(|x| x.sealed()));
         assert!(is_sorted(roots.iter().map(|x| x.level()).rev()));
@@ -512,7 +523,10 @@ impl<
     /// Likewise, sealed subtrees or leafs will be reused if possible.
     ///
     /// ![packing illustration](https://ipfs.io/ipfs/QmaEDTjHSdCKyGQ3cFMCf73kE67NvffLA5agquLW5qSEVn/packing.jpg)
-    pub fn pack(&self, tree: &mut StreamBuilder<T>) -> Result<()> {
+    pub fn pack<V: DagCbor + Clone + Send + 'static>(
+        &self,
+        tree: &mut StreamBuilder<T, V>,
+    ) -> Result<()> {
         let initial = tree.snapshot();
         let roots = self.roots(tree)?;
         self.tree_from_roots(roots, tree)?;
@@ -526,17 +540,23 @@ impl<
     }
 
     /// append a single element. This is just a shortcut for extend.
-    pub fn push(&mut self, tree: &mut StreamBuilder<T>, key: T::Key, value: V) -> Result<()> {
+    pub fn push<V: DagCbor + Clone + Send + 'static>(
+        &mut self,
+        tree: &mut StreamBuilder<T, V>,
+        key: T::Key,
+        value: V,
+    ) -> Result<()> {
         self.extend(tree, Some((key, value)))
     }
 
     /// extend the node with the given iterator of key/value pairs
     ///
     /// ![extend illustration](https://ipfs.io/ipfs/QmaEDTjHSdCKyGQ3cFMCf73kE67NvffLA5agquLW5qSEVn/extend.jpg)
-    pub fn extend<I>(&self, tree: &mut StreamBuilder<T>, from: I) -> Result<()>
+    pub fn extend<I, V>(&self, tree: &mut StreamBuilder<T, V>, from: I) -> Result<()>
     where
         I: IntoIterator<Item = (T::Key, V)>,
         I::IntoIter: Send,
+        V: DagCbor + Clone + Send + 'static,
     {
         let mut from = from.into_iter().peekable();
         if from.peek().is_none() {
@@ -563,10 +583,11 @@ impl<
     /// To pack a tree, use the pack method.
     ///
     /// ![extend_unpacked illustration](https://ipfs.io/ipfs/QmaEDTjHSdCKyGQ3cFMCf73kE67NvffLA5agquLW5qSEVn/extend_unpacked.jpg)
-    pub fn extend_unpacked<I>(&self, tree: &mut StreamBuilder<T>, from: I) -> Result<()>
+    pub fn extend_unpacked<I, V>(&self, tree: &mut StreamBuilder<T, V>, from: I) -> Result<()>
     where
         I: IntoIterator<Item = (T::Key, V)>,
         I::IntoIter: Send,
+        V: DagCbor + Clone + Send + 'static,
     {
         let index = tree.as_index_ref().cloned();
         let index = self.extend_unpacked0(index.as_ref(), from, tree.state_mut())?;
@@ -584,9 +605,9 @@ impl<
     ///
     /// note that offsets will not be affected by this. Also, unsealed nodes will not be forgotten
     /// even if they do not match the query.
-    pub fn retain<'a, Q: Query<T> + Send + Sync>(
+    pub fn retain<'a, Q: Query<T> + Send + Sync, V>(
         &'a self,
-        tree: &mut StreamBuilder<T>,
+        tree: &mut StreamBuilder<T, V>,
         query: &'a Q,
     ) -> Result<()> {
         let index = tree.index().cloned();
@@ -605,7 +626,7 @@ impl<
     /// Note that this is an emergency measure to recover data if the tree is not completely
     /// available. It might result in a degenerate tree that can no longer be safely added to,
     /// especially if there are repaired blocks in the non-packed part.
-    pub fn repair(&self, tree: &mut StreamBuilder<T>) -> Result<Vec<String>> {
+    pub fn repair<V>(&self, tree: &mut StreamBuilder<T, V>) -> Result<Vec<String>> {
         let mut report = Vec::new();
         let index = tree.index().cloned();
         if let Some(index) = index {

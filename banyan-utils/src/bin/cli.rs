@@ -27,7 +27,7 @@ static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
 pub type Error = anyhow::Error;
 pub type Result<T> = anyhow::Result<T>;
 
-type Txn = Transaction<TT, String, ArcReadOnlyStore<Sha256Digest>, ArcBlockWriter<Sha256Digest>>;
+type Txn = Transaction<TT, ArcReadOnlyStore<Sha256Digest>, ArcBlockWriter<Sha256Digest>>;
 
 enum Storage {
     Memory(MemStore<Sha256Digest>),
@@ -222,7 +222,7 @@ async fn build_tree(
     count: u64,
     unbalanced: bool,
     print_every: u64,
-) -> anyhow::Result<StreamBuilder<TT>> {
+) -> anyhow::Result<StreamBuilder<TT, String>> {
     let secrets = Secrets::default();
     let config = Config::debug();
     let mut tagger = Tagger::new();
@@ -242,7 +242,7 @@ async fn build_tree(
     };
     let mut tree = match base {
         Some(root) => forest.load_stream_builder(secrets, config, root)?,
-        None => StreamBuilder::<TT>::new(config, secrets),
+        None => StreamBuilder::<TT, String>::new(config, secrets),
     };
     let mut offset: u64 = 0;
     for _ in 0..batches {
@@ -278,7 +278,7 @@ async fn bench_build(
     unbalanced: bool,
     secrets: Secrets,
     config: Config,
-) -> anyhow::Result<(Tree<TT>, std::time::Duration)> {
+) -> anyhow::Result<(Tree<TT, String>, std::time::Duration)> {
     let mut tagger = Tagger::new();
     // function to add some arbitrary tags to test out tag querying and compression
     let mut tags_from_offset = |i: u64| -> TagSet {
@@ -296,7 +296,7 @@ async fn bench_build(
     };
     let mut tree = match base {
         Some(link) => forest.load_stream_builder(secrets, config, link)?,
-        None => StreamBuilder::<TT>::new(config, secrets),
+        None => StreamBuilder::<TT, String>::new(config, secrets),
     };
     let mut offset: u64 = 0;
     let data = (0..batches)
@@ -360,16 +360,16 @@ async fn main() -> Result<()> {
     let forest = txn();
     match opts.cmd {
         Command::Graph { root } => {
-            let tree = forest.load_tree(secrets, root)?;
+            let tree = forest.load_tree::<String>(secrets, root)?;
             let mut stdout = std::io::stdout();
             dump::graph(&forest, &tree, &mut stdout)?;
         }
         Command::Dump { root } => {
-            let tree = forest.load_tree(secrets, root)?;
+            let tree = forest.load_tree::<String>(secrets, root)?;
             forest.dump(&tree)?;
         }
         Command::DumpValues { root } => {
-            let tree = forest.load_tree(secrets, root)?;
+            let tree = forest.load_tree::<String>(secrets, root)?;
             let iter = forest.iter_from(&tree);
             for res in iter {
                 let (i, k, v) = res?;
@@ -380,7 +380,7 @@ async fn main() -> Result<()> {
             dump::dump_json(store, hash, value_key, &mut std::io::stdout())?;
         }
         Command::Stream { root } => {
-            let tree = forest.load_tree(secrets, root)?;
+            let tree = forest.load_tree::<String>(secrets, root)?;
             let mut stream = forest.stream_filtered(&tree, AllQuery).enumerate();
             while let Some((i, Ok(v))) = stream.next().await {
                 if i % 1000 == 0 {
@@ -457,7 +457,7 @@ async fn main() -> Result<()> {
             let query = DnfQuery(tags).boxed();
             let secrets = Secrets::default();
             let config = Config::debug();
-            let tree = forest.load_stream_builder(secrets, config, root)?;
+            let tree = forest.load_stream_builder::<String>(secrets, config, root)?;
             forest.dump(&tree.snapshot())?;
             let mut stream = forest.stream_filtered(&tree.snapshot(), query).enumerate();
             while let Some((i, Ok(v))) = stream.next().await {
@@ -469,7 +469,7 @@ async fn main() -> Result<()> {
         Command::Forget { root, before } => {
             let secrets = Secrets::default();
             let config = Config::debug();
-            let mut tree = forest.load_stream_builder(secrets, config, root)?;
+            let mut tree = forest.load_stream_builder::<String>(secrets, config, root)?;
             forest.retain(&mut tree, &OffsetRangeQuery::from(before..))?;
             forest.dump(&tree.snapshot())?;
             println!("{:?}", tree);
@@ -477,7 +477,7 @@ async fn main() -> Result<()> {
         Command::Pack { root } => {
             let secrets = Secrets::default();
             let config = Config::debug();
-            let mut tree = forest.load_stream_builder(secrets, config, root)?;
+            let mut tree = forest.load_stream_builder::<String>(secrets, config, root)?;
             forest.dump(&tree.snapshot())?;
             forest.pack(&mut tree)?;
             forest.assert_invariants(&tree)?;
@@ -496,7 +496,7 @@ async fn main() -> Result<()> {
                 let forest = forest2.clone();
                 let secrets = secrets.clone();
                 future::ready(
-                    link.and_then(move |link| forest.load_tree(secrets, link))
+                    link.and_then(move |link| forest.load_tree::<String>(secrets, link))
                         .ok(),
                 )
             });
@@ -506,14 +506,14 @@ async fn main() -> Result<()> {
             }
         }
         Command::Repair { root } => {
-            let mut tree = forest.load_stream_builder(secrets, config, root)?;
+            let mut tree = forest.load_stream_builder::<String>(secrets, config, root)?;
             let _ = forest.repair(&mut tree)?;
             forest.dump(&tree.snapshot())?;
             println!("{:?}", tree);
         }
         Command::SendStream { topic } => {
             let mut ticks = tokio::time::interval(Duration::from_secs(1));
-            let mut tree = StreamBuilder::<TT>::new(config, secrets);
+            let mut tree = StreamBuilder::<TT, String>::new(config, secrets);
             let mut offset = 0;
             loop {
                 poll_fn(|cx| ticks.poll_tick(cx)).await;

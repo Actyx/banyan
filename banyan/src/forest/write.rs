@@ -15,24 +15,22 @@ use crate::{
     util::{is_sorted, BoolSliceExt},
 };
 use anyhow::{ensure, Result};
-use core::fmt::Debug;
 use libipld::cbor::DagCbor;
 use std::{iter, time::Instant};
 
 /// basic random access append only tree
-impl<T, V, R, W> Transaction<T, V, R, W>
+impl<T, R, W> Transaction<T, R, W>
 where
     T: TreeTypes + 'static,
-    V: DagCbor + Clone + Send + Sync + Debug + 'static,
     R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static,
     W: BlockWriter<T::Link> + 'static,
 {
-    pub fn read(&self) -> &Forest<T, V, R> {
+    pub fn read(&self) -> &Forest<T, R> {
         &self.read
     }
 
     /// create a leaf from scratch from an interator
-    fn leaf_from_iter(
+    fn leaf_from_iter<V: DagCbor>(
         &self,
         from: &mut iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
         stream: &mut StreamBuilderState,
@@ -44,7 +42,7 @@ where
     /// Creates a leaf from a sequence that either contains all items from the sequence, or is full
     ///
     /// The result is the index of the leaf. The iterator will contain the elements that did not fit.
-    fn extend_leaf(
+    fn extend_leaf<V: DagCbor>(
         &self,
         compressed: &[u8],
         keys: Option<T::KeySeq>,
@@ -91,7 +89,7 @@ where
 
     /// given some children and some additional elements, creates a node with the given
     /// children and new children from `from` until it is full
-    pub(crate) fn extend_branch(
+    pub(crate) fn extend_branch<V: DagCbor>(
         &self,
         mut children: Vec<Index<T>>,
         level: u32,
@@ -155,7 +153,7 @@ where
     /// Given an iterator of values and a level, consume from the iterator until either
     /// the iterator is consumed or the node is "filled". At the end of this call, the
     /// iterator will contain the remaining elements that did not "fit".
-    fn fill_node(
+    fn fill_node<V: DagCbor>(
         &self,
         level: u32,
         from: &mut iter::Peekable<impl Iterator<Item = (T::Key, V)> + Send>,
@@ -208,7 +206,7 @@ where
     /// extends an existing node with some values
     ///
     /// The result will have the max level `level`. `from` will contain all elements that did not fit.
-    pub(crate) fn extend_above(
+    pub(crate) fn extend_above<V: DagCbor>(
         &self,
         node: Option<&Index<T>>,
         level: u32,
@@ -240,7 +238,7 @@ where
         Ok(node)
     }
 
-    pub(crate) fn extend_unpacked0<I>(
+    pub(crate) fn extend_unpacked0<I, V>(
         &self,
         index: Option<&Index<T>>,
         from: I,
@@ -249,6 +247,7 @@ where
     where
         I: IntoIterator<Item = (T::Key, V)>,
         I::IntoIter: Send,
+        V: DagCbor,
     {
         let mut from = from.into_iter().peekable();
         if from.peek().is_none() {
@@ -275,7 +274,7 @@ where
     /// extends an existing node with some values
     ///
     /// The result will have the same level as the input. `from` will contain all elements that did not fit.
-    fn extend0(
+    fn extend0<V: DagCbor>(
         &self,
         index: &Index<T>,
         from: &mut iter::Peekable<impl Iterator<Item = (T::Key, V)> + Send>,
