@@ -336,11 +336,11 @@ impl AsRef<ZstdDagCborSeq> for Leaf {
 }
 
 #[derive(Debug)]
-pub struct BranchInfo<'a, T: TreeTypes, V, R> {
+pub struct BranchLoader<'a, T: TreeTypes, V, R> {
     forest: &'a Forest<T, V, R>,
     secrets: &'a Secrets,
     index: &'a BranchIndex<T>,
-    branch: Option<Option<Branch<T>>>,
+    branch: Option<Branch<T>>,
 }
 
 impl<
@@ -348,7 +348,7 @@ impl<
         T: TreeTypes,
         V: Debug + Send + Sync + Clone + DagCbor + 'static,
         R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static,
-    > BranchInfo<'a, T, V, R>
+    > BranchLoader<'a, T, V, R>
 {
     pub fn new(
         forest: &'a Forest<T, V, R>,
@@ -363,26 +363,26 @@ impl<
         }
     }
 
-    pub fn index(&'a self) -> &'a BranchIndex<T> {
-        &self.index
-    }
-
-    pub fn branch(&'a mut self) -> anyhow::Result<Option<&'a Branch<T>>> {
+    pub fn load(&'a mut self) -> anyhow::Result<&'a Branch<T>> {
         Ok({
             if self.branch.is_none() {
-                self.branch = Some(self.forest.load_branch_cached(&self.secrets, &self.index)?);
+                if let Some(branch) = self.forest.load_branch_cached(&self.secrets, &self.index)? {
+                    self.branch = Some(branch)
+                } else {
+                    anyhow::bail!("unable to load branch")
+                }
             }
-            self.branch.as_ref().unwrap().as_ref()
+            self.branch.as_ref().unwrap()
         })
     }
 }
 
 #[derive(Debug)]
-pub struct LeafInfo<'a, T: TreeTypes, V, R> {
+pub struct LeafLoader<'a, T: TreeTypes, V, R> {
     forest: &'a Forest<T, V, R>,
     secrets: &'a Secrets,
     index: &'a LeafIndex<T>,
-    leaf: Option<Option<Leaf>>,
+    leaf: Option<Leaf>,
 }
 
 impl<
@@ -390,7 +390,7 @@ impl<
         T: TreeTypes,
         V: Debug + Send + Sync + Clone + DagCbor + 'static,
         R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static,
-    > LeafInfo<'a, T, V, R>
+    > LeafLoader<'a, T, V, R>
 {
     pub fn new(forest: &'a Forest<T, V, R>, secrets: &'a Secrets, index: &'a LeafIndex<T>) -> Self {
         Self {
@@ -401,26 +401,78 @@ impl<
         }
     }
 
-    pub fn index(&'a self) -> &'a LeafIndex<T> {
-        &self.index
-    }
-
-    pub fn leaf(&'a mut self) -> anyhow::Result<Option<&'a Leaf>> {
+    pub fn load(&'a mut self) -> anyhow::Result<&'a Leaf> {
         Ok({
             if self.leaf.is_none() {
-                self.leaf = Some(self.forest.load_leaf(&self.secrets, &self.index)?);
+                if let Some(leaf) = self.forest.load_leaf(&self.secrets, &self.index)? {
+                    self.leaf = Some(leaf)
+                } else {
+                    anyhow::bail!("unable to load leaf")
+                }
             }
-            self.leaf.as_ref().unwrap().as_ref()
+            self.leaf.as_ref().unwrap()
         })
     }
 }
 
 #[derive(Debug)]
 pub enum NodeInfo2<'a, T: TreeTypes, V, R> {
-    Branch(BranchInfo<'a, T, V, R>),
-    Leaf(LeafInfo<'a, T, V, R>),
+    Branch(&'a BranchIndex<T>, BranchLoader<'a, T, V, R>),
+    Leaf(&'a LeafIndex<T>, LeafLoader<'a, T, V, R>),
     PurgedBranch(&'a BranchIndex<T>),
     PurgedLeaf(&'a LeafIndex<T>),
+}
+
+impl<'a, T: TreeTypes, V, R> Display for NodeInfo2<'a, T, V, R> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Leaf(index, _) => {
+                write!(
+                    f,
+                    "Leaf(count={}, value_bytes={}, sealed={}, link={})",
+                    index.keys.count(),
+                    index.value_bytes,
+                    index.sealed,
+                    index
+                        .link
+                        .map(|x| format!("{}", x))
+                        .unwrap_or_else(|| "".to_string())
+                )
+            }
+
+            Self::Branch(index, _) => {
+                write!(
+                    f,
+                    "Branch(count={}, key_bytes={}, value_bytes={}, sealed={}, link={}, children={})",
+                    index.count,
+                    index.key_bytes,
+                    index.value_bytes,
+                    index.sealed,
+                    index
+                        .link
+                        .map(|x| format!("{}", x))
+                        .unwrap_or_else(|| "".to_string()),
+                    index.summaries.len()
+                )
+            }
+            Self::PurgedBranch(index) => {
+                write!(
+                    f,
+                    "PurgedBranch(count={}, key_bytes={}, value_bytes={}, sealed={})",
+                    index.count, index.key_bytes, index.value_bytes, index.sealed,
+                )
+            }
+            Self::PurgedLeaf(index) => {
+                write!(
+                    f,
+                    "PurgedLeaf(count={}, key_bytes={}, sealed={})",
+                    index.keys.count(),
+                    index.value_bytes,
+                    index.sealed,
+                )
+            }
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -439,7 +491,7 @@ pub enum NodeInfo<T: TreeTypes> {
 impl<T: TreeTypes> Display for NodeInfo<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            NodeInfo::Leaf(index, _) => {
+            Self::Leaf(index, _) => {
                 write!(
                     f,
                     "Leaf(count={}, value_bytes={}, sealed={}, link={})",
@@ -453,7 +505,7 @@ impl<T: TreeTypes> Display for NodeInfo<T> {
                 )
             }
 
-            NodeInfo::Branch(index, branch) => {
+            Self::Branch(index, branch) => {
                 write!(
                     f,
                     "Branch(count={}, key_bytes={}, value_bytes={}, sealed={}, link={}, children={})",
@@ -468,14 +520,14 @@ impl<T: TreeTypes> Display for NodeInfo<T> {
                     branch.children.len()
                 )
             }
-            NodeInfo::PurgedBranch(index) => {
+            Self::PurgedBranch(index) => {
                 write!(
                     f,
                     "PurgedBranch(count={}, key_bytes={}, value_bytes={}, sealed={})",
                     index.count, index.key_bytes, index.value_bytes, index.sealed,
                 )
             }
-            NodeInfo::PurgedLeaf(index) => {
+            Self::PurgedLeaf(index) => {
                 write!(
                     f,
                     "PurgedLeaf(count={}, key_bytes={}, sealed={})",
