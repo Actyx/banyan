@@ -502,6 +502,7 @@ where
             .boxed()
     }
 
+    #[allow(clippy::clippy::type_complexity)]
     pub(crate) fn stream_filtered_chunked0<
         Q: Query<T> + Clone + Send + 'static,
         V: BanyanValue,
@@ -549,6 +550,7 @@ where
             .flatten()
     }
 
+    #[allow(clippy::clippy::type_complexity)]
     pub(crate) fn stream_filtered_chunked_reverse0<
         Q: Query<T> + Clone + Send + 'static,
         V: BanyanValue,
