@@ -212,7 +212,7 @@ impl Config {
         }
     }
 
-    /// predicate to determine if a leaf is sealed, based on the config
+    /// predicate to determine if a branch is sealed, based on the config
     pub fn branch_sealed<T: TreeTypes>(&self, items: &[Index<T>], level: u32) -> bool {
         assert!(level > 0);
         // all children must be sealed
