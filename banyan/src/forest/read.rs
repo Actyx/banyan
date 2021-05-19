@@ -1,8 +1,8 @@
 use super::{BranchCache, Config, FilteredChunk, Forest, Secrets, TreeTypes};
 use crate::{
     index::{
-        deserialize_compressed, Branch, BranchIndex, CompactSeq, Index, IndexRef, Leaf, LeafIndex,
-        NodeInfo,
+        deserialize_compressed, Branch, BranchIndex, BranchInfo, CompactSeq, Index, IndexRef, Leaf,
+        LeafIndex, LeafInfo, NodeInfo, NodeInfo2,
     },
     query::Query,
     store::ReadOnlyStore,
@@ -374,6 +374,29 @@ where
             }
         } else {
             Ok(None)
+        }
+    }
+
+    pub(crate) fn load_node_2<'a>(
+        &'a self,
+        secrets: &'a Secrets,
+        index: &'a Index<T>,
+    ) -> NodeInfo2<'a, T, V, R> {
+        match index {
+            Index::Branch(index) => {
+                if index.link.is_some() {
+                    NodeInfo2::Branch(BranchInfo::new(self, secrets, index))
+                } else {
+                    NodeInfo2::PurgedBranch(index)
+                }
+            }
+            Index::Leaf(index) => {
+                if index.link.is_some() {
+                    NodeInfo2::Leaf(LeafInfo::new(self, secrets, index))
+                } else {
+                    NodeInfo2::PurgedLeaf(index)
+                }
+            }
         }
     }
 

@@ -38,7 +38,11 @@
 //! [CompactSeq]: trait.CompactSeq.html
 //! [Semigroup]: trait.Semigroup.html
 //! [SimpleCompactSeq]: struct.SimpleCompactSeq.html
-use crate::{forest::TreeTypes, store::ZstdDagCborSeq, CipherOffset};
+use crate::{
+    forest::TreeTypes,
+    store::{ReadOnlyStore, ZstdDagCborSeq},
+    CipherOffset, Forest, Secrets,
+};
 use anyhow::{anyhow, Result};
 use derive_more::From;
 use libipld::{
@@ -329,6 +333,94 @@ impl AsRef<ZstdDagCborSeq> for Leaf {
     fn as_ref(&self) -> &ZstdDagCborSeq {
         &self.items
     }
+}
+
+#[derive(Debug)]
+pub struct BranchInfo<'a, T: TreeTypes, V, R> {
+    forest: &'a Forest<T, V, R>,
+    secrets: &'a Secrets,
+    index: &'a BranchIndex<T>,
+    branch: Option<Option<Branch<T>>>,
+}
+
+impl<
+        'a,
+        T: TreeTypes,
+        V: Debug + Send + Sync + Clone + DagCbor + 'static,
+        R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static,
+    > BranchInfo<'a, T, V, R>
+{
+    pub fn new(
+        forest: &'a Forest<T, V, R>,
+        secrets: &'a Secrets,
+        index: &'a BranchIndex<T>,
+    ) -> Self {
+        Self {
+            forest,
+            secrets,
+            index,
+            branch: None,
+        }
+    }
+
+    pub fn index(&'a self) -> &'a BranchIndex<T> {
+        &self.index
+    }
+
+    pub fn branch(&'a mut self) -> anyhow::Result<Option<&'a Branch<T>>> {
+        Ok({
+            if self.branch.is_none() {
+                self.branch = Some(self.forest.load_branch_cached(&self.secrets, &self.index)?);
+            }
+            self.branch.as_ref().unwrap().as_ref()
+        })
+    }
+}
+
+#[derive(Debug)]
+pub struct LeafInfo<'a, T: TreeTypes, V, R> {
+    forest: &'a Forest<T, V, R>,
+    secrets: &'a Secrets,
+    index: &'a LeafIndex<T>,
+    leaf: Option<Option<Leaf>>,
+}
+
+impl<
+        'a,
+        T: TreeTypes,
+        V: Debug + Send + Sync + Clone + DagCbor + 'static,
+        R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static,
+    > LeafInfo<'a, T, V, R>
+{
+    pub fn new(forest: &'a Forest<T, V, R>, secrets: &'a Secrets, index: &'a LeafIndex<T>) -> Self {
+        Self {
+            forest,
+            secrets,
+            index,
+            leaf: None,
+        }
+    }
+
+    pub fn index(&'a self) -> &'a LeafIndex<T> {
+        &self.index
+    }
+
+    pub fn leaf(&'a mut self) -> anyhow::Result<Option<&'a Leaf>> {
+        Ok({
+            if self.leaf.is_none() {
+                self.leaf = Some(self.forest.load_leaf(&self.secrets, &self.index)?);
+            }
+            self.leaf.as_ref().unwrap().as_ref()
+        })
+    }
+}
+
+#[derive(Debug)]
+pub enum NodeInfo2<'a, T: TreeTypes, V, R> {
+    Branch(BranchInfo<'a, T, V, R>),
+    Leaf(LeafInfo<'a, T, V, R>),
+    PurgedBranch(&'a BranchIndex<T>),
+    PurgedLeaf(&'a LeafIndex<T>),
 }
 
 #[derive(Debug)]
