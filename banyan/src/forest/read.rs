@@ -167,8 +167,8 @@ where
                 Mode::Backward => self.offset.saturating_sub(head.index.count())..self.offset,
             };
 
-            match &head.index {
-                Index::Branch(index) if index.link.is_some() => {
+            match self.forest.load_node(&self.secrets, &head.index) {
+                NodeInfo::Branch(index, mut branch) => {
                     if head.filter.is_empty() {
                         // we hit this branch node for the first time. Apply the
                         // query on its children and store it
@@ -190,16 +190,7 @@ where
                     let branch = match &head.branch {
                         Some(branch) => branch.clone(),
                         None => {
-                            tracing::debug!(
-                                "loading branch {:?} {} {}",
-                                range,
-                                index.level,
-                                index.summaries().count()
-                            );
-                            let branch = self
-                                .forest
-                                .load_branch_cached(&self.secrets, index)?
-                                .expect("branch must be some here");
+                            let branch = branch.load()?.clone();
                             head.branch = Some(branch.clone());
                             branch
                         }
@@ -227,15 +218,12 @@ where
                     }
                 }
 
-                Index::Leaf(index) if index.link.is_some() => {
+                NodeInfo::Leaf(index, mut leaf) => {
                     let mut matching: SmallVec<[_; 32]> = smallvec![true; index.keys.len()];
                     self.query.containing(range.start, &index, &mut matching);
                     let data = if matching.any() {
                         tracing::debug!("loading leaf {:?}", range);
-                        let leaf = self
-                            .forest
-                            .load_leaf(&self.secrets, index)?
-                            .expect("leaf must be some here");
+                        let leaf = leaf.load()?;
                         let offsets = matching
                             .iter()
                             .enumerate()
@@ -326,7 +314,14 @@ where
         })
     }
 
-    pub(crate) fn load_branch_from_link(
+    /// load a leaf given a leaf index
+    pub(crate) fn load_leaf_from_link(&self, stream: &Secrets, link: &T::Link) -> Result<Leaf> {
+        let data = &self.store().get(link)?;
+        let (items, range) = ZstdDagCborSeq::decrypt(data, stream.value_key())?;
+        Ok(Leaf::new(items, range))
+    }
+
+    pub(crate) fn create_index_from_link(
         &self,
         secrets: &Secrets,
         sealed: impl Fn(&[Index<T>], u32) -> bool,
@@ -377,19 +372,49 @@ where
         }
     }
 
+    /// load a branch given a branch index, from the cache
+    pub(crate) fn load_branch_cached_from_link(
+        &self,
+        secrets: &Secrets,
+        link: &T::Link,
+    ) -> Result<Branch<T>> {
+        let res = self.branch_cache().get(link);
+        match res {
+            Some(branch) => Ok(branch),
+            None => {
+                let branch = self.load_branch_from_link(secrets, link)?;
+                self.branch_cache().put(*link, branch.clone());
+                Ok(branch)
+            }
+        }
+    }
+
+    /// load a branch given a branch index
+    pub(crate) fn load_branch_from_link(
+        &self,
+        secrets: &Secrets,
+        link: &T::Link,
+    ) -> Result<Branch<T>> {
+        let t0 = Instant::now();
+        let result = Ok({
+            let bytes = self.store.get(&link)?;
+            let (children, byte_range) = deserialize_compressed(secrets.index_key(), &bytes)?;
+            Branch::<T>::new(children, byte_range)
+        });
+        tracing::debug!("load_branch {}", t0.elapsed().as_secs_f64());
+        result
+    }
+
     pub(crate) fn load_node(&self, secrets: &Secrets, index: &Index<T>) -> NodeInfo<T, V, R> {
         match index {
             Index::Branch(index) => match index.link {
-                Some(_link) => NodeInfo::Branch(
-                    index.clone(),
-                    BranchLoader::new(self, secrets, index.clone()),
-                ),
+                Some(link) => {
+                    NodeInfo::Branch(index.clone(), BranchLoader::new(self, secrets, link))
+                }
                 None => NodeInfo::PurgedBranch(index.clone()),
             },
             Index::Leaf(index) => match index.link {
-                Some(_link) => {
-                    NodeInfo::Leaf(index.clone(), LeafLoader::new(self, secrets, index.clone()))
-                }
+                Some(link) => NodeInfo::Leaf(index.clone(), LeafLoader::new(self, secrets, link)),
                 None => NodeInfo::PurgedLeaf(index.clone()),
             },
         }

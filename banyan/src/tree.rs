@@ -115,7 +115,7 @@ impl<
         config: Config,
         link: T::Link,
     ) -> Result<StreamBuilder<T>> {
-        let (index, byte_range) = self.load_branch_from_link(
+        let (index, byte_range) = self.create_index_from_link(
             &secrets,
             |items, level| config.branch_sealed(items, level),
             link,
@@ -126,7 +126,7 @@ impl<
 
     pub fn load_tree(&self, secrets: Secrets, link: T::Link) -> Result<Tree<T>> {
         // we pass in a predicate that makes the nodes sealed, since we don't care
-        let (index, byte_range) = self.load_branch_from_link(&secrets, |_, _| true, link)?;
+        let (index, byte_range) = self.create_index_from_link(&secrets, |_, _| true, link)?;
         // store the offset with the snapshot. Snapshots are immutable, so this won't change.
         Ok(Tree::new(index, secrets, byte_range.end))
     }

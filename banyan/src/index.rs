@@ -339,7 +339,7 @@ impl AsRef<ZstdDagCborSeq> for Leaf {
 pub struct BranchLoader<T: TreeTypes, V, R> {
     forest: Forest<T, V, R>,
     secrets: Secrets,
-    index: Arc<BranchIndex<T>>,
+    link: T::Link,
     branch: Option<Branch<T>>,
 }
 
@@ -349,11 +349,11 @@ impl<
         R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static,
     > BranchLoader<T, V, R>
 {
-    pub fn new(forest: &Forest<T, V, R>, secrets: &Secrets, index: Arc<BranchIndex<T>>) -> Self {
+    pub fn new(forest: &Forest<T, V, R>, secrets: &Secrets, link: T::Link) -> Self {
         Self {
             forest: forest.clone(),
             secrets: secrets.clone(),
-            index,
+            link,
             branch: None,
         }
     }
@@ -361,11 +361,10 @@ impl<
     pub fn load(&mut self) -> anyhow::Result<&Branch<T>> {
         Ok({
             if self.branch.is_none() {
-                if let Some(branch) = self.forest.load_branch_cached(&self.secrets, &self.index)? {
-                    self.branch = Some(branch)
-                } else {
-                    anyhow::bail!("unable to load branch")
-                }
+                self.branch = Some(
+                    self.forest
+                        .load_branch_cached_from_link(&self.secrets, &self.link)?,
+                );
             }
             self.branch.as_ref().unwrap()
         })
@@ -376,7 +375,7 @@ impl<
 pub struct LeafLoader<T: TreeTypes, V, R> {
     forest: Forest<T, V, R>,
     secrets: Secrets,
-    index: Arc<LeafIndex<T>>,
+    link: T::Link,
     leaf: Option<Leaf>,
 }
 
@@ -386,11 +385,11 @@ impl<
         R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static,
     > LeafLoader<T, V, R>
 {
-    pub fn new(forest: &Forest<T, V, R>, secrets: &Secrets, index: Arc<LeafIndex<T>>) -> Self {
+    pub fn new(forest: &Forest<T, V, R>, secrets: &Secrets, link: T::Link) -> Self {
         Self {
             forest: forest.clone(),
             secrets: secrets.clone(),
-            index,
+            link,
             leaf: None,
         }
     }
@@ -398,11 +397,7 @@ impl<
     pub fn load(&mut self) -> anyhow::Result<&Leaf> {
         Ok({
             if self.leaf.is_none() {
-                if let Some(leaf) = self.forest.load_leaf(&self.secrets, &self.index)? {
-                    self.leaf = Some(leaf)
-                } else {
-                    anyhow::bail!("unable to load leaf")
-                }
+                self.leaf = Some(self.forest.load_leaf_from_link(&self.secrets, &self.link)?)
             }
             self.leaf.as_ref().unwrap()
         })
