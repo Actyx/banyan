@@ -336,83 +336,61 @@ impl AsRef<ZstdDagCborSeq> for Leaf {
 }
 
 #[derive(Debug)]
-pub struct BranchLoader<T: TreeTypes, V, R> {
-    forest: Forest<T, V, R>,
+pub struct BranchLoader<T: TreeTypes, R> {
+    forest: Forest<T, R>,
     secrets: Secrets,
     link: T::Link,
-    branch: Option<Branch<T>>,
 }
 
-impl<
-        T: TreeTypes,
-        V: Debug + Send + Sync + Clone + DagCbor + 'static,
-        R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static,
-    > BranchLoader<T, V, R>
-{
-    pub fn new(forest: &Forest<T, V, R>, secrets: &Secrets, link: T::Link) -> Self {
+impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> BranchLoader<T, R> {
+    pub fn new(forest: &Forest<T, R>, secrets: &Secrets, link: T::Link) -> Self {
         Self {
             forest: forest.clone(),
             secrets: secrets.clone(),
             link,
-            branch: None,
         }
     }
 
-    pub fn load(&mut self) -> anyhow::Result<&Branch<T>> {
-        Ok({
-            if self.branch.is_none() {
-                self.branch = Some(
-                    self.forest
-                        .load_branch_cached_from_link(&self.secrets, &self.link)?,
-                );
-            }
-            self.branch.as_ref().unwrap()
-        })
+    pub fn load_cached(&self) -> anyhow::Result<Branch<T>> {
+        self.forest
+            .load_branch_cached_from_link(&self.secrets, &self.link)
+    }
+
+    pub fn load(&self) -> anyhow::Result<Branch<T>> {
+        self.forest.load_branch_from_link(&self.secrets, &self.link)
     }
 }
 
 #[derive(Debug)]
-pub struct LeafLoader<T: TreeTypes, V, R> {
-    forest: Forest<T, V, R>,
+pub struct LeafLoader<T: TreeTypes, R> {
+    forest: Forest<T, R>,
     secrets: Secrets,
     link: T::Link,
-    leaf: Option<Leaf>,
 }
 
-impl<
-        T: TreeTypes,
-        V: Debug + Send + Sync + Clone + DagCbor + 'static,
-        R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static,
-    > LeafLoader<T, V, R>
-{
-    pub fn new(forest: &Forest<T, V, R>, secrets: &Secrets, link: T::Link) -> Self {
+impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> LeafLoader<T, R> {
+    pub fn new(forest: &Forest<T, R>, secrets: &Secrets, link: T::Link) -> Self {
         Self {
             forest: forest.clone(),
             secrets: secrets.clone(),
             link,
-            leaf: None,
         }
     }
 
-    pub fn load(&mut self) -> anyhow::Result<&Leaf> {
-        Ok({
-            if self.leaf.is_none() {
-                self.leaf = Some(self.forest.load_leaf_from_link(&self.secrets, &self.link)?)
-            }
-            self.leaf.as_ref().unwrap()
-        })
+    pub fn load(&self) -> anyhow::Result<Leaf> {
+        self.forest.load_leaf_from_link(&self.secrets, &self.link)
     }
 }
 
 #[derive(Debug)]
-pub enum NodeInfo<T: TreeTypes, V, R> {
-    Branch(Arc<BranchIndex<T>>, BranchLoader<T, V, R>),
-    Leaf(Arc<LeafIndex<T>>, LeafLoader<T, V, R>),
+pub enum NodeInfo<T: TreeTypes, R> {
+    Branch(Arc<BranchIndex<T>>, BranchLoader<T, R>),
+    Leaf(Arc<LeafIndex<T>>, LeafLoader<T, R>),
     PurgedBranch(Arc<BranchIndex<T>>),
     PurgedLeaf(Arc<LeafIndex<T>>),
 }
 
-impl<T: TreeTypes, V, R> Display for NodeInfo<T, V, R> {
+impl<T: TreeTypes, R> Display for NodeInfo<T, R> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Leaf(index, _) => {

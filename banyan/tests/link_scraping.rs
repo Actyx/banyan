@@ -12,7 +12,7 @@ use std::str::FromStr;
 
 mod common;
 
-type Txn = Transaction<TT, Payload, MemStore<Sha256Digest>, MemStore<Sha256Digest>>;
+type Txn = Transaction<TT, MemStore<Sha256Digest>, MemStore<Sha256Digest>>;
 
 impl Arbitrary for Key {
     fn arbitrary(g: &mut Gen) -> Self {
@@ -66,14 +66,14 @@ fn txn(store: MemStore<Sha256Digest>) -> Txn {
     Txn::new(Forest::new(store.clone(), branch_cache), store)
 }
 
-fn create_test_tree<I>(xs: I) -> anyhow::Result<(Tree<TT>, Txn)>
+fn create_test_tree<I>(xs: I) -> anyhow::Result<(Tree<TT, Payload>, Txn)>
 where
     I: IntoIterator<Item = (Key, Payload)>,
     I::IntoIter: Send,
 {
     let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
     let forest = txn(store);
-    let mut tree = StreamBuilder::<TT>::debug();
+    let mut tree = StreamBuilder::<TT, Payload>::debug();
     forest.extend(&mut tree, xs)?;
     forest.assert_invariants(&tree)?;
     Ok((tree.snapshot(), forest))

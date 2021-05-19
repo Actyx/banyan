@@ -5,8 +5,6 @@ use crate::{
     store::ReadOnlyStore,
 };
 use anyhow::Result;
-use core::fmt::Debug;
-use libipld::cbor::DagCbor;
 use smallvec::{smallvec, SmallVec};
 
 #[derive(PartialEq)]
@@ -15,8 +13,8 @@ enum Mode {
     Backward,
 }
 
-pub(crate) struct IndexIter<T: TreeTypes, V, R, Q: Query<T>> {
-    forest: Forest<T, V, R>,
+pub(crate) struct IndexIter<T: TreeTypes, R, Q: Query<T>> {
+    forest: Forest<T, R>,
     secrets: Secrets,
     offset: u64,
     query: Q,
@@ -58,19 +56,13 @@ impl<T: TreeTypes> TraverseState<T> {
     }
 }
 
-impl<T, V, R, Q> IndexIter<T, V, R, Q>
+impl<T, R, Q> IndexIter<T, R, Q>
 where
-    T: TreeTypes + 'static,
-    V: DagCbor + Clone + Send + Sync + Debug + 'static,
-    R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static,
+    T: TreeTypes,
+    R: ReadOnlyStore<T::Link>,
     Q: Query<T> + Clone + Send + 'static,
 {
-    pub(crate) fn new(
-        forest: Forest<T, V, R>,
-        secrets: Secrets,
-        query: Q,
-        index: Index<T>,
-    ) -> Self {
+    pub(crate) fn new(forest: Forest<T, R>, secrets: Secrets, query: Q, index: Index<T>) -> Self {
         let mode = Mode::Forward;
         let stack = smallvec![TraverseState::new(index)];
 
@@ -84,7 +76,7 @@ where
         }
     }
     pub(crate) fn new_rev(
-        forest: Forest<T, V, R>,
+        forest: Forest<T, R>,
         secrets: Secrets,
         query: Q,
         index: Index<T>,
@@ -104,11 +96,10 @@ where
     }
 }
 
-impl<T, V, R, Q> Iterator for IndexIter<T, V, R, Q>
+impl<T, R, Q> Iterator for IndexIter<T, R, Q>
 where
-    T: TreeTypes + 'static,
-    V: DagCbor + Clone + Send + Sync + Debug + 'static,
-    R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static,
+    T: TreeTypes,
+    R: ReadOnlyStore<T::Link>,
     Q: Query<T> + Clone + Send + 'static,
 {
     type Item = Result<Index<T>>;
@@ -135,8 +126,8 @@ where
             }
 
             match self.forest.load_node(&self.secrets, &head.index) {
-                NodeInfo::Branch(index, mut branch) => {
-                    let branch = match branch.load() {
+                NodeInfo::Branch(index, branch) => {
+                    let branch = match branch.load_cached() {
                         Ok(branch) => branch,
                         Err(cause) => return Some(Err(cause)),
                     };

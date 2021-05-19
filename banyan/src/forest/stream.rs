@@ -1,7 +1,7 @@
 //! helper methods to stream trees
 use crate::{
     index::IndexRef,
-    store::ReadOnlyStore,
+    store::{BanyanValue, ReadOnlyStore},
     tree::Tree,
     util::{take_until_condition, ToStreamExt},
 };
@@ -10,27 +10,22 @@ use super::{FilteredChunk, Forest, TreeTypes};
 use crate::query::*;
 use futures::executor::ThreadPool;
 use futures::prelude::*;
-use libipld::cbor::DagCbor;
 use std::sync::atomic::Ordering;
-use std::{fmt::Debug, ops::RangeInclusive, sync::atomic::AtomicU64, sync::Arc};
+use std::{ops::RangeInclusive, sync::atomic::AtomicU64, sync::Arc};
 
-impl<
-        T: TreeTypes + 'static,
-        V: Clone + Send + Sync + Debug + DagCbor + 'static,
-        R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static,
-    > Forest<T, V, R>
-{
+impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
     /// Given a sequence of roots, will stream matching events in ascending order indefinitely.
     ///
     /// This is implemented by calling stream_trees_chunked and just flattening the chunks.
-    pub fn stream_trees<Q, S>(
+    pub fn stream_trees<Q, S, V>(
         &self,
         query: Q,
         trees: S,
     ) -> impl Stream<Item = anyhow::Result<(u64, T::Key, V)>> + Send
     where
         Q: Query<T> + Clone + 'static,
-        S: Stream<Item = Tree<T>> + Send + 'static,
+        S: Stream<Item = Tree<T, V>> + Send + 'static,
+        V: BanyanValue,
     {
         self.stream_trees_chunked(query, trees, 0..=u64::max_value(), &|_| ())
             .map_ok(|chunk| stream::iter(chunk.data.into_iter().map(Ok)))
@@ -43,7 +38,7 @@ impl<
     /// - range: the range which to stream. It is up to the caller to ensure that we have events for this range.
     /// - mk_extra: a fn that allows to compute extra info from indices.
     ///     this can be useful to get progress info even if the query does not match any events
-    pub fn stream_trees_chunked<S, Q, E, F>(
+    pub fn stream_trees_chunked<S, Q, V, E, F>(
         &self,
         query: Q,
         trees: S,
@@ -51,10 +46,11 @@ impl<
         mk_extra: &'static F,
     ) -> impl Stream<Item = anyhow::Result<FilteredChunk<(u64, T::Key, V), E>>> + Send + 'static
     where
+        S: Stream<Item = Tree<T, V>> + Send + 'static,
         Q: Query<T> + Clone + Send + 'static,
+        V: BanyanValue,
         E: Send + 'static,
         F: Send + Sync + 'static + Fn(IndexRef<T>) -> E,
-        S: Stream<Item = Tree<T>> + Send + 'static,
     {
         let end = *range.end();
         let start_offset_ref = Arc::new(AtomicU64::new(*range.start()));
@@ -95,7 +91,7 @@ impl<
     /// - range: the range which to stream. It is up to the caller to ensure that we have events for this range.
     /// - mk_extra: a fn that allows to compute extra info from indices.
     ///     this can be useful to get progress info even if the query does not match any events
-    pub fn stream_trees_chunked_threaded<S, Q, E, F>(
+    pub fn stream_trees_chunked_threaded<S, Q, V, E, F>(
         &self,
         query: Q,
         trees: S,
@@ -104,10 +100,11 @@ impl<
         thread_pool: ThreadPool,
     ) -> impl Stream<Item = anyhow::Result<FilteredChunk<(u64, T::Key, V), E>>> + Send + 'static
     where
+        S: Stream<Item = Tree<T, V>> + Send + 'static,
         Q: Query<T> + Clone + Send + 'static,
+        V: BanyanValue,
         E: Send + 'static,
         F: Send + Sync + 'static + Fn(IndexRef<T>) -> E,
-        S: Stream<Item = Tree<T>> + Send + 'static,
     {
         let offset = Arc::new(AtomicU64::new(*range.start()));
         let forest = self.clone();
@@ -142,7 +139,7 @@ impl<
     /// - range: the range which to stream. It is up to the caller to ensure that we have events for this range.
     /// - mk_extra: a fn that allows to compute extra info from indices.
     ///     this can be useful to get progress info even if the query does not match any events
-    pub fn stream_trees_chunked_reverse<S, Q, E, F>(
+    pub fn stream_trees_chunked_reverse<S, Q, V, E, F>(
         &self,
         query: Q,
         trees: S,
@@ -150,10 +147,11 @@ impl<
         mk_extra: &'static F,
     ) -> impl Stream<Item = anyhow::Result<FilteredChunk<(u64, T::Key, V), E>>> + Send + 'static
     where
+        S: Stream<Item = Tree<T, V>> + Send + 'static,
         Q: Query<T> + Clone + Send + 'static,
+        V: BanyanValue,
         E: Send + 'static,
         F: Send + Sync + 'static + Fn(IndexRef<T>) -> E,
-        S: Stream<Item = Tree<T>> + Send + 'static,
     {
         let start = *range.start();
         let end_offset_ref = Arc::new(AtomicU64::new(*range.end()));

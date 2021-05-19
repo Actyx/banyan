@@ -5,30 +5,30 @@ use crate::{
         Leaf, LeafIndex, LeafLoader, NodeInfo,
     },
     query::Query,
-    store::ReadOnlyStore,
     store::ZstdDagCborSeq,
+    store::{BanyanValue, ReadOnlyStore},
     util::{BoolSliceExt, IterExt},
 };
 use anyhow::{anyhow, Result};
-use core::fmt::Debug;
 use futures::{prelude::*, stream::BoxStream};
 use libipld::cbor::DagCbor;
 use smallvec::{smallvec, SmallVec};
 
-use std::{iter, ops::Range, time::Instant};
+use std::{iter, marker::PhantomData, ops::Range, time::Instant};
 #[derive(PartialEq)]
 enum Mode {
     Forward,
     Backward,
 }
 pub(crate) struct TreeIter<T: TreeTypes, V, R, Q, F> {
-    forest: Forest<T, V, R>,
+    forest: Forest<T, R>,
     secrets: Secrets,
     offset: u64,
     query: Q,
     mk_extra: F,
     stack: SmallVec<[TraverseState<T>; 5]>,
     mode: Mode,
+    _v: PhantomData<V>,
 }
 
 struct TraverseState<T: TreeTypes> {
@@ -70,15 +70,15 @@ impl<T: TreeTypes> TraverseState<T> {
 
 impl<T: TreeTypes, V, R, Q, E, F> TreeIter<T, V, R, Q, F>
 where
-    T: TreeTypes + 'static,
-    V: DagCbor + Clone + Send + Sync + Debug + 'static,
-    R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static,
+    T: TreeTypes,
+    V: BanyanValue,
+    R: ReadOnlyStore<T::Link>,
     Q: Query<T> + Clone + Send + 'static,
     E: Send + 'static,
     F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
 {
     pub(crate) fn new(
-        forest: Forest<T, V, R>,
+        forest: Forest<T, R>,
         secrets: Secrets,
         query: Q,
         index: Index<T>,
@@ -95,10 +95,11 @@ where
             mk_extra,
             stack,
             mode,
+            _v: PhantomData,
         }
     }
     pub(crate) fn new_rev(
-        forest: Forest<T, V, R>,
+        forest: Forest<T, R>,
         secrets: Secrets,
         query: Q,
         index: Index<T>,
@@ -116,6 +117,7 @@ where
             mk_extra,
             stack,
             mode,
+            _v: PhantomData,
         }
     }
 
@@ -168,7 +170,7 @@ where
             };
 
             match self.forest.load_node(&self.secrets, &head.index) {
-                NodeInfo::Branch(index, mut branch) => {
+                NodeInfo::Branch(index, branch) => {
                     if head.filter.is_empty() {
                         // we hit this branch node for the first time. Apply the
                         // query on its children and store it
@@ -190,7 +192,7 @@ where
                     let branch = match &head.branch {
                         Some(branch) => branch.clone(),
                         None => {
-                            let branch = branch.load()?.clone();
+                            let branch = branch.load_cached()?.clone();
                             head.branch = Some(branch.clone());
                             branch
                         }
@@ -218,7 +220,7 @@ where
                     }
                 }
 
-                NodeInfo::Leaf(index, mut leaf) => {
+                NodeInfo::Leaf(index, leaf) => {
                     let mut matching: SmallVec<[_; 32]> = smallvec![true; index.keys.len()];
                     self.query.containing(range.start, &index, &mut matching);
                     let data = if matching.any() {
@@ -267,9 +269,9 @@ where
 
 impl<T: TreeTypes, V, R, Q, E, F> Iterator for TreeIter<T, V, R, Q, F>
 where
-    T: TreeTypes + 'static,
-    V: DagCbor + Clone + Send + Sync + Debug + 'static,
-    R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static,
+    T: TreeTypes,
+    V: BanyanValue,
+    R: ReadOnlyStore<T::Link>,
     Q: Query<T> + Clone + Send + 'static,
     E: Send + 'static,
     F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
@@ -289,11 +291,10 @@ where
 }
 
 /// basic random access append only tree
-impl<T, V, R> Forest<T, V, R>
+impl<T, R> Forest<T, R>
 where
-    T: TreeTypes + 'static,
-    V: DagCbor + Clone + Send + Sync + Debug + 'static,
-    R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static,
+    T: TreeTypes,
+    R: ReadOnlyStore<T::Link>,
 {
     pub fn store(&self) -> &R {
         &self.0.store
@@ -350,29 +351,6 @@ where
     }
 
     /// load a branch given a branch index, from the cache
-    pub(crate) fn load_branch_cached(
-        &self,
-        secrets: &Secrets,
-        index: &BranchIndex<T>,
-    ) -> Result<Option<Branch<T>>> {
-        if let Some(link) = &index.link {
-            let res = self.branch_cache().get(link);
-            match res {
-                Some(branch) => Ok(Some(branch)),
-                None => {
-                    let branch = self.load_branch(secrets, index)?;
-                    if let Some(branch) = &branch {
-                        self.branch_cache().put(*link, branch.clone());
-                    }
-                    Ok(branch)
-                }
-            }
-        } else {
-            Ok(None)
-        }
-    }
-
-    /// load a branch given a branch index, from the cache
     pub(crate) fn load_branch_cached_from_link(
         &self,
         secrets: &Secrets,
@@ -405,7 +383,7 @@ where
         result
     }
 
-    pub(crate) fn load_node(&self, secrets: &Secrets, index: &Index<T>) -> NodeInfo<T, V, R> {
+    pub(crate) fn load_node(&self, secrets: &Secrets, index: &Index<T>) -> NodeInfo<T, R> {
         match index {
             Index::Branch(index) => match index.link {
                 Some(link) => {
@@ -438,7 +416,7 @@ where
         result
     }
 
-    pub(crate) fn get0(
+    pub(crate) fn get0<V: DagCbor>(
         &self,
         stream: &Secrets,
         index: &Index<T>,
@@ -448,8 +426,8 @@ where
             return Ok(None);
         }
         match self.load_node(stream, index) {
-            NodeInfo::Branch(_, mut info) => {
-                let node = info.load()?;
+            NodeInfo::Branch(_, info) => {
+                let node = info.load_cached()?;
                 for child in node.children.iter() {
                     if offset < child.count() {
                         return self.get0(stream, child, offset);
@@ -459,9 +437,9 @@ where
                 }
                 Err(anyhow!("index out of bounds: {}", offset))
             }
-            NodeInfo::Leaf(index, mut info) => {
+            NodeInfo::Leaf(index, leaf) => {
                 let k = index.keys.get(offset as usize).unwrap();
-                let leaf = info.load()?;
+                let leaf = leaf.load()?;
                 let v = leaf.child_at::<V>(offset)?;
                 Ok(Some((k, v)))
             }
@@ -469,7 +447,7 @@ where
         }
     }
 
-    pub(crate) fn collect0(
+    pub(crate) fn collect0<V: DagCbor>(
         &self,
         stream: &Secrets,
         index: &Index<T>,
@@ -480,15 +458,15 @@ where
             return Ok(());
         }
         match self.load_node(stream, index) {
-            NodeInfo::Branch(_, mut node) => {
-                for child in node.load()?.children.iter() {
+            NodeInfo::Branch(_, node) => {
+                for child in node.load_cached()?.children.iter() {
                     if offset < child.count() {
                         self.collect0(stream, child, offset, into)?;
                     }
                     offset = offset.saturating_sub(child.count());
                 }
             }
-            NodeInfo::Leaf(index, mut node) => {
+            NodeInfo::Leaf(index, node) => {
                 let vs = node.load()?.as_ref().items::<V>()?;
                 let ks = index.keys.to_vec();
                 for (k, v) in ks.into_iter().zip(vs.into_iter()).skip(offset as usize) {
@@ -512,7 +490,7 @@ where
     /// Convenience method to stream filtered.
     ///
     /// Implemented in terms of stream_filtered_chunked
-    pub(crate) fn stream_filtered0<Q: Query<T> + Clone + 'static>(
+    pub(crate) fn stream_filtered0<Q: Query<T> + Clone + 'static, V: BanyanValue>(
         &self,
         secrets: Secrets,
         query: Q,
@@ -524,8 +502,10 @@ where
             .boxed()
     }
 
+    #[allow(clippy::clippy::type_complexity)]
     pub(crate) fn stream_filtered_chunked0<
         Q: Query<T> + Clone + Send + 'static,
+        V: BanyanValue,
         E: Send + 'static,
         F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
     >(
@@ -543,7 +523,7 @@ where
     }
 
     /// Convenience method to iterate filtered.
-    pub(crate) fn iter_filtered0<Q: Query<T> + Clone + Send + 'static>(
+    pub(crate) fn iter_filtered0<Q: Query<T> + Clone + Send + 'static, V: BanyanValue>(
         &self,
         secrets: Secrets,
         query: Q,
@@ -556,7 +536,7 @@ where
             })
             .flatten()
     }
-    pub(crate) fn iter_filtered_reverse0<Q: Query<T> + Clone + Send + 'static>(
+    pub(crate) fn iter_filtered_reverse0<Q: Query<T> + Clone + Send + 'static, V: BanyanValue>(
         &self,
         secrets: Secrets,
         query: Q,
@@ -570,8 +550,10 @@ where
             .flatten()
     }
 
+    #[allow(clippy::clippy::type_complexity)]
     pub(crate) fn stream_filtered_chunked_reverse0<
         Q: Query<T> + Clone + Send + 'static,
+        V: BanyanValue,
         E: Send + 'static,
         F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
     >(
@@ -590,8 +572,8 @@ where
 
     pub(crate) fn dump0(&self, secrets: &Secrets, index: &Index<T>, prefix: &str) -> Result<()> {
         match self.load_node(secrets, index) {
-            NodeInfo::Branch(index, mut branch) => {
-                let branch = branch.load()?;
+            NodeInfo::Branch(index, branch) => {
+                let branch = branch.load_cached()?;
                 println!(
                     "{}Branch(count={}, key_bytes={}, value_bytes={}, sealed={}, link={}, children={})",
                     prefix,
@@ -624,7 +606,7 @@ where
 
     fn roots0(
         &self,
-        stream: &Secrets,
+        secrets: &Secrets,
         index: &Index<T>,
         level: &mut i32,
         res: &mut Vec<Index<T>>,
@@ -635,9 +617,10 @@ where
         } else {
             *level = (*level).min(index.level() as i32 - 1);
             if let Index::Branch(b) = index {
-                if let Some(branch) = self.load_branch(stream, b)? {
+                if let Some(link) = b.link {
+                    let branch = self.load_branch_from_link(secrets, &link)?;
                     for child in branch.children.iter() {
-                        self.roots0(stream, child, level, res)?;
+                        self.roots0(secrets, child, level, res)?;
                     }
                 }
             }
@@ -665,14 +648,14 @@ where
             *level = (*level).min((index.level() as i32) - 1);
         }
         match self.load_node(secrets, index) {
-            NodeInfo::Leaf(index, mut leaf) => {
+            NodeInfo::Leaf(index, leaf) => {
                 let leaf = leaf.load()?;
                 let value_count = leaf.as_ref().count()?;
                 let key_count = index.keys.count();
                 check!(value_count == key_count);
             }
-            NodeInfo::Branch(index, mut branch) => {
-                let branch = branch.load()?;
+            NodeInfo::Branch(index, branch) => {
+                let branch = branch.load_cached()?;
                 check!(branch.count() == index.summaries.count());
                 for child in &branch.children.to_vec() {
                     if index.sealed {
@@ -704,11 +687,11 @@ where
     /// Checks if a node is packed to the left
     pub(crate) fn is_packed0(&self, secrets: &Secrets, index: &Index<T>) -> Result<bool> {
         Ok(
-            if let NodeInfo::Branch(index, mut branch) = self.load_node(secrets, index) {
+            if let NodeInfo::Branch(index, branch) = self.load_node(secrets, index) {
                 if index.sealed {
                     // sealed nodes, for themselves, are packed
                     true
-                } else if let Some((last, rest)) = branch.load()?.children.split_last() {
+                } else if let Some((last, rest)) = branch.load_cached()?.children.split_last() {
                     // for the first n-1 children, they must all be sealed and at exactly 1 level below
                     let first_ok = rest
                         .iter()

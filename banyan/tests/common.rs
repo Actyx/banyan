@@ -25,10 +25,10 @@ use std::{
 };
 
 #[allow(dead_code)]
-pub type Forest = banyan::Forest<TT, u64, MemStore<Sha256Digest>>;
+pub type Forest = banyan::Forest<TT, MemStore<Sha256Digest>>;
 
 #[allow(dead_code)]
-pub type Txn = Transaction<TT, u64, MemStore<Sha256Digest>, MemStore<Sha256Digest>>;
+pub type Txn = Transaction<TT, MemStore<Sha256Digest>, MemStore<Sha256Digest>>;
 
 #[derive(Debug, Clone)]
 pub struct TT;
@@ -94,14 +94,14 @@ pub fn txn(store: MemStore<Sha256Digest>, cache_cap: usize) -> Txn {
 }
 
 #[allow(dead_code)]
-pub fn create_test_tree<I>(xs: I) -> anyhow::Result<(Tree<TT>, Txn)>
+pub fn create_test_tree<I>(xs: I) -> anyhow::Result<(Tree<TT, u64>, Txn)>
 where
     I: IntoIterator<Item = (Key, u64)>,
     I::IntoIter: Send,
 {
     let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
     let forest = txn(store, 1000);
-    let mut builder = StreamBuilder::<TT>::debug();
+    let mut builder = StreamBuilder::<TT, u64>::debug();
     forest.extend(&mut builder, xs)?;
     forest.assert_invariants(&builder)?;
     Ok((builder.snapshot(), forest))
@@ -110,7 +110,7 @@ where
 /// Extract all links from a tree
 pub fn links(
     forest: &Forest,
-    tree: &Tree<TT>,
+    tree: &Tree<TT, u64>,
     links: &mut HashSet<Sha256Digest>,
 ) -> anyhow::Result<()> {
     let link_opts = forest
@@ -121,7 +121,7 @@ pub fn links(
     Ok(())
 }
 
-fn same_secrets(a: &Tree<TT>, b: &Tree<TT>) -> bool {
+fn same_secrets<X, Y>(a: &Tree<TT, X>, b: &Tree<TT, Y>) -> bool {
     match (a.secrets(), b.secrets()) {
         (Some(sa), Some(sb)) => {
             sa.index_key() == sb.index_key() || sa.value_key() == sb.value_key()
@@ -177,7 +177,7 @@ fn no_range_overlap(forest: &Forest, hashes: HashSet<Sha256Digest>) -> anyhow::R
 #[allow(dead_code)]
 pub fn no_offset_overlap<'a>(
     forest: &'a Forest,
-    trees: impl IntoIterator<Item = &'a Tree<TT>>,
+    trees: impl IntoIterator<Item = &'a Tree<TT, u64>>,
 ) -> anyhow::Result<bool> {
     let mut trees = trees.into_iter().peekable();
     if let Some(first) = trees.peek().cloned() {

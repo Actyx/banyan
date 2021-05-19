@@ -1,7 +1,7 @@
 //! creation and traversal of banyan trees
 use super::index::*;
 use crate::store::{BlockWriter, BranchCache, ReadOnlyStore};
-use core::{fmt::Debug, hash::Hash, iter::FromIterator, marker::PhantomData, ops::Range};
+use core::{fmt::Debug, hash::Hash, iter::FromIterator, ops::Range};
 use libipld::cbor::DagCbor;
 use std::{fmt::Display, sync::Arc};
 mod index_iter;
@@ -45,34 +45,32 @@ pub trait TreeTypes: Debug + Send + Sync + Clone + 'static {
 
 /// Everything that is needed to read trees
 #[derive(Debug)]
-pub struct ForestInner<T: TreeTypes, V, R> {
+pub struct ForestInner<T: TreeTypes, R> {
     pub(crate) store: R,
     pub(crate) branch_cache: BranchCache<T>,
-    pub(crate) _tt: PhantomData<V>,
 }
 
 #[derive(Debug)]
-pub struct Forest<TT: TreeTypes, V, R>(Arc<ForestInner<TT, V, R>>);
+pub struct Forest<TT: TreeTypes, R>(Arc<ForestInner<TT, R>>);
 
-impl<TT: TreeTypes, V, R> Clone for Forest<TT, V, R> {
+impl<TT: TreeTypes, R> Clone for Forest<TT, R> {
     fn clone(&self) -> Self {
         Self(self.0.clone())
     }
 }
 
-impl<TT: TreeTypes, V, R: Clone> Forest<TT, V, R> {
+impl<TT: TreeTypes, R: Clone> Forest<TT, R> {
     pub fn new(store: R, branch_cache: BranchCache<TT>) -> Self {
         Self(Arc::new(ForestInner {
             store,
             branch_cache,
-            _tt: PhantomData,
         }))
     }
 
     pub fn transaction<W: BlockWriter<TT::Link>>(
         &self,
         f: impl FnOnce(R) -> (R, W),
-    ) -> Transaction<TT, V, R, W> {
+    ) -> Transaction<TT, R, W> {
         let (reader, writer) = f(self.0.as_ref().store.clone());
         Transaction {
             read: Self::new(reader, self.branch_cache.clone()),
@@ -81,8 +79,8 @@ impl<TT: TreeTypes, V, R: Clone> Forest<TT, V, R> {
     }
 }
 
-impl<T: TreeTypes, V, R> std::ops::Deref for Forest<T, V, R> {
-    type Target = ForestInner<T, V, R>;
+impl<T: TreeTypes, R> std::ops::Deref for Forest<T, R> {
+    type Target = ForestInner<T, R>;
 
     fn deref(&self) -> &Self::Target {
         &self.0
@@ -90,12 +88,12 @@ impl<T: TreeTypes, V, R> std::ops::Deref for Forest<T, V, R> {
 }
 
 /// Everything that is needed to write trees. To write trees, you also have to read trees.
-pub struct Transaction<T: TreeTypes, V, R, W> {
-    read: Forest<T, V, R>,
+pub struct Transaction<T: TreeTypes, R, W> {
+    read: Forest<T, R>,
     writer: W,
 }
 
-impl<T: TreeTypes, V, R, W> Transaction<T, V, R, W> {
+impl<T: TreeTypes, R, W> Transaction<T, R, W> {
     /// Get the writer of the transaction.
     ///
     /// This can be used to finally commit the transaction or manually store the content.
@@ -108,22 +106,22 @@ impl<T: TreeTypes, V, R, W> Transaction<T, V, R, W> {
     }
 }
 
-impl<T: TreeTypes, V, R, W> Transaction<T, V, R, W>
+impl<T: TreeTypes, R, W> Transaction<T, R, W>
 where
-    R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static,
-    W: BlockWriter<T::Link> + 'static,
+    R: ReadOnlyStore<T::Link>,
+    W: BlockWriter<T::Link>,
 {
     /// create a new transaction.
     ///
     /// It is up to the caller to ensure that the reader reads the writes of the writer,
     /// if complex operations that require that should be performed in the transaction.
-    pub fn new(read: Forest<T, V, R>, writer: W) -> Self {
+    pub fn new(read: Forest<T, R>, writer: W) -> Self {
         Self { read, writer }
     }
 }
 
-impl<T: TreeTypes, V, R, W> std::ops::Deref for Transaction<T, V, R, W> {
-    type Target = Forest<T, V, R>;
+impl<T: TreeTypes, R, W> std::ops::Deref for Transaction<T, R, W> {
+    type Target = Forest<T, R>;
 
     fn deref(&self) -> &Self::Target {
         &self.read
