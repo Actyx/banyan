@@ -13,7 +13,7 @@ use futures::prelude::*;
 use std::sync::atomic::Ordering;
 use std::{ops::RangeInclusive, sync::atomic::AtomicU64, sync::Arc};
 
-impl<T: TreeTypes, R: ReadOnlyStore<T::Link> + Clone> Forest<T, R> {
+impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
     /// Given a sequence of roots, will stream matching events in ascending order indefinitely.
     ///
     /// This is implemented by calling stream_trees_chunked and just flattening the chunks.

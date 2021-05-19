@@ -102,7 +102,7 @@ impl<T: TreeTypes, V> fmt::Display for Tree<T, V> {
 pub type GraphEdges = Vec<(usize, usize)>;
 pub type GraphNodes<S> = BTreeMap<usize, S>;
 
-impl<T: TreeTypes, R: ReadOnlyStore<T::Link> + Clone> Forest<T, R> {
+impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
     pub fn load_stream_builder<V>(
         &self,
         secrets: Secrets,
@@ -209,7 +209,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link> + Clone> Forest<T, R> {
             edges.push((p, next_id));
         }
         nodes.insert(next_id, f((next_id, &node)));
-        if let NodeInfo::Branch(_, mut branch) = node {
+        if let NodeInfo::Branch(_, branch) = node {
             let branch = branch.load()?;
             let mut cur = next_id;
             for x in branch.children.iter() {
@@ -492,9 +492,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link> + Clone> Forest<T, R> {
     }
 }
 
-impl<T: TreeTypes, R: ReadOnlyStore<T::Link> + Clone, W: BlockWriter<T::Link> + 'static>
-    Transaction<T, R, W>
-{
+impl<T: TreeTypes, R: ReadOnlyStore<T::Link>, W: BlockWriter<T::Link>> Transaction<T, R, W> {
     pub(crate) fn tree_from_roots<V>(
         &self,
         mut roots: Vec<Index<T>>,

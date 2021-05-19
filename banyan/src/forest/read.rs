@@ -72,7 +72,7 @@ impl<T: TreeTypes, V, R, Q, E, F> TreeIter<T, V, R, Q, F>
 where
     T: TreeTypes,
     V: BanyanValue,
-    R: ReadOnlyStore<T::Link> + Clone,
+    R: ReadOnlyStore<T::Link>,
     Q: Query<T> + Clone + Send + 'static,
     E: Send + 'static,
     F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
@@ -170,7 +170,7 @@ where
             };
 
             match self.forest.load_node(&self.secrets, &head.index) {
-                NodeInfo::Branch(index, mut branch) => {
+                NodeInfo::Branch(index, branch) => {
                     if head.filter.is_empty() {
                         // we hit this branch node for the first time. Apply the
                         // query on its children and store it
@@ -220,7 +220,7 @@ where
                     }
                 }
 
-                NodeInfo::Leaf(index, mut leaf) => {
+                NodeInfo::Leaf(index, leaf) => {
                     let mut matching: SmallVec<[_; 32]> = smallvec![true; index.keys.len()];
                     self.query.containing(range.start, &index, &mut matching);
                     let data = if matching.any() {
@@ -271,7 +271,7 @@ impl<T: TreeTypes, V, R, Q, E, F> Iterator for TreeIter<T, V, R, Q, F>
 where
     T: TreeTypes,
     V: BanyanValue,
-    R: ReadOnlyStore<T::Link> + Clone,
+    R: ReadOnlyStore<T::Link>,
     Q: Query<T> + Clone + Send + 'static,
     E: Send + 'static,
     F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
@@ -294,7 +294,7 @@ where
 impl<T, R> Forest<T, R>
 where
     T: TreeTypes,
-    R: ReadOnlyStore<T::Link> + Clone,
+    R: ReadOnlyStore<T::Link>,
 {
     pub fn store(&self) -> &R {
         &self.0.store
@@ -449,7 +449,7 @@ where
             return Ok(None);
         }
         match self.load_node(stream, index) {
-            NodeInfo::Branch(_, mut info) => {
+            NodeInfo::Branch(_, info) => {
                 let node = info.load()?;
                 for child in node.children.iter() {
                     if offset < child.count() {
@@ -460,9 +460,9 @@ where
                 }
                 Err(anyhow!("index out of bounds: {}", offset))
             }
-            NodeInfo::Leaf(index, mut info) => {
+            NodeInfo::Leaf(index, leaf) => {
                 let k = index.keys.get(offset as usize).unwrap();
-                let leaf = info.load()?;
+                let leaf = leaf.load()?;
                 let v = leaf.child_at::<V>(offset)?;
                 Ok(Some((k, v)))
             }
@@ -481,7 +481,7 @@ where
             return Ok(());
         }
         match self.load_node(stream, index) {
-            NodeInfo::Branch(_, mut node) => {
+            NodeInfo::Branch(_, node) => {
                 for child in node.load()?.children.iter() {
                     if offset < child.count() {
                         self.collect0(stream, child, offset, into)?;
@@ -489,7 +489,7 @@ where
                     offset = offset.saturating_sub(child.count());
                 }
             }
-            NodeInfo::Leaf(index, mut node) => {
+            NodeInfo::Leaf(index, node) => {
                 let vs = node.load()?.as_ref().items::<V>()?;
                 let ks = index.keys.to_vec();
                 for (k, v) in ks.into_iter().zip(vs.into_iter()).skip(offset as usize) {
@@ -593,7 +593,7 @@ where
 
     pub(crate) fn dump0(&self, secrets: &Secrets, index: &Index<T>, prefix: &str) -> Result<()> {
         match self.load_node(secrets, index) {
-            NodeInfo::Branch(index, mut branch) => {
+            NodeInfo::Branch(index, branch) => {
                 let branch = branch.load()?;
                 println!(
                     "{}Branch(count={}, key_bytes={}, value_bytes={}, sealed={}, link={}, children={})",
@@ -668,13 +668,13 @@ where
             *level = (*level).min((index.level() as i32) - 1);
         }
         match self.load_node(secrets, index) {
-            NodeInfo::Leaf(index, mut leaf) => {
+            NodeInfo::Leaf(index, leaf) => {
                 let leaf = leaf.load()?;
                 let value_count = leaf.as_ref().count()?;
                 let key_count = index.keys.count();
                 check!(value_count == key_count);
             }
-            NodeInfo::Branch(index, mut branch) => {
+            NodeInfo::Branch(index, branch) => {
                 let branch = branch.load()?;
                 check!(branch.count() == index.summaries.count());
                 for child in &branch.children.to_vec() {
@@ -707,7 +707,7 @@ where
     /// Checks if a node is packed to the left
     pub(crate) fn is_packed0(&self, secrets: &Secrets, index: &Index<T>) -> Result<bool> {
         Ok(
-            if let NodeInfo::Branch(index, mut branch) = self.load_node(secrets, index) {
+            if let NodeInfo::Branch(index, branch) = self.load_node(secrets, index) {
                 if index.sealed {
                     // sealed nodes, for themselves, are packed
                     true

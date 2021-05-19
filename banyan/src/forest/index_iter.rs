@@ -59,7 +59,7 @@ impl<T: TreeTypes> TraverseState<T> {
 impl<T, R, Q> IndexIter<T, R, Q>
 where
     T: TreeTypes,
-    R: ReadOnlyStore<T::Link> + Clone,
+    R: ReadOnlyStore<T::Link>,
     Q: Query<T> + Clone + Send + 'static,
 {
     pub(crate) fn new(forest: Forest<T, R>, secrets: Secrets, query: Q, index: Index<T>) -> Self {
@@ -99,7 +99,7 @@ where
 impl<T, R, Q> Iterator for IndexIter<T, R, Q>
 where
     T: TreeTypes,
-    R: ReadOnlyStore<T::Link> + Clone,
+    R: ReadOnlyStore<T::Link>,
     Q: Query<T> + Clone + Send + 'static,
 {
     type Item = Result<Index<T>>;
@@ -126,7 +126,7 @@ where
             }
 
             match self.forest.load_node(&self.secrets, &head.index) {
-                NodeInfo::Branch(index, mut branch) => {
+                NodeInfo::Branch(index, branch) => {
                     let branch = match branch.load() {
                         Ok(branch) => branch,
                         Err(cause) => return Some(Err(cause)),

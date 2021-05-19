@@ -2,13 +2,13 @@ use futures::future::poll_fn;
 use futures::prelude::*;
 use ipfs_sqlite_block_store::BlockStore;
 
-use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Duration};
+use std::{collections::BTreeMap, str::FromStr, time::Duration};
 use structopt::StructOpt;
 use tracing::Level;
 
 use banyan::{
     query::{AllQuery, OffsetRangeQuery, QueryExt},
-    store::{ArcBlockWriter, ArcReadOnlyStore, BlockWriter, BranchCache, MemStore, ReadOnlyStore},
+    store::{BlockWriter, BranchCache, MemStore, ReadOnlyStore},
     Config, Forest, Secrets, StreamBuilder, Transaction, Tree,
 };
 use banyan_utils::{
@@ -27,8 +27,9 @@ static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
 pub type Error = anyhow::Error;
 pub type Result<T> = anyhow::Result<T>;
 
-type Txn = Transaction<TT, ArcReadOnlyStore<Sha256Digest>, ArcBlockWriter<Sha256Digest>>;
+type Txn = Transaction<TT, Storage, Storage>;
 
+#[derive(Clone)]
 enum Storage {
     Memory(MemStore<Sha256Digest>),
     Ipfs(IpfsStore),
@@ -346,7 +347,7 @@ async fn main() -> Result<()> {
         }
     };
 
-    let store = Arc::new(opts.storage);
+    let store = opts.storage;
     let index_key: chacha20::Key = opts.index_pass.map(create_chacha_key).unwrap_or_default();
     let value_key: chacha20::Key = opts.value_pass.map(create_chacha_key).unwrap_or_default();
     let config = Config::debug_fast();

@@ -2,7 +2,7 @@ use core::fmt::Debug;
 use std::collections::BTreeMap;
 
 use banyan::{
-    store::{ArcReadOnlyStore, ReadOnlyStore, ZstdDagCborSeq},
+    store::{ReadOnlyStore, ZstdDagCborSeq},
     Tree, {Forest, TreeTypes},
 };
 use libipld::{cbor::DagCbor, codec::Codec, json::DagJsonCodec};
@@ -135,7 +135,7 @@ where
 /// Takes a hash to a dagcbor encoded blob, and write it as dag-json to `writer`,
 /// each item separated by newlines.
 pub fn dump_json<Link: 'static>(
-    store: ArcReadOnlyStore<Link>,
+    store: impl ReadOnlyStore<Link>,
     hash: Link,
     value_key: chacha20::Key,
     mut writer: impl std::io::Write,

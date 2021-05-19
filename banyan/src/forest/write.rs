@@ -22,8 +22,8 @@ use std::{iter, time::Instant};
 impl<T, R, W> Transaction<T, R, W>
 where
     T: TreeTypes,
-    R: ReadOnlyStore<T::Link> + Clone,
-    W: BlockWriter<T::Link> + 'static,
+    R: ReadOnlyStore<T::Link>,
+    W: BlockWriter<T::Link>,
 {
     pub fn read(&self) -> &Forest<T, R> {
         &self.read
@@ -292,14 +292,14 @@ where
         }
         let secrets = stream.secrets().clone();
         Ok(match self.load_node(&secrets, index) {
-            NodeInfo::Leaf(index, mut leaf) => {
+            NodeInfo::Leaf(index, leaf) => {
                 tracing::debug!("extending existing leaf");
                 let leaf = leaf.load()?;
                 let keys = index.keys.clone();
                 self.extend_leaf(leaf.as_ref().compressed(), Some(keys), from, stream)?
                     .into()
             }
-            NodeInfo::Branch(index, mut branch) => {
+            NodeInfo::Branch(index, branch) => {
                 tracing::debug!("extending existing branch");
                 let branch = branch.load()?;
                 let mut children = branch.children.to_vec();

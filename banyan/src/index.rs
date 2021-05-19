@@ -340,29 +340,20 @@ pub struct BranchLoader<T: TreeTypes, R> {
     forest: Forest<T, R>,
     secrets: Secrets,
     link: T::Link,
-    branch: Option<Branch<T>>,
 }
 
-impl<T: TreeTypes, R: ReadOnlyStore<T::Link> + Clone> BranchLoader<T, R> {
+impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> BranchLoader<T, R> {
     pub fn new(forest: &Forest<T, R>, secrets: &Secrets, link: T::Link) -> Self {
         Self {
             forest: forest.clone(),
             secrets: secrets.clone(),
             link,
-            branch: None,
         }
     }
 
-    pub fn load(&mut self) -> anyhow::Result<&Branch<T>> {
-        Ok({
-            if self.branch.is_none() {
-                self.branch = Some(
-                    self.forest
-                        .load_branch_cached_from_link(&self.secrets, &self.link)?,
-                );
-            }
-            self.branch.as_ref().unwrap()
-        })
+    pub fn load(&self) -> anyhow::Result<Branch<T>> {
+        self.forest
+            .load_branch_cached_from_link(&self.secrets, &self.link)
     }
 }
 
@@ -371,26 +362,19 @@ pub struct LeafLoader<T: TreeTypes, R> {
     forest: Forest<T, R>,
     secrets: Secrets,
     link: T::Link,
-    leaf: Option<Leaf>,
 }
 
-impl<T: TreeTypes, R: ReadOnlyStore<T::Link> + Clone> LeafLoader<T, R> {
+impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> LeafLoader<T, R> {
     pub fn new(forest: &Forest<T, R>, secrets: &Secrets, link: T::Link) -> Self {
         Self {
             forest: forest.clone(),
             secrets: secrets.clone(),
             link,
-            leaf: None,
         }
     }
 
-    pub fn load(&mut self) -> anyhow::Result<&Leaf> {
-        Ok({
-            if self.leaf.is_none() {
-                self.leaf = Some(self.forest.load_leaf_from_link(&self.secrets, &self.link)?)
-            }
-            self.leaf.as_ref().unwrap()
-        })
+    pub fn load(&self) -> anyhow::Result<Leaf> {
+        self.forest.load_leaf_from_link(&self.secrets, &self.link)
     }
 }
 

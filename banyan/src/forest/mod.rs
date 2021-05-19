@@ -108,8 +108,8 @@ impl<T: TreeTypes, R, W> Transaction<T, R, W> {
 
 impl<T: TreeTypes, R, W> Transaction<T, R, W>
 where
-    R: ReadOnlyStore<T::Link> + Clone,
-    W: BlockWriter<T::Link> + 'static,
+    R: ReadOnlyStore<T::Link>,
+    W: BlockWriter<T::Link>,
 {
     /// create a new transaction.
     ///
