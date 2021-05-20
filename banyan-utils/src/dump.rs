@@ -2,7 +2,7 @@ use core::fmt::Debug;
 use std::collections::BTreeMap;
 
 use banyan::{
-    store::{ArcReadOnlyStore, ReadOnlyStore, ZstdDagCborSeq},
+    store::{ReadOnlyStore, ZstdDagCborSeq},
     Tree, {Forest, TreeTypes},
 };
 use libipld::{cbor::DagCbor, codec::Codec, json::DagJsonCodec};
@@ -101,8 +101,8 @@ impl<'a> dot::GraphWalk<'a, Node<'a>, Edge<'a>> for ForestWithTree {
 }
 
 pub fn graph<TT, V, R>(
-    forest: &Forest<TT, V, R>,
-    tree: &Tree<TT>,
+    forest: &Forest<TT, R>,
+    tree: &Tree<TT, V>,
     mut out: impl std::io::Write,
 ) -> anyhow::Result<()>
 where
@@ -134,8 +134,8 @@ where
 
 /// Takes a hash to a dagcbor encoded blob, and write it as dag-json to `writer`,
 /// each item separated by newlines.
-pub fn dump_json<Link>(
-    store: ArcReadOnlyStore<Link>,
+pub fn dump_json<Link: 'static>(
+    store: impl ReadOnlyStore<Link>,
     hash: Link,
     value_key: chacha20::Key,
     mut writer: impl std::io::Write,

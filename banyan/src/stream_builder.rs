@@ -1,5 +1,8 @@
 use core::fmt;
-use std::ops::{Deref, DerefMut};
+use std::{
+    marker::PhantomData,
+    ops::{Deref, DerefMut},
+};
 
 use crate::{
     forest::{Config, Secrets, TreeTypes},
@@ -77,12 +80,13 @@ impl StreamBuilderState {
 /// A builder for a stream of trees
 ///
 /// Most of the logic except for handling the empty case is implemented in the forest
-pub struct StreamBuilder<T: TreeTypes> {
+pub struct StreamBuilder<T: TreeTypes, V> {
     root: Option<Index<T>>,
     state: StreamBuilderState,
+    _p: PhantomData<V>,
 }
 
-impl<T: TreeTypes> fmt::Debug for StreamBuilder<T> {
+impl<T: TreeTypes, V> fmt::Debug for StreamBuilder<T, V> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.root {
             Some(root) => f
@@ -100,7 +104,7 @@ impl<T: TreeTypes> fmt::Debug for StreamBuilder<T> {
     }
 }
 
-impl<T: TreeTypes> fmt::Display for StreamBuilder<T> {
+impl<T: TreeTypes, V> fmt::Display for StreamBuilder<T, V> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.root {
             Some(root) => write!(f, "{:?}", root.link(),),
@@ -109,7 +113,7 @@ impl<T: TreeTypes> fmt::Display for StreamBuilder<T> {
     }
 }
 
-impl<T: TreeTypes> StreamBuilder<T> {
+impl<T: TreeTypes, V> StreamBuilder<T, V> {
     pub fn new(config: Config, secrets: Secrets) -> Self {
         let state = StreamBuilderState::new(0, secrets, config);
         Self::new_from_index(None, state)
@@ -128,7 +132,7 @@ impl<T: TreeTypes> StreamBuilder<T> {
         Self::new_from_index(None, state)
     }
 
-    pub fn snapshot(&self) -> Tree<T> {
+    pub fn snapshot(&self) -> Tree<T, V> {
         self.root
             .as_ref()
             .map(|root| {
@@ -176,7 +180,7 @@ impl<T: TreeTypes> StreamBuilder<T> {
     /// Modify a StreamBuilder and roll back the changes if the operation was not successful
     ///
     /// Note that consumed offets are *not* rolled back to make sure we don't reuse offsets.
-    pub fn transaction(&mut self) -> StreamTransaction<'_, T> {
+    pub fn transaction(&mut self) -> StreamTransaction<'_, T, V> {
         StreamTransaction::new(self, self.index().cloned())
     }
 
@@ -189,7 +193,11 @@ impl<T: TreeTypes> StreamBuilder<T> {
     }
 
     pub(crate) fn new_from_index(root: Option<Index<T>>, state: StreamBuilderState) -> Self {
-        Self { root, state }
+        Self {
+            root,
+            state,
+            _p: PhantomData,
+        }
     }
 
     pub(crate) fn set_index(&mut self, index: Option<Index<T>>) {
@@ -197,13 +205,13 @@ impl<T: TreeTypes> StreamBuilder<T> {
     }
 }
 
-pub struct StreamTransaction<'a, T: TreeTypes> {
-    builder: &'a mut StreamBuilder<T>,
+pub struct StreamTransaction<'a, T: TreeTypes, V> {
+    builder: &'a mut StreamBuilder<T, V>,
     restore: Option<Option<Index<T>>>,
 }
 
-impl<'a, T: TreeTypes> StreamTransaction<'a, T> {
-    fn new(builder: &'a mut StreamBuilder<T>, index: Option<Index<T>>) -> Self {
+impl<'a, T: TreeTypes, V> StreamTransaction<'a, T, V> {
+    fn new(builder: &'a mut StreamBuilder<T, V>, index: Option<Index<T>>) -> Self {
         Self {
             builder,
             restore: Some(index),
@@ -215,21 +223,21 @@ impl<'a, T: TreeTypes> StreamTransaction<'a, T> {
     }
 }
 
-impl<'a, T: TreeTypes> Deref for StreamTransaction<'a, T> {
-    type Target = StreamBuilder<T>;
+impl<'a, T: TreeTypes, V> Deref for StreamTransaction<'a, T, V> {
+    type Target = StreamBuilder<T, V>;
 
     fn deref(&self) -> &Self::Target {
         &self.builder
     }
 }
 
-impl<'a, T: TreeTypes> DerefMut for StreamTransaction<'a, T> {
+impl<'a, T: TreeTypes, V> DerefMut for StreamTransaction<'a, T, V> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.builder
     }
 }
 
-impl<'a, T: TreeTypes> Drop for StreamTransaction<'a, T> {
+impl<'a, T: TreeTypes, V> Drop for StreamTransaction<'a, T, V> {
     fn drop(&mut self) {
         if let Some(index) = self.restore.take() {
             self.builder.set_index(index);

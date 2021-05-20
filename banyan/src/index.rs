@@ -38,7 +38,11 @@
 //! [CompactSeq]: trait.CompactSeq.html
 //! [Semigroup]: trait.Semigroup.html
 //! [SimpleCompactSeq]: struct.SimpleCompactSeq.html
-use crate::{forest::TreeTypes, store::ZstdDagCborSeq, CipherOffset};
+use crate::{
+    forest::TreeTypes,
+    store::{ReadOnlyStore, ZstdDagCborSeq},
+    CipherOffset, Forest, Secrets,
+};
 use anyhow::{anyhow, Result};
 use derive_more::From;
 use libipld::{
@@ -332,22 +336,64 @@ impl AsRef<ZstdDagCborSeq> for Leaf {
 }
 
 #[derive(Debug)]
-/// enum that combines index and corresponding data
-pub enum NodeInfo<T: TreeTypes> {
-    // Branch with index and data
-    Branch(Arc<BranchIndex<T>>, Branch<T>),
-    /// Leaf with index and data
-    Leaf(Arc<LeafIndex<T>>, Leaf),
-    /// Purged branch, with just the index
+pub struct BranchLoader<T: TreeTypes, R> {
+    forest: Forest<T, R>,
+    secrets: Secrets,
+    link: T::Link,
+}
+
+impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> BranchLoader<T, R> {
+    pub fn new(forest: &Forest<T, R>, secrets: &Secrets, link: T::Link) -> Self {
+        Self {
+            forest: forest.clone(),
+            secrets: secrets.clone(),
+            link,
+        }
+    }
+
+    pub fn load_cached(&self) -> anyhow::Result<Branch<T>> {
+        self.forest
+            .load_branch_cached_from_link(&self.secrets, &self.link)
+    }
+
+    pub fn load(&self) -> anyhow::Result<Branch<T>> {
+        self.forest.load_branch_from_link(&self.secrets, &self.link)
+    }
+}
+
+#[derive(Debug)]
+pub struct LeafLoader<T: TreeTypes, R> {
+    forest: Forest<T, R>,
+    secrets: Secrets,
+    link: T::Link,
+}
+
+impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> LeafLoader<T, R> {
+    pub fn new(forest: &Forest<T, R>, secrets: &Secrets, link: T::Link) -> Self {
+        Self {
+            forest: forest.clone(),
+            secrets: secrets.clone(),
+            link,
+        }
+    }
+
+    pub fn load(&self) -> anyhow::Result<Leaf> {
+        self.forest.load_leaf_from_link(&self.secrets, &self.link)
+    }
+}
+
+#[derive(Debug)]
+pub enum NodeInfo<T: TreeTypes, R> {
+    Branch(Arc<BranchIndex<T>>, BranchLoader<T, R>),
+    Leaf(Arc<LeafIndex<T>>, LeafLoader<T, R>),
     PurgedBranch(Arc<BranchIndex<T>>),
-    /// Purged leaf, with just the index
     PurgedLeaf(Arc<LeafIndex<T>>),
 }
 
-impl<T: TreeTypes> Display for NodeInfo<T> {
+impl<T: TreeTypes, R> Display for NodeInfo<T, R> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            NodeInfo::Leaf(index, _) => {
+            Self::Leaf(index, _) => {
                 write!(
                     f,
                     "Leaf(count={}, value_bytes={}, sealed={}, link={})",
@@ -361,7 +407,7 @@ impl<T: TreeTypes> Display for NodeInfo<T> {
                 )
             }
 
-            NodeInfo::Branch(index, branch) => {
+            Self::Branch(index, _) => {
                 write!(
                     f,
                     "Branch(count={}, key_bytes={}, value_bytes={}, sealed={}, link={}, children={})",
@@ -373,17 +419,17 @@ impl<T: TreeTypes> Display for NodeInfo<T> {
                         .link
                         .map(|x| format!("{}", x))
                         .unwrap_or_else(|| "".to_string()),
-                    branch.children.len()
+                    index.summaries.len()
                 )
             }
-            NodeInfo::PurgedBranch(index) => {
+            Self::PurgedBranch(index) => {
                 write!(
                     f,
                     "PurgedBranch(count={}, key_bytes={}, value_bytes={}, sealed={})",
                     index.count, index.key_bytes, index.value_bytes, index.sealed,
                 )
             }
-            NodeInfo::PurgedLeaf(index) => {
+            Self::PurgedLeaf(index) => {
                 write!(
                     f,
                     "PurgedLeaf(count={}, key_bytes={}, sealed={})",

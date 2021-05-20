@@ -5,8 +5,6 @@ use crate::{
     store::ReadOnlyStore,
 };
 use anyhow::Result;
-use core::fmt::Debug;
-use libipld::cbor::DagCbor;
 use smallvec::{smallvec, SmallVec};
 
 #[derive(PartialEq)]
@@ -15,8 +13,8 @@ enum Mode {
     Backward,
 }
 
-pub(crate) struct IndexIter<T: TreeTypes, V, R, Q: Query<T>> {
-    forest: Forest<T, V, R>,
+pub(crate) struct IndexIter<T: TreeTypes, R, Q: Query<T>> {
+    forest: Forest<T, R>,
     secrets: Secrets,
     offset: u64,
     query: Q,
@@ -58,19 +56,13 @@ impl<T: TreeTypes> TraverseState<T> {
     }
 }
 
-impl<T, V, R, Q> IndexIter<T, V, R, Q>
+impl<T, R, Q> IndexIter<T, R, Q>
 where
-    T: TreeTypes + 'static,
-    V: DagCbor + Clone + Send + Sync + Debug + 'static,
-    R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static,
-    Q: Query<T> + Clone + Send + 'static,
+    T: TreeTypes,
+    R: ReadOnlyStore<T::Link>,
+    Q: Query<T>,
 {
-    pub(crate) fn new(
-        forest: Forest<T, V, R>,
-        secrets: Secrets,
-        query: Q,
-        index: Index<T>,
-    ) -> Self {
+    pub(crate) fn new(forest: Forest<T, R>, secrets: Secrets, query: Q, index: Index<T>) -> Self {
         let mode = Mode::Forward;
         let stack = smallvec![TraverseState::new(index)];
 
@@ -84,7 +76,7 @@ where
         }
     }
     pub(crate) fn new_rev(
-        forest: Forest<T, V, R>,
+        forest: Forest<T, R>,
         secrets: Secrets,
         query: Q,
         index: Index<T>,
@@ -104,12 +96,11 @@ where
     }
 }
 
-impl<T, V, R, Q> Iterator for IndexIter<T, V, R, Q>
+impl<T, R, Q> Iterator for IndexIter<T, R, Q>
 where
-    T: TreeTypes + 'static,
-    V: DagCbor + Clone + Send + Sync + Debug + 'static,
-    R: ReadOnlyStore<T::Link> + Clone + Send + Sync + 'static,
-    Q: Query<T> + Clone + Send + 'static,
+    T: TreeTypes,
+    R: ReadOnlyStore<T::Link>,
+    Q: Query<T>,
 {
     type Item = Result<Index<T>>;
 
@@ -135,7 +126,11 @@ where
             }
 
             match self.forest.load_node(&self.secrets, &head.index) {
-                Ok(NodeInfo::Branch(index, branch)) => {
+                NodeInfo::Branch(index, branch) => {
+                    let branch = match branch.load_cached() {
+                        Ok(branch) => branch,
+                        Err(cause) => return Some(Err(cause)),
+                    };
                     if head.filter.is_empty() {
                         // we hit this branch node for the first time. Apply the
                         // query on its children and store it
@@ -175,7 +170,7 @@ where
                     }
                 }
 
-                Ok(NodeInfo::Leaf(index, _)) => {
+                NodeInfo::Leaf(index, _) => {
                     match self.mode {
                         Mode::Forward => {
                             self.offset += index.keys.count();
@@ -194,7 +189,7 @@ where
 
                 // even for purged leafs and branches or ignored chunks,
                 // produce a placeholder.
-                Ok(_) => {
+                _ => {
                     let TraverseState { index, .. } = self.stack.pop().expect("not empty");
                     // Ascend to parent's node. This might be none in case the
                     // tree's root node is a `PurgedBranch`.
@@ -211,7 +206,6 @@ where
                     };
                     break index;
                 }
-                Err(e) => return Some(Err(e)),
             };
         };
         Some(Ok(res))

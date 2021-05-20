@@ -106,6 +106,7 @@ where
 {
 }
 
+#[allow(dead_code)]
 pub(crate) type BoxedIter<'a, T> = Box<dyn Iterator<Item = T> + Send + 'a>;
 
 /// Like the one from itertools, but more convenient
