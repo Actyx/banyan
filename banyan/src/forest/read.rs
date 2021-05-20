@@ -41,8 +41,6 @@ struct TraverseState<T: TreeTypes> {
     // Branches can not have zero children, so when this is empty we know that we have
     // to initialize it.
     filter: SmallVec<[bool; 64]>,
-    // Option to cache a branch to prevent hammering the branch cache
-    branch: Option<Branch<T>>,
 }
 
 impl<T: TreeTypes> TraverseState<T> {
@@ -51,7 +49,6 @@ impl<T: TreeTypes> TraverseState<T> {
             index,
             position: 0,
             filter: smallvec![],
-            branch: None,
         }
     }
     fn is_exhausted(&self, mode: &Mode) -> bool {
@@ -190,14 +187,7 @@ where
                         }
                     }
 
-                    let branch = match &head.branch {
-                        Some(branch) => branch.clone(),
-                        None => {
-                            let branch = branch.load_cached()?.clone();
-                            head.branch = Some(branch.clone());
-                            branch
-                        }
-                    };
+                    let branch = branch.load_cached()?;
 
                     let next_idx = head.position as usize;
                     if head.filter[next_idx] {

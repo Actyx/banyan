@@ -78,13 +78,16 @@ fn ops_count_1() -> anyhow::Result<()> {
         zstd_level: 10,
     };
     let n = 1000000;
-    let capacity = 0;
+    // test with a rather large cache, but a new one on every test
+    //
+    // we are interested in the number of distinct blocks being accessed.
+    let capacity = 16 << 20;
     let xs = (0..n)
         .map(|i| (Key::single(i, i, TagSet::empty()), i))
         .collect::<Vec<_>>();
     let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
     let store = OpsCountingStore::new(store);
-    let branch_cache = BranchCache::<TT>::new(capacity);
+    let branch_cache = BranchCache::<TT>::new(0);
     let txn = Transaction::new(Forest::new(store.clone(), branch_cache), store.clone());
     let mut builder = StreamBuilder::new(config, Secrets::default());
     txn.extend(&mut builder, xs)?;
@@ -96,11 +99,24 @@ fn ops_count_1() -> anyhow::Result<()> {
     let r_collect = store.reads() - r0;
     println!("collect {} {}", r_collect, t0.elapsed().as_micros());
 
-    let (xs2, _, r_iter) = test_ops_count("iter   ", &txn, &tree, AllQuery);
-    let (xs3, _, r_iter_small) =
-        test_ops_count("small  ", &txn, &tree, OffsetRangeQuery::from(0..n / 10));
-    let (xs4, _, r_iter_tiny) =
-        test_ops_count("tiny   ", &txn, &tree, OffsetRangeQuery::from(0..10));
+    let (xs2, _, r_iter) = test_ops_count(
+        "iter   ",
+        &Forest::new(store.clone(), BranchCache::new(capacity)),
+        &tree,
+        AllQuery,
+    );
+    let (xs3, _, r_iter_small) = test_ops_count(
+        "small  ",
+        &Forest::new(store.clone(), BranchCache::new(capacity)),
+        &tree,
+        OffsetRangeQuery::from(0..n / 10),
+    );
+    let (xs4, _, r_iter_tiny) = test_ops_count(
+        "tiny   ",
+        &Forest::new(store.clone(), BranchCache::new(capacity)),
+        &tree,
+        OffsetRangeQuery::from(0..10),
+    );
 
     assert!(xs1.len() as u64 == n);
     assert!(xs2.len() as u64 == n);
