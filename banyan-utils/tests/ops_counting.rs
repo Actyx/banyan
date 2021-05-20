@@ -113,7 +113,7 @@ fn ops_count_1() -> anyhow::Result<()> {
     );
     let (xs4, _, r_iter_tiny) = test_ops_count(
         "tiny   ",
-        &Forest::new(store.clone(), BranchCache::new(capacity)),
+        &Forest::new(store, BranchCache::new(capacity)),
         &tree,
         OffsetRangeQuery::from(0..10),
     );
