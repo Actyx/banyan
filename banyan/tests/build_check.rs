@@ -643,7 +643,7 @@ fn create_interesting_tree(
 
 /// Test all possible offset ranges for stream of trees, created from a simple tree
 #[tokio::test]
-async fn offset_range_test() -> anyhow::Result<()> {
+async fn offset_range_test_stream() -> anyhow::Result<()> {
     let n = 100;
     let (forest, payloads, tree) = create_interesting_tree(n)?;
     let trees = forest.left_roots(&tree)?;
@@ -671,7 +671,6 @@ async fn offset_range_test() -> anyhow::Result<()> {
             .flatten()
             .collect::<Vec<_>>()
             .await;
-        assert_eq!(res.len(), end - start + 1, "range was {:?}", range);
         assert_eq!(res.into_iter().collect::<Vec<_>>(), payloads[start..=end]);
     }
 
@@ -704,7 +703,6 @@ fn offset_range_test_simple() -> anyhow::Result<()> {
             .flatten()
             .flatten()
             .collect::<Vec<_>>();
-        assert_eq!(res.len(), end - start + 1, "range was {:?}", range);
         assert_eq!(res, payloads[start..=end]);
     }
 
