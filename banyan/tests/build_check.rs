@@ -635,6 +635,7 @@ async fn test_offset_ranges() -> anyhow::Result<()> {
         .into_iter()
         .map(|i| (Key(i as u64), i as u64))
         .collect();
+    let payloads = events.iter().map(|(_, v)| *v).collect::<Vec<_>>();
     let mut builder = StreamBuilder::<TT, u64>::new(config, secrets);
     forest.extend(&mut builder, events)?;
     let tree = builder.snapshot();
@@ -659,6 +660,7 @@ async fn test_offset_ranges() -> anyhow::Result<()> {
                 .collect::<Vec<_>>()
                 .await;
             assert_eq!(res.len(), end - start + 1, "range was {:?}", range);
+            assert_eq!(res.into_iter().collect::<Vec<_>>(), payloads[start..=end]);
         }
     }
 
