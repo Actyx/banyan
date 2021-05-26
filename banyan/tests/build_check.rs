@@ -9,7 +9,7 @@ use futures::prelude::*;
 use libipld::{cbor::DagCborCodec, codec::Codec, Cid};
 use quickcheck::TestResult;
 use quickcheck_macros::quickcheck;
-use std::{convert::TryInto, iter, ops::Range, str::FromStr, usize};
+use std::{convert::TryInto, iter, ops::Range, str::FromStr};
 
 use crate::common::no_offset_overlap;
 
@@ -616,9 +616,8 @@ fn retain1() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn create_interesting_tree(
-    n: usize,
-) -> anyhow::Result<(Forest<TT, MemStore<Sha256Digest>>, Vec<u64>, Tree<TT, u64>)> {
+type TreeFixture = (Forest<TT, MemStore<Sha256Digest>>, Vec<u64>, Tree<TT, u64>);
+fn create_interesting_tree(n: usize) -> anyhow::Result<TreeFixture> {
     let config = Config {
         target_leaf_size: 10000,
         max_leaf_count: 10,
@@ -648,15 +647,13 @@ async fn offset_range_test_stream() -> anyhow::Result<()> {
     let (forest, payloads, tree) = create_interesting_tree(n)?;
     let trees = forest.left_roots(&tree)?;
     let ranges = (0..n)
-        .map(|start| (start..n).map(move |end| (start, end)))
-        .flatten()
+        .flat_map(|start| (start..n).map(move |end| (start, end)))
         .collect::<Vec<_>>();
-    // let ranges = vec![(11, 11usize)];
     for (start, end) in ranges {
         let trees = stream::iter(trees.clone()).chain(stream::pending());
         let range = start as u64..=end as u64;
-        let res: Vec<_> = forest
-            .stream_trees_chunked(AllQuery, trees, range.clone(), &|_| ())
+        let res = forest
+            .stream_trees_chunked(AllQuery, trees, range, &|_| ())
             .map_ok(move |chunk| {
                 stream::iter(
                     chunk
@@ -683,14 +680,13 @@ fn offset_range_test_simple() -> anyhow::Result<()> {
     let n = 100;
     let (forest, payloads, tree) = create_interesting_tree(n)?;
     let ranges = (0..n)
-        .map(|start| (start..n).map(move |end| (start, end)))
-        .flatten()
+        .flat_map(|start| (start..n).map(move |end| (start, end)))
         .collect::<Vec<_>>();
     for (start, end) in ranges {
         let tree = tree.clone();
         let range = start as u64..=end as u64;
-        let res: Vec<_> = forest
-            .iter_filtered_chunked(&tree, OffsetRangeQuery::from(range.clone()), &|_| ())
+        let res = forest
+            .iter_filtered_chunked(&tree, OffsetRangeQuery::from(range), &|_| ())
             .map(move |item| {
                 item.map(|chunk| {
                     chunk
