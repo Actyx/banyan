@@ -2,14 +2,14 @@ use banyan::{
     index::{BranchIndex, Index, LeafIndex},
     query::{AllQuery, EmptyQuery, OffsetRangeQuery},
     store::MemStore,
-    Config, Secrets, StreamBuilder,
+    Config, Secrets, StreamBuilder, Tree,
 };
 use common::{create_test_tree, txn, IterExt, Key, KeySeq, Sha256Digest, TT};
 use futures::prelude::*;
 use libipld::{cbor::DagCborCodec, codec::Codec, Cid};
 use quickcheck::TestResult;
 use quickcheck_macros::quickcheck;
-use std::{convert::TryInto, iter, ops::Range, str::FromStr};
+use std::{convert::TryInto, iter, ops::Range, str::FromStr, usize};
 
 use crate::common::no_offset_overlap;
 
@@ -616,31 +616,11 @@ fn retain1() -> anyhow::Result<()> {
     Ok(())
 }
 
-const INTERESTING_CONFIG: Config = Config {
-    target_leaf_size: 10000,
-    max_leaf_count: 10,
-    max_key_branches: 4,
-    max_summary_branches: 4,
-    zstd_level: 10,
-    max_uncompressed_leaf_size: 16 * 1024 * 1024,
-};
-
+/// Test all possible offset ranges for stream of trees, created from a simple tree
 #[tokio::test]
 async fn offset_range_test() -> anyhow::Result<()> {
-    let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
-    let forest = txn(store, 1000);
-    let secrets = Secrets::default();
-    // use a fixed config so it is guaranteed that the tree is interesting in the range we are testing
-    let config = INTERESTING_CONFIG;
-    let n: usize = 100;
-    let events: Vec<_> = (0..n)
-        .into_iter()
-        .map(|i| (Key(i as u64), i as u64))
-        .collect();
-    let payloads = events.iter().map(|(_, v)| *v).collect::<Vec<_>>();
-    let mut builder = StreamBuilder::<TT, u64>::new(config, secrets);
-    forest.extend(&mut builder, events)?;
-    let tree = builder.snapshot();
+    let n = 100;
+    let (forest, payloads, tree) = create_interesting_tree(n)?;
     let trees = forest.left_roots(&tree)?;
     for start in 0..n {
         for end in start..n {
@@ -670,14 +650,24 @@ async fn offset_range_test() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[test]
-fn offset_range_test_simple() -> anyhow::Result<()> {
+fn create_interesting_tree(
+    n: usize,
+) -> anyhow::Result<(
+    banyan::Transaction<TT, MemStore<Sha256Digest>, MemStore<Sha256Digest>>,
+    Vec<u64>,
+    Tree<TT, u64>,
+)> {
+    let config = Config {
+        target_leaf_size: 10000,
+        max_leaf_count: 10,
+        max_key_branches: 4,
+        max_summary_branches: 4,
+        zstd_level: 10,
+        max_uncompressed_leaf_size: 16 * 1024 * 1024,
+    };
     let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
     let forest = txn(store, 1000);
     let secrets = Secrets::default();
-    // use a fixed config so it is guaranteed that the tree is interesting in the range we are testing
-    let config = INTERESTING_CONFIG;
-    let n: usize = 100;
     let events: Vec<_> = (0..n)
         .into_iter()
         .map(|i| (Key(i as u64), i as u64))
@@ -685,9 +675,17 @@ fn offset_range_test_simple() -> anyhow::Result<()> {
     let payloads = events.iter().map(|(_, v)| *v).collect::<Vec<_>>();
     let mut builder = StreamBuilder::<TT, u64>::new(config, secrets);
     forest.extend(&mut builder, events)?;
+    Ok((forest, payloads, builder.snapshot()))
+}
+
+/// Test all possible offset ranges for a single tree
+#[test]
+fn offset_range_test_simple() -> anyhow::Result<()> {
+    let n = 100;
+    let (forest, payloads, tree) = create_interesting_tree(n)?;
     for start in 0..n {
         for end in start..n {
-            let tree = builder.snapshot();
+            let tree = tree.clone();
             let range = start as u64..=end as u64;
             let res: Vec<_> = forest
                 .iter_filtered_chunked(&tree, OffsetRangeQuery::from(range.clone()), &|_| ())
