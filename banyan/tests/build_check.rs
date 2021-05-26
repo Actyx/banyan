@@ -616,6 +616,55 @@ fn retain1() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[tokio::test]
+async fn test_offset_ranges() -> anyhow::Result<()> {
+    let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
+    let forest = txn(store, 1000);
+    let secrets = Secrets::default();
+    // use a fixed config so it is guaranteed that the tree is interesting in the range we are testing
+    let config = Config {
+        target_leaf_size: 10000,
+        max_leaf_count: 10,
+        max_key_branches: 4,
+        max_summary_branches: 4,
+        zstd_level: 10,
+        max_uncompressed_leaf_size: 16 * 1024 * 1024,
+    };
+    let n: usize = 100;
+    let events: Vec<_> = (0..n)
+        .into_iter()
+        .map(|i| (Key(i as u64), i as u64))
+        .collect();
+    let mut builder = StreamBuilder::<TT, u64>::new(config, secrets);
+    forest.extend(&mut builder, events)?;
+    let tree = builder.snapshot();
+    for start in 0..n {
+        for end in start..n {
+            let trees = stream::once(future::ready(tree.clone())).chain(stream::pending());
+            let range = start as u64..=end as u64;
+            let res: Vec<_> = forest
+                .stream_trees_chunked(AllQuery, trees, range.clone(), &|_| ())
+                .map_ok(move |chunk| {
+                    stream::iter(
+                        chunk
+                            .data
+                            .into_iter()
+                            .map(move |(_, _, payload)| payload)
+                            .collect::<Vec<_>>(),
+                    )
+                })
+                .take_while(|x| future::ready(x.is_ok()))
+                .filter_map(|x| future::ready(x.ok()))
+                .flatten()
+                .collect::<Vec<_>>()
+                .await;
+            assert_eq!(res.len(), end - start + 1, "range was {:?}", range);
+        }
+    }
+
+    Ok(())
+}
+
 #[test]
 fn retain2() -> anyhow::Result<()> {
     let xs = vec![
