@@ -1,4 +1,4 @@
-#![allow(clippy::upper_case_acronyms, dead_code)]
+#![allow(clippy::upper_case_acronyms, dead_code, clippy::type_complexity)]
 //! helper methods for the tests
 use banyan::{
     index::{CompactSeq, Summarizable},
@@ -197,7 +197,7 @@ impl Arbitrary for UnpackedTestTree {
             }
             cuts.push(0);
             cuts.push(xs.len());
-            cuts.sort();
+            cuts.sort_unstable();
             cuts.dedup();
         } else {
             cuts.clear();
@@ -206,7 +206,7 @@ impl Arbitrary for UnpackedTestTree {
         let res = cuts
             .iter()
             .zip(cuts.iter().skip(1))
-            .map(|(start, end)| xs[*start..*end].iter().cloned().collect::<Vec<_>>())
+            .map(|(start, end)| xs[*start..*end].to_vec())
             .collect::<Vec<_>>();
         UnpackedTestTree(res)
     }
