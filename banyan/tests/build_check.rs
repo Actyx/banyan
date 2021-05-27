@@ -1,8 +1,8 @@
 use banyan::{
     index::{BranchIndex, Index, LeafIndex},
     query::{AllQuery, EmptyQuery, OffsetRangeQuery},
-    store::MemStore,
-    Config, Secrets, StreamBuilder,
+    store::{BranchCache, MemStore},
+    Config, Forest, Secrets, StreamBuilder, Tree,
 };
 use common::{create_test_tree, txn, IterExt, Key, KeySeq, Sha256Digest, TT};
 use futures::prelude::*;
@@ -613,6 +613,95 @@ fn retain1() -> anyhow::Result<()> {
     let xs = (0..10).map(|i| (Key(i), i)).collect::<Vec<_>>();
     let ok = do_retain(vec![xs])?;
     assert!(ok);
+    Ok(())
+}
+
+type TreeFixture = (Forest<TT, MemStore<Sha256Digest>>, Vec<u64>, Tree<TT, u64>);
+fn create_interesting_tree(n: usize) -> anyhow::Result<TreeFixture> {
+    let config = Config {
+        target_leaf_size: 10000,
+        max_leaf_count: 10,
+        max_key_branches: 4,
+        max_summary_branches: 4,
+        zstd_level: 10,
+        max_uncompressed_leaf_size: 16 * 1024 * 1024,
+    };
+    let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
+    let forest = Forest::new(store.clone(), BranchCache::new(1 << 20));
+    let txn = txn(store, 1 << 20);
+    let secrets = Secrets::default();
+    let events: Vec<_> = (0..n)
+        .into_iter()
+        .map(|i| (Key(i as u64), i as u64))
+        .collect();
+    let payloads = events.iter().map(|(_, v)| *v).collect::<Vec<_>>();
+    let mut builder = StreamBuilder::<TT, u64>::new(config, secrets);
+    txn.extend(&mut builder, events)?;
+    Ok((forest, payloads, builder.snapshot()))
+}
+
+/// Test all possible offset ranges for stream of trees, created from a simple tree
+#[tokio::test]
+async fn offset_range_test_stream() -> anyhow::Result<()> {
+    let n = 100;
+    let (forest, payloads, tree) = create_interesting_tree(n)?;
+    let trees = forest.left_roots(&tree)?;
+    let ranges = (0..n)
+        .flat_map(|start| (start..n).map(move |end| (start, end)))
+        .collect::<Vec<_>>();
+    for (start, end) in ranges {
+        let trees = stream::iter(trees.clone()).chain(stream::pending());
+        let range = start as u64..=end as u64;
+        let res = forest
+            .stream_trees_chunked(AllQuery, trees, range, &|_| ())
+            .map_ok(move |chunk| {
+                stream::iter(
+                    chunk
+                        .data
+                        .into_iter()
+                        .map(move |(_, _, payload)| payload)
+                        .collect::<Vec<_>>(),
+                )
+            })
+            .take_while(|x| future::ready(x.is_ok()))
+            .filter_map(|x| future::ready(x.ok()))
+            .flatten()
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(res.into_iter().collect::<Vec<_>>(), payloads[start..=end]);
+    }
+
+    Ok(())
+}
+
+/// Test all possible offset ranges for a single tree
+#[test]
+fn offset_range_test_simple() -> anyhow::Result<()> {
+    let n = 100;
+    let (forest, payloads, tree) = create_interesting_tree(n)?;
+    let ranges = (0..n)
+        .flat_map(|start| (start..n).map(move |end| (start, end)))
+        .collect::<Vec<_>>();
+    for (start, end) in ranges {
+        let tree = tree.clone();
+        let range = start as u64..=end as u64;
+        let res = forest
+            .iter_filtered_chunked(&tree, OffsetRangeQuery::from(range), &|_| ())
+            .map(move |item| {
+                item.map(|chunk| {
+                    chunk
+                        .data
+                        .into_iter()
+                        .map(move |(_, _, payload)| payload)
+                        .collect::<Vec<_>>()
+                })
+            })
+            .flatten()
+            .flatten()
+            .collect::<Vec<_>>();
+        assert_eq!(res, payloads[start..=end]);
+    }
+
     Ok(())
 }
 

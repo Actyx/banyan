@@ -68,7 +68,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
                     .take_while(move |result| {
                         if let Ok(chunk) = result {
                             // update the offset
-                            start_offset_ref.store(chunk.range.end, Ordering::SeqCst)
+                            start_offset_ref.fetch_max(chunk.range.end, Ordering::SeqCst);
                         }
                         // abort at the first non-ok offset
                         future::ready(result.is_ok())
@@ -122,7 +122,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
                     .take_while(move |result| {
                         if let Ok(chunk) = result {
                             // update the offset
-                            offset.store(chunk.range.end, Ordering::SeqCst)
+                            offset.fetch_max(chunk.range.end, Ordering::SeqCst);
                         }
                         // abort at the first non-ok offset
                         result.is_ok()
@@ -173,7 +173,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
                     .take_while(move |result| {
                         if let Ok(chunk) = result {
                             // update the end offset from the start of what we got
-                            end_offset_ref.store(chunk.range.start, Ordering::SeqCst);
+                            end_offset_ref.fetch_min(chunk.range.start, Ordering::SeqCst);
                         }
                         // abort at the first non-ok offset
                         future::ready(result.is_ok())
