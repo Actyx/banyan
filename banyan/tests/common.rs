@@ -1,4 +1,4 @@
-#![allow(clippy::upper_case_acronyms)]
+#![allow(clippy::upper_case_acronyms, dead_code, clippy::type_complexity)]
 //! helper methods for the tests
 use banyan::{
     index::{CompactSeq, Summarizable},
@@ -93,18 +93,110 @@ pub fn txn(store: MemStore<Sha256Digest>, cache_cap: usize) -> Txn {
     Txn::new(Forest::new(store.clone(), branch_cache), store)
 }
 
-#[allow(dead_code)]
-pub fn create_test_tree<I>(xs: I) -> anyhow::Result<(Tree<TT, u64>, Txn)>
-where
-    I: IntoIterator<Item = (Key, u64)>,
-    I::IntoIter: Send,
-{
-    let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
-    let forest = txn(store, 1000);
-    let mut builder = StreamBuilder::<TT, u64>::debug();
-    forest.extend(&mut builder, xs)?;
-    forest.assert_invariants(&builder)?;
-    Ok((builder.snapshot(), forest))
+/// A recipe for a tree, which will either be packed or unpacked
+#[derive(Debug, Clone)]
+pub enum TestTree {
+    Unpacked(UnpackedTestTree),
+    Packed(PackedTestTree),
+}
+
+impl TestTree {
+    pub fn packed(xs: Vec<(Key, u64)>) -> Self {
+        Self::Packed(PackedTestTree(xs))
+    }
+
+    pub fn unpacked(xss: Vec<Vec<(Key, u64)>>) -> Self {
+        Self::Unpacked(UnpackedTestTree(xss))
+    }
+
+    pub fn tree(self) -> anyhow::Result<(Tree<TT, u64>, Txn, Vec<(Key, u64)>)> {
+        let (b, txn, xs) = self.builder()?;
+        Ok((b.snapshot(), txn, xs))
+    }
+
+    pub fn builder(self) -> anyhow::Result<(StreamBuilder<TT, u64>, Txn, Vec<(Key, u64)>)> {
+        match self {
+            Self::Unpacked(x) => x.builder(),
+            Self::Packed(x) => x.builder(),
+        }
+    }
+}
+
+impl Arbitrary for TestTree {
+    fn arbitrary(g: &mut Gen) -> Self {
+        if Arbitrary::arbitrary(g) {
+            Self::Packed(Arbitrary::arbitrary(g))
+        } else {
+            Self::Unpacked(Arbitrary::arbitrary(g))
+        }
+    }
+}
+
+/// Recipe for a packed test tree
+#[derive(Debug, Clone)]
+pub struct PackedTestTree(Vec<(Key, u64)>);
+
+impl PackedTestTree {
+    /// Convert this into an actual tree
+    pub fn builder(self) -> anyhow::Result<(StreamBuilder<TT, u64>, Txn, Vec<(Key, u64)>)> {
+        let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
+        let txn = txn(store, 1 << 20);
+        let mut builder = StreamBuilder::<TT, u64>::debug();
+        let xs = self.0.clone();
+        txn.extend(&mut builder, self.0)?;
+        txn.assert_invariants(&builder)?;
+        Ok((builder, txn, xs))
+    }
+}
+
+impl Arbitrary for PackedTestTree {
+    fn arbitrary(g: &mut Gen) -> Self {
+        Self(Arbitrary::arbitrary(g))
+    }
+}
+
+/// Recipe for an unpacked test tree
+#[derive(Debug, Clone)]
+pub struct UnpackedTestTree(Vec<Vec<(Key, u64)>>);
+
+impl UnpackedTestTree {
+    /// Convert this into an actual tree
+    pub fn builder(self) -> anyhow::Result<(StreamBuilder<TT, u64>, Txn, Vec<(Key, u64)>)> {
+        let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
+        let txn = txn(store, 1 << 20);
+        let mut builder = StreamBuilder::<TT, u64>::debug();
+        let xs = self.0.iter().cloned().flatten().collect();
+        for xs in self.0 {
+            txn.extend_unpacked(&mut builder, xs)?;
+        }
+        txn.assert_invariants(&builder)?;
+        Ok((builder, txn, xs))
+    }
+}
+
+impl Arbitrary for UnpackedTestTree {
+    fn arbitrary(g: &mut Gen) -> Self {
+        let xs: Vec<(Key, u64)> = Arbitrary::arbitrary(g);
+        let mut cuts: Vec<usize> = Arbitrary::arbitrary(g);
+        if !xs.is_empty() {
+            for x in cuts.iter_mut() {
+                *x %= xs.len();
+            }
+            cuts.push(0);
+            cuts.push(xs.len());
+            cuts.sort_unstable();
+            cuts.dedup();
+        } else {
+            cuts.clear();
+        }
+        // cut xs in random places
+        let res = cuts
+            .iter()
+            .zip(cuts.iter().skip(1))
+            .map(|(start, end)| xs[*start..*end].to_vec())
+            .collect::<Vec<_>>();
+        UnpackedTestTree(res)
+    }
 }
 
 /// Extract all links from a tree
