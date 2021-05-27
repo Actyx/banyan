@@ -7,14 +7,13 @@ use banyan::{
 use common::{Key, Sha256Digest, TT};
 use fnv::FnvHashMap;
 use futures::prelude::*;
-use parking_lot::Mutex;
-use parking_lot::MutexGuard;
 use rand::Rng;
 use std::{sync::Arc, time::Duration};
 use std::{
     task::{Context, Poll, Waker},
     usize,
 };
+use tokio::sync::Mutex;
 
 mod common;
 
@@ -40,22 +39,20 @@ impl MiniStore {
         }
     }
 
-    pub fn push(&self, xs: Vec<(Key, u64)>) -> anyhow::Result<()> {
-        let mut guard = self.builder.lock();
+    pub async fn push(&self, xs: Vec<(Key, u64)>) -> anyhow::Result<()> {
+        let mut guard = self.builder.lock().await;
         let txn = self.forest.transaction(|x| (x.clone(), x));
         txn.extend_unpacked(&mut guard, xs)?;
-        drop(txn);
         self.current.set(guard.snapshot());
         Ok(())
     }
 
-    pub fn trees(
-        &self,
-    ) -> (
-        Forest<TT, MemStore<Sha256Digest>>,
-        impl Stream<Item = Tree<TT, u64>>,
-    ) {
-        (self.forest.clone(), self.current.new_observer())
+    pub fn forest(&self) -> &Forest<TT, MemStore<Sha256Digest>> {
+        &self.forest
+    }
+
+    pub fn trees(&self) -> impl Stream<Item = Tree<TT, u64>> {
+        self.current.new_observer()
     }
 }
 #[derive(Debug, Clone)]
@@ -73,8 +70,8 @@ impl Query<TT> for EqQuery {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn hammer_mini_store_tokio() -> anyhow::Result<()> {
-    let n_writers = 10;
-    let n_events = 100;
+    let n_writers = 20;
+    let n_events = 20;
     let store = MiniStore::new();
     let handles = (0..n_writers)
         .flat_map(|i| {
@@ -83,15 +80,16 @@ async fn hammer_mini_store_tokio() -> anyhow::Result<()> {
             let wh = tokio::task::spawn(async move {
                 for j in 0..n_events {
                     println!("Thread {} pushing {}", i, j);
-                    w.push(vec![(Key(i), j)]).unwrap();
+                    w.push(vec![(Key(i), j)]).await.unwrap();
                     let delay = rand::thread_rng().gen_range(1..100);
                     println!("sleeping for {}", delay);
                     tokio::time::sleep(Duration::from_millis(delay)).await;
                 }
             });
             let rh = tokio::task::spawn(async move {
-                let (forest, trees) = r.trees();
-                let events = forest
+                let trees = r.trees();
+                let events = r
+                    .forest()
                     .stream_trees(EqQuery(Key(i)), trees)
                     .take(n_events as usize)
                     .inspect_ok(|ev| println!("reader {} got event {:?}", i, ev))
@@ -107,9 +105,9 @@ async fn hammer_mini_store_tokio() -> anyhow::Result<()> {
         })
         .collect::<Vec<_>>();
     futures::future::join_all(handles).await;
-    let (forest, mut trees) = store.trees();
-    let tree = trees.next().await.unwrap();
-    let events = forest
+    let tree = store.trees().next().await.unwrap();
+    let events = store
+        .forest()
         .collect(&tree)?
         .into_iter()
         .flatten()
@@ -123,18 +121,18 @@ async fn hammer_mini_store_tokio() -> anyhow::Result<()> {
 #[derive(Debug)]
 pub struct Observer<T> {
     id: usize,
-    inner: Arc<Mutex<VariableInner<T>>>,
+    inner: Arc<parking_lot::Mutex<VariableInner<T>>>,
 }
 
 impl<T> Observer<T> {
-    fn new(inner: Arc<Mutex<VariableInner<T>>>) -> Self {
+    fn new(inner: Arc<parking_lot::Mutex<VariableInner<T>>>) -> Self {
         let id = inner.lock().new_observer_id();
         Self { id, inner }
     }
 }
 
 fn poll_next_impl<'a, T, U>(
-    mut inner: MutexGuard<'a, VariableInner<T>>,
+    mut inner: parking_lot::MutexGuard<'a, VariableInner<T>>,
     id: usize,
     cx: &mut Context<'_>,
     f: &impl Fn(&T) -> U,
@@ -183,12 +181,12 @@ impl<T: Clone> Stream for Observer<T> {
 /// even if there are no observers.
 #[derive(Debug)]
 pub struct Variable<T> {
-    inner: Arc<Mutex<VariableInner<T>>>,
+    inner: Arc<parking_lot::Mutex<VariableInner<T>>>,
 }
 
 impl<T> Variable<T> {
     pub fn new(value: T) -> Self {
-        let inner = Arc::new(Mutex::new(VariableInner::new(value)));
+        let inner = Arc::new(parking_lot::Mutex::new(VariableInner::new(value)));
         Self { inner }
     }
 
