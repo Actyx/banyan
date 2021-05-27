@@ -4,7 +4,7 @@ use banyan::{
     store::{BranchCache, MemStore},
     Config, Forest, Secrets, StreamBuilder, Tree,
 };
-use common::{create_test_tree, txn, IterExt, Key, KeySeq, Sha256Digest, TestTree, TT};
+use common::{txn, IterExt, Key, KeySeq, Sha256Digest, TestTree, TT};
 use futures::prelude::*;
 use libipld::{cbor::DagCborCodec, codec::Codec, Cid};
 use quickcheck::TestResult;
@@ -133,9 +133,9 @@ fn filtered_chunked_no_holes(t: TestTree, range: Range<u64>) -> anyhow::Result<b
     Ok(max_offset == (xs.len() as u64))
 }
 
-fn iter_index(xs: Vec<(Key, u64)>) -> anyhow::Result<bool> {
+fn iter_index(t: TestTree) -> anyhow::Result<bool> {
+    let (tree, txn, xs) = t.tree()?;
     let len = xs.len() as u64;
-    let (tree, txn) = create_test_tree(xs)?;
     let actual = txn
         .iter_index(&tree, AllQuery)
         .collect::<anyhow::Result<Vec<_>>>()?;
@@ -152,8 +152,8 @@ fn iter_index(xs: Vec<(Key, u64)>) -> anyhow::Result<bool> {
 }
 
 #[quickcheck]
-fn build_iter_index(xs: Vec<(Key, u64)>) -> anyhow::Result<bool> {
-    iter_index(xs)
+fn build_iter_index(t: TestTree) -> anyhow::Result<bool> {
+    iter_index(t)
 }
 
 #[quickcheck]
@@ -358,44 +358,53 @@ async fn stream_trees_chunked_should_honour_an_inclusive_upper_bound(
     Ok(TestResult::from_bool(expected == actual))
 }
 
+#[tokio::test]
+async fn stream_trees_chunked_reverse_should_honour_an_inclusive_upper_bound_1(
+) -> anyhow::Result<()> {
+    let t = TestTree::unpacked(vec![vec![(Key(0), 0)], vec![(Key(1), 1)]]);
+    let res = do_stream_trees_chunked_reverse_should_honour_an_inclusive_upper_bound(t).await?;
+    assert!(!res.is_failure());
+    Ok(())
+}
+
 #[quickcheck_async::tokio]
 async fn stream_trees_chunked_reverse_should_honour_an_inclusive_upper_bound(
-    xs: Vec<(Key, u64)>,
+    t: TestTree,
 ) -> anyhow::Result<TestResult> {
+    do_stream_trees_chunked_reverse_should_honour_an_inclusive_upper_bound(t).await
+}
+
+async fn do_stream_trees_chunked_reverse_should_honour_an_inclusive_upper_bound(
+    t: TestTree,
+) -> anyhow::Result<TestResult> {
+    let (builder, forest, xs) = t.builder()?;
     let len = xs.len() as u64;
     if len == 0 {
         return Ok(TestResult::discard());
     }
-    let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
-    let forest = txn(store, 1000);
-    let mut builder = StreamBuilder::<TT, u64>::debug();
-    forest.extend_unpacked(&mut builder, xs.clone().into_iter())?;
     let trees = stream::once(async move { builder.snapshot() }).chain(stream::pending());
     let actual = forest
         .stream_trees_chunked_reverse(AllQuery, trees, 0u64..=(len - 1), &|_| ())
-        .map_ok(move |chunk| stream::iter(chunk.data))
+        .map_ok(move |chunk| {
+            // reverse the chunk
+            stream::iter(chunk.data.into_iter().rev())
+        })
         .take_while(|x| future::ready(x.is_ok()))
         .filter_map(|x| future::ready(x.ok()))
         .flatten()
         .collect::<Vec<_>>()
         .await;
 
-    let values = xs
+    let expected = xs
         .iter()
         .cloned()
         .enumerate()
         .map(|(i, (k, v))| (i as u64, k, v))
-        .collect::<Vec<_>>();
-    let leaf_count = Config::debug().max_leaf_count;
-    // desc per chunk, asc inside chunk
-    let expected: Vec<_> = values
-        .chunks(leaf_count as usize)
         .rev()
-        .flat_map(|x| x.iter().cloned())
-        .collect();
+        .collect::<Vec<_>>();
 
     if expected != actual {
-        println!("{:?} {:?}", expected, actual);
+        println!("expected {:?} actual {:?}", expected, actual);
     }
     Ok(TestResult::from_bool(expected == actual))
 }
