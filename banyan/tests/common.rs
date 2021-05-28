@@ -2,7 +2,7 @@
 //! helper methods for the tests
 use banyan::{
     index::{CompactSeq, Summarizable, VecSeq},
-    query::AllQuery,
+    query::{AllQuery, Query},
     store::{BranchCache, MemStore, ReadOnlyStore},
     StreamBuilder, Transaction, Tree, TreeTypes,
 };
@@ -38,6 +38,31 @@ pub struct Key(pub u64);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, DagCbor)]
 pub struct KeyRange(pub u64, pub u64);
+
+impl KeyRange {
+    fn to_range_set(&self) -> RangeSet<u64> {
+        RangeSet::from(self.0..self.1)
+    }
+}
+
+#[derive(Debug)]
+pub struct KeyQuery(RangeSet<u64>);
+
+impl Query<TT> for KeyQuery {
+    fn containing(&self, _: u64, index: &banyan::index::LeafIndex<TT>, res: &mut [bool]) {
+        for (res, key) in res.iter_mut().zip(index.keys()) {
+            if *res {
+                *res = self.0.contains(&key.0)
+            }
+        }
+    }
+
+    fn intersecting(&self, _offset: u64, index: &banyan::index::BranchIndex<TT>, res: &mut [bool]) {
+        for (res, range) in res.iter_mut().zip(index.summaries()) {
+            *res &= !self.0.is_disjoint(&range.to_range_set());
+        }
+    }
+}
 
 /// A trivial implementation of a CompactSeq as just a Seq.
 ///
