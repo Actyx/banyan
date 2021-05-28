@@ -1,7 +1,7 @@
 #![allow(clippy::upper_case_acronyms, dead_code, clippy::type_complexity)]
 //! helper methods for the tests
 use banyan::{
-    index::{CompactSeq, Summarizable},
+    index::{CompactSeq, Summarizable, VecSeq},
     query::AllQuery,
     store::{BranchCache, MemStore, ReadOnlyStore},
     StreamBuilder, Transaction, Tree, TreeTypes,
@@ -36,6 +36,9 @@ pub struct TT;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, DagCbor)]
 pub struct Key(pub u64);
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, DagCbor)]
+pub struct KeyRange(pub u64, pub u64);
+
 /// A trivial implementation of a CompactSeq as just a Seq.
 ///
 /// This is useful mostly as a reference impl and for testing.
@@ -52,15 +55,22 @@ impl CompactSeq for KeySeq {
     }
 }
 
-impl Summarizable<Key> for KeySeq {
-    fn summarize(&self) -> Key {
-        let mut res = self.0[0];
-        for i in 1..self.0.len() {
-            res.combine(&self.0[i]);
-        }
-        res
+impl Summarizable<KeyRange> for KeySeq {
+    fn summarize(&self) -> KeyRange {
+        let min = self.0.iter().map(|x| x.0).min().unwrap();
+        let max = self.0.iter().map(|x| x.0).max().unwrap();
+        KeyRange(min, max)
     }
 }
+
+impl Summarizable<KeyRange> for VecSeq<KeyRange> {
+    fn summarize(&self) -> KeyRange {
+        let min = self.as_ref().iter().map(|x| x.0).min().unwrap();
+        let max = self.as_ref().iter().map(|x| x.1).max().unwrap();
+        KeyRange(min, max)
+    }
+}
+
 impl FromIterator<Key> for KeySeq {
     fn from_iter<T: IntoIterator<Item = Key>>(iter: T) -> Self {
         KeySeq(iter.into_iter().collect())
@@ -70,8 +80,8 @@ impl FromIterator<Key> for KeySeq {
 impl TreeTypes for TT {
     type Key = Key;
     type KeySeq = KeySeq;
-    type Summary = Key;
-    type SummarySeq = KeySeq;
+    type Summary = KeyRange;
+    type SummarySeq = VecSeq<KeyRange>;
     type Link = Sha256Digest;
 }
 

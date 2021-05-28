@@ -525,6 +525,12 @@ impl FromIterator<()> for UnitSeq {
 #[derive(Debug, Clone, DagCbor)]
 pub struct VecSeq<T: DagCbor>(Vec<T>);
 
+impl<T: DagCbor> AsRef<[T]> for VecSeq<T> {
+    fn as_ref(&self) -> &[T] {
+        &self.0
+    }
+}
+
 impl<T: DagCbor + Clone> CompactSeq for VecSeq<T> {
     type Item = T;
     fn get(&self, index: usize) -> Option<T> {
