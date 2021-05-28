@@ -4,10 +4,11 @@ use banyan::{
     store::{BranchCache, MemStore},
     Config, Forest, Secrets, StreamBuilder, Tree,
 };
-use common::{Key, Sha256Digest, TT};
+use common::{Key, KeyQuery, Sha256Digest, TT};
 use fnv::FnvHashMap;
 use futures::prelude::*;
 use rand::Rng;
+use range_collections::RangeSet;
 use std::{sync::Arc, time::Duration};
 use std::{
     task::{Context, Poll, Waker},
@@ -90,7 +91,7 @@ async fn hammer_mini_store_tokio() -> anyhow::Result<()> {
                 let trees = r.trees();
                 let events = r
                     .forest()
-                    .stream_trees(EqQuery(Key(i)), trees)
+                    .stream_trees(KeyQuery(RangeSet::from(i..i + 1)), trees)
                     .take(n_events as usize)
                     .inspect_ok(|ev| println!("reader {} got event {:?}", i, ev))
                     .map_ok(|(_, _, value)| value)
