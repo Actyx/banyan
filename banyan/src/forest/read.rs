@@ -198,6 +198,13 @@ where
                     } else {
                         let index = &branch.children[next_idx];
                         head.next_pos(&self.mode);
+                        // calculate the range in advance
+                        let range = match self.mode {
+                            Mode::Forward => self.offset..self.offset.saturating_add(index.count()),
+                            Mode::Backward => {
+                                self.offset.saturating_sub(index.count())..self.offset
+                            }
+                        };
                         // move offset
                         match self.mode {
                             Mode::Forward => self.offset += index.count(),
