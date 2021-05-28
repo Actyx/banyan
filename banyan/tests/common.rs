@@ -2,7 +2,7 @@
 //! helper methods for the tests
 use banyan::{
     index::{CompactSeq, Summarizable, VecSeq},
-    query::{AllQuery, Query},
+    query::{AllQuery, AndQuery, OffsetRangeQuery, Query},
     store::{BranchCache, MemStore, ReadOnlyStore},
     StreamBuilder, Transaction, Tree, TreeTypes,
 };
@@ -41,25 +41,23 @@ pub struct KeyRange(pub u64, pub u64);
 
 impl KeyRange {
     fn to_range_set(&self) -> RangeSet<u64> {
-        RangeSet::from(self.0..self.1)
+        RangeSet::from(self.0..self.1.saturating_add(1))
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct KeyQuery(RangeSet<u64>);
 
 impl Query<TT> for KeyQuery {
     fn containing(&self, _: u64, index: &banyan::index::LeafIndex<TT>, res: &mut [bool]) {
         for (res, key) in res.iter_mut().zip(index.keys()) {
-            if *res {
-                *res = self.0.contains(&key.0)
-            }
+            *res = *res && self.0.contains(&key.0);
         }
     }
 
     fn intersecting(&self, _offset: u64, index: &banyan::index::BranchIndex<TT>, res: &mut [bool]) {
         for (res, range) in res.iter_mut().zip(index.summaries()) {
-            *res &= !self.0.is_disjoint(&range.to_range_set());
+            *res = *res && !self.0.is_disjoint(&range.to_range_set());
         }
     }
 }
@@ -126,6 +124,57 @@ impl Arbitrary for Key {
 pub fn txn(store: MemStore<Sha256Digest>, cache_cap: usize) -> Txn {
     let branch_cache = BranchCache::new(cache_cap);
     Txn::new(Forest::new(store.clone(), branch_cache), store)
+}
+
+#[derive(Debug, Clone)]
+pub struct TestFilter {
+    offset_range: Range<u64>,
+    keys: RangeSet<u64>,
+}
+
+impl TestFilter {
+    pub fn offset_range(offset_range: Range<u64>) -> Self {
+        Self {
+            offset_range,
+            keys: RangeSet::all(),
+        }
+    }
+
+    pub fn keys(values: impl IntoIterator<Item = u64>) -> Self {
+        let mut keys = RangeSet::empty();
+        for value in values {
+            keys |= RangeSet::from(value..value + 1);
+        }
+        Self {
+            offset_range: 0..u64::max_value(),
+            keys,
+        }
+    }
+
+    pub fn query(&self) -> impl Query<TT> + Clone {
+        AndQuery(
+            OffsetRangeQuery::from(self.offset_range.clone()),
+            KeyQuery(self.keys.clone()),
+        )
+    }
+
+    pub fn contains(&self, triple: &(u64, Key, u64)) -> bool {
+        let (offset, key, _) = triple;
+        self.offset_range.contains(offset) && self.keys.contains(&key.0)
+    }
+}
+
+impl Arbitrary for TestFilter {
+    fn arbitrary(g: &mut Gen) -> Self {
+        let offset_range = Arbitrary::arbitrary(g);
+        let points: Vec<u16> = Arbitrary::arbitrary(g);
+        let mut keys = RangeSet::empty();
+        for key in points {
+            let key = key as u64;
+            keys |= RangeSet::from(key..key + 1);
+        }
+        Self { offset_range, keys }
+    }
 }
 
 /// A recipe for a tree, which will either be packed or unpacked

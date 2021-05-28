@@ -4,12 +4,12 @@ use banyan::{
     store::{BranchCache, MemStore},
     Config, Forest, Secrets, StreamBuilder, Tree,
 };
-use common::{txn, IterExt, Key, KeyRange, KeySeq, Sha256Digest, TestTree, TT};
+use common::{txn, IterExt, Key, KeyRange, KeySeq, Sha256Digest, TestFilter, TestTree, TT};
 use futures::prelude::*;
 use libipld::{cbor::DagCborCodec, codec::Codec, Cid};
 use quickcheck::TestResult;
 use quickcheck_macros::quickcheck;
-use std::{convert::TryInto, iter, ops::Range, str::FromStr};
+use std::{convert::TryInto, iter, str::FromStr};
 
 use crate::common::no_offset_overlap;
 
@@ -26,26 +26,29 @@ fn build_stream(t: TestTree) -> anyhow::Result<bool> {
 }
 
 /// checks that stream_filtered returns the same elements as filtering each element manually
-fn compare_filtered(t: TestTree, range: Range<u64>) -> anyhow::Result<bool> {
+fn compare_filtered(t: TestTree, filter: TestFilter) -> anyhow::Result<bool> {
     let (tree, txn, xs) = t.tree()?;
     let actual = txn
-        .iter_filtered(&tree, OffsetRangeQuery::from(range.clone()))
+        .iter_filtered(&tree, filter.query())
         .collect::<anyhow::Result<Vec<_>>>()?;
     let expected = xs
         .iter()
         .cloned()
         .enumerate()
         .map(|(i, (k, v))| (i as u64, k, v))
-        .filter(|(offset, _, _)| range.contains(offset))
+        .filter(|triple| filter.contains(triple))
         .collect::<Vec<_>>();
+    if actual != expected {
+        println!("{:?} {:?}", actual, expected);
+    }
     Ok(actual == expected)
 }
 
 /// checks that stream_filtered_chunked returns the same elements as filtering each element manually
-fn compare_filtered_chunked(t: TestTree, range: Range<u64>) -> anyhow::Result<bool> {
+fn compare_filtered_chunked(t: TestTree, filter: TestFilter) -> anyhow::Result<bool> {
     let (tree, txn, xs) = t.tree()?;
     let actual = txn
-        .iter_filtered_chunked(&tree, OffsetRangeQuery::from(range.clone()), &|_| ())
+        .iter_filtered_chunked(&tree, filter.query(), &|_| ())
         .map(|chunk_result| match chunk_result {
             Ok(chunk) => chunk.data.into_iter().map(Ok).boxed(),
             Err(cause) => iter::once(Err(cause)).boxed(),
@@ -57,15 +60,15 @@ fn compare_filtered_chunked(t: TestTree, range: Range<u64>) -> anyhow::Result<bo
         .cloned()
         .enumerate()
         .map(|(i, (k, v))| (i as u64, k, v))
-        .filter(|(offset, _, _)| range.contains(offset))
+        .filter(|triple| filter.contains(triple))
         .collect::<Vec<_>>();
     Ok(actual == expected)
 }
 /// checks that stream_filtered_chunked returns the same elements as stream_filtered_chunked_reverse
-fn compare_filtered_chunked_with_reverse(t: TestTree, range: Range<u64>) -> anyhow::Result<bool> {
+fn compare_filtered_chunked_with_reverse(t: TestTree, filter: TestFilter) -> anyhow::Result<bool> {
     let (tree, txn, xs) = t.tree()?;
     let mut reverse = txn
-        .iter_filtered_chunked_reverse(&tree, OffsetRangeQuery::from(range.clone()), &|_| ())
+        .iter_filtered_chunked_reverse(&tree, filter.query(), &|_| ())
         .map(|chunk_result| match chunk_result {
             Ok(chunk) => chunk.data.into_iter().rev().map(Ok).boxed(),
             Err(cause) => iter::once(Err(cause)).boxed(),
@@ -75,7 +78,7 @@ fn compare_filtered_chunked_with_reverse(t: TestTree, range: Range<u64>) -> anyh
     reverse.reverse();
 
     let forward = txn
-        .iter_filtered_chunked(&tree, OffsetRangeQuery::from(range.clone()), &|_| ())
+        .iter_filtered_chunked(&tree, filter.query(), &|_| ())
         .map(|chunk_result| match chunk_result {
             Ok(chunk) => chunk.data.into_iter().map(Ok).boxed(),
             Err(cause) => iter::once(Err(cause)).boxed(),
@@ -87,16 +90,16 @@ fn compare_filtered_chunked_with_reverse(t: TestTree, range: Range<u64>) -> anyh
         .cloned()
         .enumerate()
         .map(|(i, (k, v))| (i as u64, k, v))
-        .filter(|(offset, _, _)| range.contains(offset))
+        .filter(|triple| filter.contains(triple))
         .collect::<Vec<_>>();
     Ok(reverse == forward && forward == expected)
 }
 
 /// checks that stream_filtered_chunked returns the same elements as filtering each element manually
-fn compare_filtered_chunked_reverse(t: TestTree, range: Range<u64>) -> anyhow::Result<bool> {
+fn compare_filtered_chunked_reverse(t: TestTree, filter: TestFilter) -> anyhow::Result<bool> {
     let (tree, txn, xs) = t.tree()?;
     let actual = txn
-        .iter_filtered_chunked_reverse(&tree, OffsetRangeQuery::from(range.clone()), &|_| ())
+        .iter_filtered_chunked_reverse(&tree, filter.query(), &|_| ())
         .map(|chunk_result| match chunk_result {
             Ok(chunk) => chunk.data.into_iter().rev().map(Ok).boxed(),
             Err(cause) => iter::once(Err(cause)).boxed(),
@@ -109,7 +112,7 @@ fn compare_filtered_chunked_reverse(t: TestTree, range: Range<u64>) -> anyhow::R
         .enumerate()
         .rev()
         .map(|(i, (k, v))| (i as u64, k, v))
-        .filter(|(offset, _, _)| range.contains(offset))
+        .filter(|triple| filter.contains(triple))
         .collect::<Vec<_>>();
     if actual != expected {
         println!("{:?} {:?}", actual, expected);
@@ -118,10 +121,10 @@ fn compare_filtered_chunked_reverse(t: TestTree, range: Range<u64>) -> anyhow::R
 }
 
 /// checks that stream_filtered_chunked returns the same elements as filtering each element manually
-fn filtered_chunked_no_holes(t: TestTree, range: Range<u64>) -> anyhow::Result<bool> {
+fn filtered_chunked_no_holes(t: TestTree, filter: TestFilter) -> anyhow::Result<bool> {
     let (tree, txn, xs) = t.tree()?;
     let chunks = txn
-        .iter_filtered_chunked(&tree, OffsetRangeQuery::from(range), &|_| ())
+        .iter_filtered_chunked(&tree, filter.query(), &|_| ())
         .collect::<anyhow::Result<Vec<_>>>()?;
     let max_offset = chunks.iter().fold(0, |offset, chunk| {
         if offset == chunk.range.start {
@@ -157,31 +160,31 @@ fn build_iter_index(t: TestTree) -> anyhow::Result<bool> {
 }
 
 #[quickcheck]
-fn build_stream_filtered(t: TestTree, range: Range<u64>) -> anyhow::Result<bool> {
-    compare_filtered(t, range)
+fn build_stream_filtered(t: TestTree, filter: TestFilter) -> anyhow::Result<bool> {
+    compare_filtered(t, filter)
 }
 
 #[quickcheck]
-fn build_stream_filtered_chunked(t: TestTree, range: Range<u64>) -> anyhow::Result<bool> {
-    compare_filtered_chunked(t, range)
+fn build_stream_filtered_chunked(t: TestTree, filter: TestFilter) -> anyhow::Result<bool> {
+    compare_filtered_chunked(t, filter)
 }
 
 #[quickcheck]
 fn build_stream_filtered_chunked_forward_and_reverse(
     t: TestTree,
-    range: Range<u64>,
+    filter: TestFilter,
 ) -> anyhow::Result<bool> {
-    compare_filtered_chunked_with_reverse(t, range)
+    compare_filtered_chunked_with_reverse(t, filter)
 }
 
 #[quickcheck]
-fn build_stream_filtered_chunked_reverse(t: TestTree, range: Range<u64>) -> anyhow::Result<bool> {
-    compare_filtered_chunked_reverse(t, range)
+fn build_stream_filtered_chunked_reverse(t: TestTree, filter: TestFilter) -> anyhow::Result<bool> {
+    compare_filtered_chunked_reverse(t, filter)
 }
 
 #[quickcheck]
-fn build_stream_filtered_chunked_no_holes(t: TestTree, range: Range<u64>) -> anyhow::Result<bool> {
-    filtered_chunked_no_holes(t, range)
+fn build_stream_filtered_chunked_no_holes(t: TestTree, filter: TestFilter) -> anyhow::Result<bool> {
+    filtered_chunked_no_holes(t, filter)
 }
 
 #[quickcheck]
@@ -279,7 +282,21 @@ fn iter_from_should_return_all_items(t: TestTree) -> anyhow::Result<bool> {
 #[test]
 fn filter_test_simple() -> anyhow::Result<()> {
     let _ = env_logger::builder().is_test(true).try_init();
-    let ok = compare_filtered(TestTree::packed(vec![(Key(1), 1), (Key(2), 2)]), 0..1)?;
+    let ok = compare_filtered(
+        TestTree::packed(vec![(Key(1), 1), (Key(2), 2)]),
+        TestFilter::offset_range(0..1),
+    )?;
+    assert!(ok);
+    Ok(())
+}
+
+#[test]
+fn filter_test_simple_2() -> anyhow::Result<()> {
+    let _ = env_logger::builder().is_test(true).try_init();
+    let ok = compare_filtered(
+        TestTree::unpacked(vec![vec![(Key(1), 1)], vec![(Key(2), 2)]]),
+        TestFilter::offset_range(0..1),
+    )?;
     assert!(ok);
     Ok(())
 }
