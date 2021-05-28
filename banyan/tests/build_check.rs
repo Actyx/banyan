@@ -136,6 +136,22 @@ fn filtered_chunked_no_holes(t: TestTree, filter: TestFilter) -> anyhow::Result<
     Ok(max_offset == (xs.len() as u64))
 }
 
+/// checks that stream_filtered_chunked returns the same elements as filtering each element manually
+fn filtered_chunked_reverse_no_holes(t: TestTree, filter: TestFilter) -> anyhow::Result<bool> {
+    let (tree, txn, _xs) = t.tree()?;
+    let chunks = txn
+        .iter_filtered_chunked_reverse(&tree, filter.query(), &|_| ())
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    let min_offset = chunks.iter().fold(tree.count(), |offset, chunk| {
+        if offset == chunk.range.end {
+            chunk.range.start
+        } else {
+            offset
+        }
+    });
+    Ok(min_offset == 0)
+}
+
 fn iter_index(t: TestTree) -> anyhow::Result<bool> {
     let (tree, txn, xs) = t.tree()?;
     let len = xs.len() as u64;
@@ -185,6 +201,14 @@ fn build_stream_filtered_chunked_reverse(t: TestTree, filter: TestFilter) -> any
 #[quickcheck]
 fn build_stream_filtered_chunked_no_holes(t: TestTree, filter: TestFilter) -> anyhow::Result<bool> {
     filtered_chunked_no_holes(t, filter)
+}
+
+#[quickcheck]
+fn build_stream_filtered_chunked_reverse_no_holes(
+    t: TestTree,
+    filter: TestFilter,
+) -> anyhow::Result<bool> {
+    filtered_chunked_reverse_no_holes(t, filter)
 }
 
 #[quickcheck]
