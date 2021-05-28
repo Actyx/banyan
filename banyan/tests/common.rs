@@ -1,8 +1,8 @@
 #![allow(clippy::upper_case_acronyms, dead_code, clippy::type_complexity)]
 //! helper methods for the tests
 use banyan::{
-    index::{CompactSeq, Summarizable},
-    query::AllQuery,
+    index::{CompactSeq, Summarizable, VecSeq},
+    query::{AllQuery, AndQuery, OffsetRangeQuery, Query},
     store::{BranchCache, MemStore, ReadOnlyStore},
     StreamBuilder, Transaction, Tree, TreeTypes,
 };
@@ -36,6 +36,32 @@ pub struct TT;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, DagCbor)]
 pub struct Key(pub u64);
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, DagCbor)]
+pub struct KeyRange(pub u64, pub u64);
+
+impl KeyRange {
+    fn to_range_set(&self) -> RangeSet<u64> {
+        RangeSet::from(self.0..self.1.saturating_add(1))
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct KeyQuery(RangeSet<u64>);
+
+impl Query<TT> for KeyQuery {
+    fn containing(&self, _: u64, index: &banyan::index::LeafIndex<TT>, res: &mut [bool]) {
+        for (res, key) in res.iter_mut().zip(index.keys()) {
+            *res = *res && self.0.contains(&key.0);
+        }
+    }
+
+    fn intersecting(&self, _offset: u64, index: &banyan::index::BranchIndex<TT>, res: &mut [bool]) {
+        for (res, range) in res.iter_mut().zip(index.summaries()) {
+            *res = *res && !self.0.is_disjoint(&range.to_range_set());
+        }
+    }
+}
+
 /// A trivial implementation of a CompactSeq as just a Seq.
 ///
 /// This is useful mostly as a reference impl and for testing.
@@ -52,15 +78,22 @@ impl CompactSeq for KeySeq {
     }
 }
 
-impl Summarizable<Key> for KeySeq {
-    fn summarize(&self) -> Key {
-        let mut res = self.0[0];
-        for i in 1..self.0.len() {
-            res.combine(&self.0[i]);
-        }
-        res
+impl Summarizable<KeyRange> for KeySeq {
+    fn summarize(&self) -> KeyRange {
+        let min = self.0.iter().map(|x| x.0).min().unwrap();
+        let max = self.0.iter().map(|x| x.0).max().unwrap();
+        KeyRange(min, max)
     }
 }
+
+impl Summarizable<KeyRange> for VecSeq<KeyRange> {
+    fn summarize(&self) -> KeyRange {
+        let min = self.as_ref().iter().map(|x| x.0).min().unwrap();
+        let max = self.as_ref().iter().map(|x| x.1).max().unwrap();
+        KeyRange(min, max)
+    }
+}
+
 impl FromIterator<Key> for KeySeq {
     fn from_iter<T: IntoIterator<Item = Key>>(iter: T) -> Self {
         KeySeq(iter.into_iter().collect())
@@ -70,8 +103,8 @@ impl FromIterator<Key> for KeySeq {
 impl TreeTypes for TT {
     type Key = Key;
     type KeySeq = KeySeq;
-    type Summary = Key;
-    type SummarySeq = KeySeq;
+    type Summary = KeyRange;
+    type SummarySeq = VecSeq<KeyRange>;
     type Link = Sha256Digest;
 }
 
@@ -91,6 +124,57 @@ impl Arbitrary for Key {
 pub fn txn(store: MemStore<Sha256Digest>, cache_cap: usize) -> Txn {
     let branch_cache = BranchCache::new(cache_cap);
     Txn::new(Forest::new(store.clone(), branch_cache), store)
+}
+
+#[derive(Debug, Clone)]
+pub struct TestFilter {
+    offset_range: Range<u64>,
+    keys: RangeSet<u64>,
+}
+
+impl TestFilter {
+    pub fn offset_range(offset_range: Range<u64>) -> Self {
+        Self {
+            offset_range,
+            keys: RangeSet::all(),
+        }
+    }
+
+    pub fn keys(values: impl IntoIterator<Item = u64>) -> Self {
+        let mut keys = RangeSet::empty();
+        for value in values {
+            keys |= RangeSet::from(value..value + 1);
+        }
+        Self {
+            offset_range: 0..u64::max_value(),
+            keys,
+        }
+    }
+
+    pub fn query(&self) -> impl Query<TT> + Clone {
+        AndQuery(
+            OffsetRangeQuery::from(self.offset_range.clone()),
+            KeyQuery(self.keys.clone()),
+        )
+    }
+
+    pub fn contains(&self, triple: &(u64, Key, u64)) -> bool {
+        let (offset, key, _) = triple;
+        self.offset_range.contains(offset) && self.keys.contains(&key.0)
+    }
+}
+
+impl Arbitrary for TestFilter {
+    fn arbitrary(g: &mut Gen) -> Self {
+        let offset_range = Arbitrary::arbitrary(g);
+        let points: Vec<u16> = Arbitrary::arbitrary(g);
+        let mut keys = RangeSet::empty();
+        for key in points {
+            let key = key as u64;
+            keys |= RangeSet::from(key..key + 1);
+        }
+        Self { offset_range, keys }
+    }
 }
 
 /// A recipe for a tree, which will either be packed or unpacked
