@@ -46,7 +46,7 @@ impl KeyRange {
 }
 
 #[derive(Debug, Clone)]
-pub struct KeyQuery(RangeSet<u64>);
+pub struct KeyQuery(pub RangeSet<u64>);
 
 impl Query<TT> for KeyQuery {
     fn containing(&self, _: u64, index: &banyan::index::LeafIndex<TT>, res: &mut [bool]) {
