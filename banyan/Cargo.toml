@@ -1,6 +1,6 @@
 [package]
 name = "banyan"
-version = "0.13.2"
+version = "0.14.0"
 authors = ["Rüdiger Klaehn <rklaehn@protonmail.com>", "Actyx AG"]
 edition = "2018"
 license = "MIT OR Apache-2.0"
@@ -15,7 +15,7 @@ chacha20 = "0.7.1"
 derive_more = "0.99.13"
 fnv = "1.0.7"
 futures = { version = "0.3.14", features = ["thread-pool"] }
-libipld = { version = "0.11.0", features = ["unleashed"] }
+libipld = { version = "0.12.0", features = ["unleashed"] }
 maplit = "1.0.2"
 parking_lot = "0.11.1"
 smallvec = "1.6.1"
@@ -28,7 +28,7 @@ clap = "2.33.3"
 env_logger = "0.8.3"
 generic-array = "0.14.4"
 hex = "0.4.3"
-multihash = "0.13.2"
+multihash = "0.14.0"
 quickcheck = "1.0.3"
 quickcheck_async = "0.1.1"
 quickcheck_macros = "1.0.0"
