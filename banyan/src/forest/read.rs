@@ -72,7 +72,7 @@ where
     R: ReadOnlyStore<T::Link>,
     Q: Query<T>,
     E: Send + 'static,
-    F: Fn(NodeInfo<T, R>) -> E + Send + Sync + 'static,
+    F: Fn(&NodeInfo<T, R>) -> E + Send + Sync + 'static,
 {
     pub(crate) fn new(
         forest: Forest<T, R>,
@@ -132,11 +132,11 @@ where
             Mode::Forward => self.offset += index.count(),
             Mode::Backward => self.offset -= index.count(),
         };
-        let info = self.forest.load_node(&self.secrets, &index);
+        let info = self.forest.node_info(&self.secrets, &index);
         FilteredChunk {
             range,
             data: vec![],
-            extra: (self.mk_extra)(info),
+            extra: (self.mk_extra)(&info),
         }
     }
 
@@ -168,7 +168,8 @@ where
                 Mode::Backward => self.offset.saturating_sub(head.index.count())..self.offset,
             };
 
-            match self.forest.load_node(&self.secrets, &head.index) {
+            let info = self.forest.node_info(&self.secrets, &head.index);
+            match &info {
                 NodeInfo::Branch(index, branch) => {
                     if head.filter.is_empty() {
                         // we hit this branch node for the first time. Apply the
@@ -206,7 +207,7 @@ where
                                 self.offset.saturating_sub(index.count())..self.offset
                             }
                         };
-                        let info = self.forest.load_node(&self.secrets, index);
+                        let info = self.forest.node_info(&self.secrets, index);
                         // move offset
                         match self.mode {
                             Mode::Forward => self.offset += index.count(),
@@ -215,7 +216,7 @@ where
                         break FilteredChunk {
                             range,
                             data: vec![],
-                            extra: (self.mk_extra)(info),
+                            extra: (self.mk_extra)(&info),
                         };
                     }
                 }
@@ -241,7 +242,7 @@ where
                     } else {
                         Vec::new()
                     };
-                    let extra = (self.mk_extra)(NodeInfo::Leaf(index.clone(), leaf));
+                    let extra = (self.mk_extra)(&info);
                     match self.mode {
                         Mode::Backward => self.offset -= index.keys.count(),
                         Mode::Forward => self.offset += index.keys.count(),
@@ -274,7 +275,7 @@ where
     R: ReadOnlyStore<T::Link>,
     Q: Query<T>,
     E: Send + 'static,
-    F: Fn(NodeInfo<T, R>) -> E + Send + Sync + 'static,
+    F: Fn(&NodeInfo<T, R>) -> E + Send + Sync + 'static,
 {
     #[allow(clippy::type_complexity)]
     type Item = Result<FilteredChunk<(u64, T::Key, V), E>>;
@@ -385,7 +386,7 @@ where
         result
     }
 
-    pub(crate) fn load_node(&self, secrets: &Secrets, index: &Index<T>) -> NodeInfo<T, R> {
+    pub(crate) fn node_info(&self, secrets: &Secrets, index: &Index<T>) -> NodeInfo<T, R> {
         match index {
             Index::Branch(index) => match index.link {
                 Some(link) => {
@@ -428,7 +429,7 @@ where
         if offset >= index.count() {
             return Ok(None);
         }
-        match self.load_node(stream, index) {
+        match self.node_info(stream, index) {
             NodeInfo::Branch(_, info) => {
                 let node = info.load_cached()?;
                 for child in node.children.iter() {
@@ -460,7 +461,7 @@ where
         if offset >= index.count() {
             return Ok(());
         }
-        match self.load_node(stream, index) {
+        match self.node_info(stream, index) {
             NodeInfo::Branch(_, node) => {
                 for child in node.load_cached()?.children.iter() {
                     if offset < child.count() {
@@ -510,7 +511,7 @@ where
         Q: Query<T>,
         V: BanyanValue,
         E: Send + 'static,
-        F: Fn(NodeInfo<T, R>) -> E + Send + Sync + 'static,
+        F: Fn(&NodeInfo<T, R>) -> E + Send + Sync + 'static,
     >(
         &self,
         secrets: Secrets,
@@ -558,7 +559,7 @@ where
         Q: Query<T>,
         V: BanyanValue,
         E: Send + 'static,
-        F: Fn(NodeInfo<T, R>) -> E + Send + Sync + 'static,
+        F: Fn(&NodeInfo<T, R>) -> E + Send + Sync + 'static,
     >(
         &self,
         secrets: &Secrets,
@@ -574,7 +575,7 @@ where
     }
 
     pub(crate) fn dump0(&self, secrets: &Secrets, index: &Index<T>, prefix: &str) -> Result<()> {
-        match self.load_node(secrets, index) {
+        match self.node_info(secrets, index) {
             NodeInfo::Branch(index, branch) => {
                 let branch = branch.load_cached()?;
                 println!(
@@ -650,7 +651,7 @@ where
         if !index.sealed() {
             *level = (*level).min((index.level() as i32) - 1);
         }
-        match self.load_node(secrets, index) {
+        match self.node_info(secrets, index) {
             NodeInfo::Leaf(index, leaf) => {
                 let leaf = leaf.load()?;
                 let value_count = leaf.as_ref().count()?;
@@ -690,7 +691,7 @@ where
     /// Checks if a node is packed to the left
     pub(crate) fn is_packed0(&self, secrets: &Secrets, index: &Index<T>) -> Result<bool> {
         Ok(
-            if let NodeInfo::Branch(index, branch) = self.load_node(secrets, index) {
+            if let NodeInfo::Branch(index, branch) = self.node_info(secrets, index) {
                 if index.sealed {
                     // sealed nodes, for themselves, are packed
                     true

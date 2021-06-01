@@ -149,7 +149,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
         Q: Query<T>,
         V: BanyanValue,
         E: Send + 'static,
-        F: Fn(NodeInfo<T, R>) -> E + Send + Sync + 'static,
+        F: Fn(&NodeInfo<T, R>) -> E + Send + Sync + 'static,
     >(
         &self,
         secrets: Secrets,
@@ -164,7 +164,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
         Q: Query<T>,
         V: BanyanValue,
         E: Send + 'static,
-        F: Fn(NodeInfo<T, R>) -> E + Send + Sync + 'static,
+        F: Fn(&NodeInfo<T, R>) -> E + Send + Sync + 'static,
     >(
         &self,
         secrets: Secrets,
@@ -204,7 +204,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
         let mut edges = vec![];
         let mut nodes: BTreeMap<usize, S> = Default::default();
 
-        let node = self.load_node(secrets, index);
+        let node = self.node_info(secrets, index);
         if let Some(p) = parent_id {
             edges.push((p, next_id));
         }
@@ -386,7 +386,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
         Q: Query<T>,
         V: BanyanValue,
         E: Send + 'static,
-        F: Fn(NodeInfo<T, R>) -> E + Send + Sync + 'static,
+        F: Fn(&NodeInfo<T, R>) -> E + Send + Sync + 'static,
     {
         match &tree.0 {
             Some((index, secrets, _)) => self
@@ -406,7 +406,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
         Q: Query<T>,
         V: BanyanValue,
         E: Send + 'static,
-        F: Fn(NodeInfo<T, R>) -> E + Send + Sync + 'static,
+        F: Fn(&NodeInfo<T, R>) -> E + Send + Sync + 'static,
     {
         match &tree.0 {
             Some((index, secrets, _)) => self
@@ -426,7 +426,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
         Q: Query<T>,
         V: BanyanValue,
         E: Send + 'static,
-        F: Fn(NodeInfo<T, R>) -> E + Send + Sync + 'static,
+        F: Fn(&NodeInfo<T, R>) -> E + Send + Sync + 'static,
     {
         match &tree.0 {
             Some((index, secrets, _)) => self
@@ -446,7 +446,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
         Q: Query<T>,
         V: BanyanValue,
         E: Send + 'static,
-        F: Fn(NodeInfo<T, R>) -> E + Send + Sync + 'static,
+        F: Fn(&NodeInfo<T, R>) -> E + Send + Sync + 'static,
     {
         match &tree.0 {
             Some((index, secrets, _)) => self
