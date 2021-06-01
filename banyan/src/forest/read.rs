@@ -7,7 +7,7 @@ use crate::{
     query::Query,
     store::ZstdDagCborSeq,
     store::{BanyanValue, ReadOnlyStore},
-    util::{BoolSliceExt, IterExt},
+    util::{nonce, BoolSliceExt, IterExt},
 };
 use anyhow::{anyhow, Result};
 use futures::{prelude::*, stream::BoxStream};
@@ -307,7 +307,7 @@ where
     pub(crate) fn load_leaf(&self, stream: &Secrets, index: &LeafIndex<T>) -> Result<Option<Leaf>> {
         Ok(if let Some(link) = &index.link {
             let data = &self.store().get(link)?;
-            let (items, range) = ZstdDagCborSeq::decrypt(data, stream.value_key())?;
+            let (items, range) = ZstdDagCborSeq::decrypt(data, stream.value_key(), nonce::<T>())?;
             Some(Leaf::new(items, range))
         } else {
             None
@@ -317,7 +317,7 @@ where
     /// load a leaf given a leaf index
     pub(crate) fn load_leaf_from_link(&self, stream: &Secrets, link: &T::Link) -> Result<Leaf> {
         let data = &self.store().get(link)?;
-        let (items, range) = ZstdDagCborSeq::decrypt(data, stream.value_key())?;
+        let (items, range) = ZstdDagCborSeq::decrypt(data, stream.value_key(), nonce::<T>())?;
         Ok(Leaf::new(items, range))
     }
 
@@ -330,7 +330,7 @@ where
         let store = self.store.clone();
         let index_key = secrets.index_key();
         let bytes = store.get(&link)?;
-        let (children, byte_range) = deserialize_compressed::<T>(index_key, &bytes)?;
+        let (children, byte_range) = deserialize_compressed::<T>(index_key, nonce::<T>(), &bytes)?;
         let level = children.iter().map(|x| x.level()).max().unwrap() + 1;
         let count = children.iter().map(|x| x.count()).sum();
         let value_bytes = children.iter().map(|x| x.value_bytes()).sum();
@@ -375,7 +375,8 @@ where
         let t0 = Instant::now();
         let result = Ok({
             let bytes = self.store.get(&link)?;
-            let (children, byte_range) = deserialize_compressed(secrets.index_key(), &bytes)?;
+            let (children, byte_range) =
+                deserialize_compressed(secrets.index_key(), nonce::<T>(), &bytes)?;
             Branch::<T>::new(children, byte_range)
         });
         tracing::debug!("load_branch {}", t0.elapsed().as_secs_f64());
@@ -406,7 +407,8 @@ where
         let t0 = Instant::now();
         let result = Ok(if let Some(link) = &index.link {
             let bytes = self.store.get(&link)?;
-            let (children, byte_range) = deserialize_compressed(secrets.index_key(), &bytes)?;
+            let (children, byte_range) =
+                deserialize_compressed(secrets.index_key(), nonce::<T>(), &bytes)?;
             Some(Branch::<T>::new(children, byte_range))
         } else {
             None

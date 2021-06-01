@@ -41,6 +41,8 @@ pub trait TreeTypes: Debug + Send + Sync + Clone + 'static {
         + Summarizable<Self::Summary>;
     /// link type to use over block boundaries
     type Link: Display + Debug + Hash + Eq + Clone + Copy + Send + Sync + DagCbor;
+
+    const NONCE: &'static [u8; 24] = &[0u8; 24];
 }
 
 /// Everything that is needed to read trees

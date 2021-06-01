@@ -43,8 +43,6 @@ use std::{
 
 use crate::{store::decompress_and_transform, stream_builder::CipherOffset};
 
-const NONCE: [u8; 24] = [0u8; 24];
-
 #[derive(Clone, PartialEq, Eq)]
 pub struct ZstdDagCborSeq {
     /// ZStd compressed sequence of cbor items, see https://tools.ietf.org/html/rfc8742
@@ -247,20 +245,26 @@ impl ZstdDagCborSeq {
     }
 
     /// encrypt using the given key and nonce
-    pub fn encrypt(&self, key: &chacha20::Key, offset: u64) -> anyhow::Result<Vec<u8>> {
+    pub fn encrypt(
+        &self,
+        key: &chacha20::Key,
+        nonce: &chacha20::XNonce,
+        offset: u64,
+    ) -> anyhow::Result<Vec<u8>> {
         let mut state = CipherOffset::new(offset);
-        self.clone().into_encrypted(key, &mut state)
+        self.clone().into_encrypted(key, nonce, &mut state)
     }
 
     /// convert into an encrypted blob, using the given key and nonce
     pub(crate) fn into_encrypted(
         self,
         key: &chacha20::Key,
+        nonce: &chacha20::XNonce,
         state: &mut CipherOffset,
     ) -> anyhow::Result<Vec<u8>> {
         let Self { mut data, links } = self;
         // encrypt in place with the key and nonce
-        let mut chacha20 = XChaCha20::new(key, &NONCE.into());
+        let mut chacha20 = XChaCha20::new(key, nonce);
         let offset = state.reserve(data.len());
         chacha20.seek(offset);
         chacha20.apply_keystream(&mut data);
@@ -270,9 +274,13 @@ impl ZstdDagCborSeq {
     }
 
     /// decrypt using the given key
-    pub fn decrypt(data: &[u8], key: &chacha20::Key) -> anyhow::Result<(Self, Range<u64>)> {
+    pub fn decrypt(
+        data: &[u8],
+        key: &chacha20::Key,
+        nonce: &chacha20::XNonce,
+    ) -> anyhow::Result<(Self, Range<u64>)> {
         let (offset, links, mut encrypted) = DagCborCodec.decode::<IpldNode>(data)?.into_data()?;
-        let mut cipher = XChaCha20::new(key, &NONCE.into());
+        let mut cipher = XChaCha20::new(key, nonce);
         let end_offset = offset
             .checked_add(encrypted.len() as u64)
             .ok_or_else(|| anyhow::anyhow!("seek offset wraparound"))?;
@@ -461,8 +469,9 @@ mod tests {
         // do not test offsets that would wrap around!
         let offset = rng.next_u64().saturating_add(len).saturating_sub(len);
         let key: chacha20::Key = rng.gen::<[u8; 32]>().into();
-        let encrypted = za.encrypt(&key, offset)?;
-        let (za2, byte_range) = ZstdDagCborSeq::decrypt(&encrypted, &key)?;
+        let nonce: chacha20::XNonce = rng.gen::<[u8; 24]>().into();
+        let encrypted = za.encrypt(&key, &nonce, offset)?;
+        let (za2, byte_range) = ZstdDagCborSeq::decrypt(&encrypted, &key, &nonce)?;
         if za != za2 {
             return Ok(false);
         }
@@ -506,10 +515,11 @@ mod tests {
     fn test_disk_format() -> anyhow::Result<()> {
         let data = vec![1u32, 2, 3, 4];
         let key: chacha20::Key = [0u8; 32].into();
+        let nonce: chacha20::XNonce = [0u8; 24].into();
         let offset = 7u64;
 
         let res = ZstdDagCborSeq::single(&data, 10)?;
-        let bytes = res.encrypt(&key, offset)?;
+        let bytes = res.encrypt(&key, &nonce, offset)?;
 
         // do not exactly check the compressed and encrypted part, since the exact
         // bytes depend on zstd details and might be fragile.
@@ -529,7 +539,7 @@ mod tests {
             assert_eq!(offset1, offset);
             // once decrypted, must be valid zstd
             let mut decrypted = encrypted.to_vec();
-            let mut chacha = XChaCha20::new(&key, &NONCE.into());
+            let mut chacha = XChaCha20::new(&key, &nonce);
             chacha.seek(offset);
             chacha.apply_keystream(&mut decrypted);
             let decompressed = zstd::decode_all(Cursor::new(decrypted))?;
