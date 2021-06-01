@@ -44,7 +44,6 @@ use crate::{
     CipherOffset, Forest, Secrets,
 };
 use anyhow::{anyhow, Result};
-use derive_more::From;
 use libipld::{
     cbor::{DagCbor, DagCborCodec},
     codec::{Decode, Encode},
@@ -203,13 +202,6 @@ impl<T: TreeTypes> From<BranchIndex<T>> for Index<T> {
     }
 }
 
-/// enum for a leaf or branch index
-#[derive(Debug, From)]
-pub enum IndexRef<'a, T: TreeTypes> {
-    Leaf(&'a LeafIndex<T>),
-    Branch(&'a BranchIndex<T>),
-}
-
 impl<T: TreeTypes> Clone for Index<T> {
     fn clone(&self) -> Self {
         match self {
@@ -220,13 +212,6 @@ impl<T: TreeTypes> Clone for Index<T> {
 }
 
 impl<T: TreeTypes> Index<T> {
-    pub fn as_index_ref(&self) -> IndexRef<T> {
-        match self {
-            Index::Leaf(x) => IndexRef::Leaf(x),
-            Index::Branch(x) => IndexRef::Branch(x),
-        }
-    }
-
     pub fn summarize(&self) -> T::Summary {
         match self {
             Index::Leaf(x) => x.keys.summarize(),

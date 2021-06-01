@@ -1,8 +1,8 @@
 use super::{BranchCache, Config, FilteredChunk, Forest, Secrets, TreeTypes};
 use crate::{
     index::{
-        deserialize_compressed, Branch, BranchIndex, BranchLoader, CompactSeq, Index, IndexRef,
-        Leaf, LeafIndex, LeafLoader, NodeInfo,
+        deserialize_compressed, Branch, BranchIndex, BranchLoader, CompactSeq, Index, Leaf,
+        LeafIndex, LeafLoader, NodeInfo,
     },
     query::Query,
     store::ZstdDagCborSeq,
@@ -72,7 +72,7 @@ where
     R: ReadOnlyStore<T::Link>,
     Q: Query<T>,
     E: Send + 'static,
-    F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
+    F: Fn(NodeInfo<T, R>) -> E + Send + Sync + 'static,
 {
     pub(crate) fn new(
         forest: Forest<T, R>,
@@ -132,10 +132,11 @@ where
             Mode::Forward => self.offset += index.count(),
             Mode::Backward => self.offset -= index.count(),
         };
+        let info = self.forest.load_node(&self.secrets, &index);
         FilteredChunk {
             range,
             data: vec![],
-            extra: (self.mk_extra)(index.as_index_ref()),
+            extra: (self.mk_extra)(info),
         }
     }
 
@@ -205,6 +206,7 @@ where
                                 self.offset.saturating_sub(index.count())..self.offset
                             }
                         };
+                        let info = self.forest.load_node(&self.secrets, index);
                         // move offset
                         match self.mode {
                             Mode::Forward => self.offset += index.count(),
@@ -213,7 +215,7 @@ where
                         break FilteredChunk {
                             range,
                             data: vec![],
-                            extra: (self.mk_extra)(index.as_index_ref()),
+                            extra: (self.mk_extra)(info),
                         };
                     }
                 }
@@ -239,7 +241,7 @@ where
                     } else {
                         Vec::new()
                     };
-                    let extra = (self.mk_extra)(IndexRef::Leaf(&index));
+                    let extra = (self.mk_extra)(NodeInfo::Leaf(index.clone(), leaf));
                     match self.mode {
                         Mode::Backward => self.offset -= index.keys.count(),
                         Mode::Forward => self.offset += index.keys.count(),
@@ -272,7 +274,7 @@ where
     R: ReadOnlyStore<T::Link>,
     Q: Query<T>,
     E: Send + 'static,
-    F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
+    F: Fn(NodeInfo<T, R>) -> E + Send + Sync + 'static,
 {
     #[allow(clippy::type_complexity)]
     type Item = Result<FilteredChunk<(u64, T::Key, V), E>>;
@@ -508,7 +510,7 @@ where
         Q: Query<T>,
         V: BanyanValue,
         E: Send + 'static,
-        F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
+        F: Fn(NodeInfo<T, R>) -> E + Send + Sync + 'static,
     >(
         &self,
         secrets: Secrets,
@@ -556,7 +558,7 @@ where
         Q: Query<T>,
         V: BanyanValue,
         E: Send + 'static,
-        F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
+        F: Fn(NodeInfo<T, R>) -> E + Send + Sync + 'static,
     >(
         &self,
         secrets: &Secrets,
