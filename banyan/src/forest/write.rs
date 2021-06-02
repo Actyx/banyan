@@ -2,6 +2,7 @@ use crate::{
     forest::{BranchResult, Config, CreateMode, Forest, Transaction, TreeTypes},
     index::{zip_with_offset_ref, NodeInfo},
     store::{BlockWriter, ReadOnlyStore},
+    util::nonce,
     StreamBuilderState,
 };
 use crate::{
@@ -62,7 +63,11 @@ where
             stream.config().max_leaf_count,
         )?;
         let value_bytes = data.compressed().len() as u64;
-        let encrypted = data.into_encrypted(&stream.value_key().clone(), &mut stream.offset)?;
+        let encrypted = data.into_encrypted(
+            &stream.value_key().clone(),
+            nonce::<T>(),
+            &mut stream.offset,
+        )?;
         let keys = keys.into_iter().collect::<T::KeySeq>();
         let encrypted_len = encrypted.len();
         // store leaf
@@ -347,7 +352,7 @@ where
         let t0 = Instant::now();
         let level = stream.config().zstd_level;
         let key = *stream.index_key();
-        let cbor = serialize_compressed(&key, &mut stream.offset, &items, level)?;
+        let cbor = serialize_compressed(&key, nonce::<T>(), &mut stream.offset, &items, level)?;
         let len = cbor.len() as u64;
         let result = Ok((self.writer.put(cbor)?, len));
         tracing::debug!("persist_branch {}", t0.elapsed().as_secs_f64());

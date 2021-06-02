@@ -138,10 +138,11 @@ pub fn dump_json<Link: 'static>(
     store: impl ReadOnlyStore<Link>,
     hash: Link,
     value_key: chacha20::Key,
+    nonce: chacha20::XNonce,
     mut writer: impl std::io::Write,
 ) -> anyhow::Result<()> {
     let bytes = store.get(&hash)?;
-    let (dag_cbor, _) = ZstdDagCborSeq::decrypt(&bytes, &value_key)?;
+    let (dag_cbor, _) = ZstdDagCborSeq::decrypt(&bytes, &value_key, &nonce)?;
     let ipld_ast = dag_cbor.items::<libipld::Ipld>()?;
     for x in ipld_ast {
         let json = DagJsonCodec.encode(&x)?;

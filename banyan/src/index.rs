@@ -444,19 +444,21 @@ impl<T: TreeTypes, R> Display for NodeInfo<T, R> {
 
 pub(crate) fn serialize_compressed<T: TreeTypes>(
     key: &chacha20::Key,
+    nonce: &chacha20::XNonce,
     state: &mut CipherOffset,
     items: &[Index<T>],
     level: i32,
 ) -> Result<Vec<u8>> {
     let zs = ZstdDagCborSeq::from_iter(items, level)?;
-    zs.into_encrypted(key, state)
+    zs.into_encrypted(key, nonce, state)
 }
 
 pub(crate) fn deserialize_compressed<T: TreeTypes>(
     key: &chacha20::Key,
+    nonce: &chacha20::XNonce,
     ipld: &[u8],
 ) -> Result<(Vec<Index<T>>, Range<u64>)> {
-    let (seq, byte_range) = ZstdDagCborSeq::decrypt(ipld, key)?;
+    let (seq, byte_range) = ZstdDagCborSeq::decrypt(ipld, key, nonce)?;
     let seq = seq.items::<Index<T>>()?;
     Ok((seq, byte_range))
 }

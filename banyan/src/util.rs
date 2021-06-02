@@ -1,6 +1,14 @@
+use crate::TreeTypes;
 use futures::{channel::mpsc, executor::ThreadPool, prelude::*, SinkExt};
 use smallvec::{smallvec, SmallVec};
-use std::ops::{Bound, RangeBounds};
+use std::{
+    convert::TryFrom,
+    ops::{Bound, RangeBounds},
+};
+
+pub(crate) fn nonce<T: TreeTypes>() -> &'static chacha20::XNonce {
+    <&chacha20::XNonce>::try_from(T::NONCE).unwrap()
+}
 
 fn lt<T: Ord>(end: Bound<T>, start: Bound<T>) -> bool {
     match (end, start) {

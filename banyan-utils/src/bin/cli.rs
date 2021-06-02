@@ -1,8 +1,9 @@
+use banyan::TreeTypes;
 use futures::future::poll_fn;
 use futures::prelude::*;
 use ipfs_sqlite_block_store::BlockStore;
 
-use std::{collections::BTreeMap, str::FromStr, time::Duration};
+use std::{collections::BTreeMap, convert::TryFrom, str::FromStr, time::Duration};
 use structopt::StructOpt;
 use tracing::Level;
 
@@ -378,7 +379,8 @@ async fn main() -> Result<()> {
             }
         }
         Command::DumpBlock { hash } => {
-            dump::dump_json(store, hash, value_key, &mut std::io::stdout())?;
+            let nonce = chacha20::XNonce::try_from(*TT::NONCE).unwrap();
+            dump::dump_json(store, hash, value_key, nonce, &mut std::io::stdout())?;
         }
         Command::Stream { root } => {
             let tree = forest.load_tree::<String>(secrets, root)?;
