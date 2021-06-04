@@ -1,7 +1,10 @@
 //! creation and traversal of banyan trees
 use super::index::*;
 use crate::{
-    forest::{Config, FilteredChunk, Forest, IndexIter, Secrets, Transaction, TreeIter, TreeTypes},
+    forest::{
+        ChunkVisitor, Config, FilteredChunk, Forest, IndexIter, Secrets, Transaction, TreeIter,
+        TreeTypes,
+    },
     store::{BanyanValue, BlockWriter},
 };
 use crate::{query::Query, store::ReadOnlyStore, util::IterExt, StreamBuilder, StreamBuilderState};
@@ -157,7 +160,12 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
         index: Index<T>,
         mk_extra: &'static F,
     ) -> impl Iterator<Item = Result<FilteredChunk<(u64, T::Key, V), E>>> {
-        TreeIter::new(self.clone(), secrets, query, index, mk_extra)
+        TreeIter::new(
+            self.clone(),
+            secrets,
+            ChunkVisitor::new(query, mk_extra),
+            index,
+        )
     }
 
     pub(crate) fn traverse_rev0<
@@ -172,7 +180,12 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
         index: Index<T>,
         mk_extra: &'static F,
     ) -> impl Iterator<Item = Result<FilteredChunk<(u64, T::Key, V), E>>> {
-        TreeIter::new_rev(self.clone(), secrets, query, index, mk_extra)
+        TreeIter::new_rev(
+            self.clone(),
+            secrets,
+            ChunkVisitor::new(query, mk_extra),
+            index,
+        )
     }
 
     fn index_iter0<Q: Query<T> + Clone + Send + 'static>(

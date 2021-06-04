@@ -14,21 +14,115 @@ use futures::{prelude::*, stream::BoxStream};
 use libipld::cbor::DagCbor;
 use smallvec::{smallvec, SmallVec};
 
-use std::{iter, marker::PhantomData, ops::Range, time::Instant};
+use std::{iter, marker::PhantomData, ops::Range, sync::Arc, time::Instant};
+
+pub(crate) trait TreeVisitor<T: TreeTypes, R> {
+    type Item;
+    /// We hit a branch. Update the mask.
+    fn branch(&self, range: Range<u64>, index: &BranchIndex<T>, mask: &mut [bool]);
+    /// We are going to skip a branch or leaf. Compute placeholder item.
+    fn skip(&self, range: Range<u64>, index: &NodeInfo<T, R>) -> Self::Item;
+    /// We made it all the way to a leaf. Compute a value from it.
+    ///
+    /// Here we have the choice of loading the leaf or not. Since the loading
+    /// can fail, this method returns a Result.
+    fn leaf(
+        &self,
+        range: Range<u64>,
+        index: Arc<LeafIndex<T>>,
+        leaf: LeafLoader<T, R>,
+    ) -> Result<Self::Item>;
+}
+
+/// A tree visitor that produces chunks, consisting of value triples and some
+/// arbitary extra data.
+pub(crate) struct ChunkVisitor<Q, F, X>
+where
+    F: 'static,
+{
+    query: Q,
+    mk_extra: &'static F,
+    _p: PhantomData<X>,
+}
+
+impl<Q, F, X> ChunkVisitor<Q, F, X> {
+    pub fn new(query: Q, mk_extra: &'static F) -> Self {
+        Self {
+            query,
+            mk_extra,
+            _p: PhantomData,
+        }
+    }
+}
+
+impl<T, R, Q, F, V, E> TreeVisitor<T, R> for ChunkVisitor<Q, F, (V, E)>
+where
+    T: TreeTypes,
+    R: ReadOnlyStore<T::Link>,
+    V: BanyanValue,
+    Q: Query<T>,
+    F: Fn(&NodeInfo<T, R>) -> E + Send + Sync + 'static,
+{
+    type Item = FilteredChunk<(u64, T::Key, V), E>;
+
+    fn branch(&self, range: Range<u64>, index: &BranchIndex<T>, res: &mut [bool]) {
+        // delegate to the query intersecting method
+        self.query.intersecting(range.start, index, res)
+    }
+
+    fn skip(&self, range: Range<u64>, index: &NodeInfo<T, R>) -> Self::Item {
+        // produce an empy chunk with just the range and the extra set
+        FilteredChunk {
+            range,
+            data: vec![],
+            extra: (self.mk_extra)(index),
+        }
+    }
+
+    fn leaf(
+        &self,
+        range: Range<u64>,
+        index: Arc<LeafIndex<T>>,
+        leaf: LeafLoader<T, R>,
+    ) -> Result<Self::Item> {
+        let mut matching: SmallVec<[_; 32]> = smallvec![true; index.keys.len()];
+        self.query.containing(range.start, &index, &mut matching);
+        // materialize the actual (offset, key, value) triples for the matching bits
+        let data = if matching.any() {
+            tracing::debug!("loading leaf {:?}", range);
+            let leaf = leaf.load()?;
+            let offsets = matching
+                .iter()
+                .enumerate()
+                .filter(|(_, m)| **m)
+                .map(|(i, _)| range.start + i as u64);
+            let keys = index.select_keys(&matching);
+            let elems: Vec<V> = leaf.as_ref().select(&matching)?;
+            offsets
+                .zip(keys)
+                .zip(elems)
+                .map(|((o, k), v)| (o, k, v))
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+        let extra = (self.mk_extra)(&NodeInfo::Leaf(index, leaf));
+        Ok(FilteredChunk { range, data, extra })
+    }
+}
+
 #[derive(PartialEq)]
 enum Mode {
     Forward,
     Backward,
 }
-pub(crate) struct TreeIter<T: TreeTypes, V, R, Q, F> {
+pub(crate) struct TreeIter<T: TreeTypes, R, V> {
     forest: Forest<T, R>,
     secrets: Secrets,
     offset: u64,
-    query: Q,
-    mk_extra: F,
     stack: SmallVec<[TraverseState<T>; 5]>,
     mode: Mode,
-    _v: PhantomData<V>,
+    visitor: V,
 }
 
 struct TraverseState<T: TreeTypes> {
@@ -65,22 +159,13 @@ impl<T: TreeTypes> TraverseState<T> {
     }
 }
 
-impl<T: TreeTypes, V, R, Q, E, F> TreeIter<T, V, R, Q, F>
+impl<T: TreeTypes, R, V> TreeIter<T, R, V>
 where
     T: TreeTypes,
-    V: BanyanValue,
     R: ReadOnlyStore<T::Link>,
-    Q: Query<T>,
-    E: Send + 'static,
-    F: Fn(&NodeInfo<T, R>) -> E + Send + Sync + 'static,
+    V: TreeVisitor<T, R>,
 {
-    pub(crate) fn new(
-        forest: Forest<T, R>,
-        secrets: Secrets,
-        query: Q,
-        index: Index<T>,
-        mk_extra: F,
-    ) -> Self {
+    pub(crate) fn new(forest: Forest<T, R>, secrets: Secrets, visitor: V, index: Index<T>) -> Self {
         let mode = Mode::Forward;
         let stack = smallvec![TraverseState::new(index)];
 
@@ -88,19 +173,16 @@ where
             forest,
             secrets,
             offset: 0,
-            query,
-            mk_extra,
             stack,
             mode,
-            _v: PhantomData,
+            visitor,
         }
     }
     pub(crate) fn new_rev(
         forest: Forest<T, R>,
         secrets: Secrets,
-        query: Q,
+        visitor: V,
         index: Index<T>,
-        mk_extra: F,
     ) -> Self {
         let offset = index.count();
         let mode = Mode::Backward;
@@ -110,18 +192,16 @@ where
             forest,
             secrets,
             offset,
-            query,
-            mk_extra,
             stack,
             mode,
-            _v: PhantomData,
+            visitor,
         }
     }
 
     /// common code for early returns. Pop a state from the stack and completely skip the index.
     ///
     /// this can only be called before the index is partially processed.
-    fn skip(&mut self, range: Range<u64>) -> FilteredChunk<(u64, T::Key, V), E> {
+    fn skip(&mut self, range: Range<u64>) -> V::Item {
         let TraverseState { index, .. } = self.stack.pop().expect("not empty");
         // Ascend to parent's node. This might be none in case the
         // tree's root node is a `PurgedBranch`.
@@ -133,15 +213,11 @@ where
             Mode::Backward => self.offset -= index.count(),
         };
         let info = self.forest.node_info(&self.secrets, &index);
-        FilteredChunk {
-            range,
-            data: vec![],
-            extra: (self.mk_extra)(&info),
-        }
+        self.visitor.skip(range, &info)
     }
 
     #[allow(clippy::type_complexity)]
-    fn next_fallible(&mut self) -> Result<Option<FilteredChunk<(u64, T::Key, V), E>>> {
+    fn next_fallible(&mut self) -> Result<Option<V::Item>> {
         Ok(Some(loop {
             let head = match self.stack.last_mut() {
                 Some(i) => i,
@@ -169,7 +245,7 @@ where
             };
 
             let info = self.forest.node_info(&self.secrets, &head.index);
-            match &info {
+            match info {
                 NodeInfo::Branch(index, branch) => {
                     if head.filter.is_empty() {
                         // we hit this branch node for the first time. Apply the
@@ -179,8 +255,7 @@ where
                             Mode::Forward => 0,
                             Mode::Backward => index.summaries.len() as isize - 1,
                         };
-                        self.query
-                            .intersecting(range.start, &index, &mut head.filter);
+                        self.visitor.branch(range.clone(), &index, &mut head.filter);
 
                         // important early return - if not a single bit matches, there is no
                         // need to go into the individual children.
@@ -213,36 +288,12 @@ where
                             Mode::Forward => self.offset += index.count(),
                             Mode::Backward => self.offset -= index.count(),
                         };
-                        break FilteredChunk {
-                            range,
-                            data: vec![],
-                            extra: (self.mk_extra)(&info),
-                        };
+                        break self.visitor.skip(range, &info);
                     }
                 }
 
                 NodeInfo::Leaf(index, leaf) => {
-                    let mut matching: SmallVec<[_; 32]> = smallvec![true; index.keys.len()];
-                    self.query.containing(range.start, &index, &mut matching);
-                    let data = if matching.any() {
-                        tracing::debug!("loading leaf {:?}", range);
-                        let leaf = leaf.load()?;
-                        let offsets = matching
-                            .iter()
-                            .enumerate()
-                            .filter(|(_, m)| **m)
-                            .map(|(i, _)| range.start + i as u64);
-                        let keys = index.select_keys(&matching);
-                        let elems: Vec<V> = leaf.as_ref().select(&matching)?;
-                        offsets
-                            .zip(keys)
-                            .zip(elems)
-                            .map(|((o, k), v)| (o, k, v))
-                            .collect::<Vec<_>>()
-                    } else {
-                        Vec::new()
-                    };
-                    let extra = (self.mk_extra)(&info);
+                    let result = self.visitor.leaf(range, index.clone(), leaf)?;
                     match self.mode {
                         Mode::Backward => self.offset -= index.keys.count(),
                         Mode::Forward => self.offset += index.keys.count(),
@@ -253,7 +304,7 @@ where
                     if let Some(last) = self.stack.last_mut() {
                         last.next_pos(&self.mode);
                     }
-                    break FilteredChunk { range, data, extra };
+                    break result;
                 }
 
                 // even for purged leafs and branches or ignored chunks,
@@ -268,17 +319,14 @@ where
     }
 }
 
-impl<T: TreeTypes, V, R, Q, E, F> Iterator for TreeIter<T, V, R, Q, F>
+impl<T, R, V> Iterator for TreeIter<T, R, V>
 where
     T: TreeTypes,
-    V: BanyanValue,
     R: ReadOnlyStore<T::Link>,
-    Q: Query<T>,
-    E: Send + 'static,
-    F: Fn(&NodeInfo<T, R>) -> E + Send + Sync + 'static,
+    V: TreeVisitor<T, R>,
 {
     #[allow(clippy::type_complexity)]
-    type Item = Result<FilteredChunk<(u64, T::Key, V), E>>;
+    type Item = Result<V::Item>;
 
     fn next(&mut self) -> Option<<Self as Iterator>::Item> {
         match self.next_fallible() {
