@@ -163,7 +163,8 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
         TreeIter::new(
             self.clone(),
             secrets,
-            ChunkVisitor::new(query, mk_extra),
+            query,
+            ChunkVisitor::new(mk_extra),
             index,
         )
     }
@@ -183,7 +184,8 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
         TreeIter::new_rev(
             self.clone(),
             secrets,
-            ChunkVisitor::new(query, mk_extra),
+            query,
+            ChunkVisitor::new(mk_extra),
             index,
         )
     }

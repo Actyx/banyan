@@ -18,8 +18,6 @@ use std::{iter, marker::PhantomData, ops::Range, sync::Arc, time::Instant};
 
 pub(crate) trait TreeVisitor<T: TreeTypes, R> {
     type Item;
-    /// We hit a branch. Update the mask.
-    fn branch(&self, range: Range<u64>, index: &BranchIndex<T>, mask: &mut [bool]);
     /// We are going to skip a branch or leaf. Compute placeholder item.
     fn skip(&self, range: Range<u64>, index: &NodeInfo<T, R>) -> Self::Item;
     /// We made it all the way to a leaf. Compute a value from it.
@@ -31,44 +29,37 @@ pub(crate) trait TreeVisitor<T: TreeTypes, R> {
         range: Range<u64>,
         index: Arc<LeafIndex<T>>,
         leaf: LeafLoader<T, R>,
+        mask: &[bool],
     ) -> Result<Self::Item>;
 }
 
 /// A tree visitor that produces chunks, consisting of value triples and some
 /// arbitary extra data.
-pub(crate) struct ChunkVisitor<Q, F, X>
+pub(crate) struct ChunkVisitor<F, X>
 where
     F: 'static,
 {
-    query: Q,
     mk_extra: &'static F,
     _p: PhantomData<X>,
 }
 
-impl<Q, F, X> ChunkVisitor<Q, F, X> {
-    pub fn new(query: Q, mk_extra: &'static F) -> Self {
+impl<F, X> ChunkVisitor<F, X> {
+    pub fn new(mk_extra: &'static F) -> Self {
         Self {
-            query,
             mk_extra,
             _p: PhantomData,
         }
     }
 }
 
-impl<T, R, Q, F, V, E> TreeVisitor<T, R> for ChunkVisitor<Q, F, (V, E)>
+impl<T, R, F, V, E> TreeVisitor<T, R> for ChunkVisitor<F, (V, E)>
 where
     T: TreeTypes,
     R: ReadOnlyStore<T::Link>,
     V: BanyanValue,
-    Q: Query<T>,
     F: Fn(&NodeInfo<T, R>) -> E + Send + Sync + 'static,
 {
     type Item = FilteredChunk<(u64, T::Key, V), E>;
-
-    fn branch(&self, range: Range<u64>, index: &BranchIndex<T>, res: &mut [bool]) {
-        // delegate to the query intersecting method
-        self.query.intersecting(range.start, index, res)
-    }
 
     fn skip(&self, range: Range<u64>, index: &NodeInfo<T, R>) -> Self::Item {
         // produce an empy chunk with just the range and the extra set
@@ -84,9 +75,8 @@ where
         range: Range<u64>,
         index: Arc<LeafIndex<T>>,
         leaf: LeafLoader<T, R>,
+        matching: &[bool],
     ) -> Result<Self::Item> {
-        let mut matching: SmallVec<[_; 32]> = smallvec![true; index.keys.len()];
-        self.query.containing(range.start, &index, &mut matching);
         // materialize the actual (offset, key, value) triples for the matching bits
         let data = if matching.any() {
             tracing::debug!("loading leaf {:?}", range);
@@ -116,12 +106,13 @@ enum Mode {
     Forward,
     Backward,
 }
-pub(crate) struct TreeIter<T: TreeTypes, R, V> {
+pub(crate) struct TreeIter<T: TreeTypes, R, Q, V> {
     forest: Forest<T, R>,
     secrets: Secrets,
     offset: u64,
     stack: SmallVec<[TraverseState<T>; 5]>,
     mode: Mode,
+    query: Q,
     visitor: V,
 }
 
@@ -159,13 +150,20 @@ impl<T: TreeTypes> TraverseState<T> {
     }
 }
 
-impl<T: TreeTypes, R, V> TreeIter<T, R, V>
+impl<T: TreeTypes, R, Q, V> TreeIter<T, R, Q, V>
 where
     T: TreeTypes,
     R: ReadOnlyStore<T::Link>,
+    Q: Query<T>,
     V: TreeVisitor<T, R>,
 {
-    pub(crate) fn new(forest: Forest<T, R>, secrets: Secrets, visitor: V, index: Index<T>) -> Self {
+    pub(crate) fn new(
+        forest: Forest<T, R>,
+        secrets: Secrets,
+        query: Q,
+        visitor: V,
+        index: Index<T>,
+    ) -> Self {
         let mode = Mode::Forward;
         let stack = smallvec![TraverseState::new(index)];
 
@@ -175,12 +173,14 @@ where
             offset: 0,
             stack,
             mode,
+            query,
             visitor,
         }
     }
     pub(crate) fn new_rev(
         forest: Forest<T, R>,
         secrets: Secrets,
+        query: Q,
         visitor: V,
         index: Index<T>,
     ) -> Self {
@@ -194,6 +194,7 @@ where
             offset,
             stack,
             mode,
+            query,
             visitor,
         }
     }
@@ -255,7 +256,8 @@ where
                             Mode::Forward => 0,
                             Mode::Backward => index.summaries.len() as isize - 1,
                         };
-                        self.visitor.branch(range.clone(), &index, &mut head.filter);
+                        self.query
+                            .intersecting(range.start, &index, &mut head.filter);
 
                         // important early return - if not a single bit matches, there is no
                         // need to go into the individual children.
@@ -293,7 +295,9 @@ where
                 }
 
                 NodeInfo::Leaf(index, leaf) => {
-                    let result = self.visitor.leaf(range, index.clone(), leaf)?;
+                    let mut matching: SmallVec<[_; 32]> = smallvec![true; index.keys.len()];
+                    self.query.containing(range.start, &index, &mut matching);
+                    let result = self.visitor.leaf(range, index.clone(), leaf, &matching)?;
                     match self.mode {
                         Mode::Backward => self.offset -= index.keys.count(),
                         Mode::Forward => self.offset += index.keys.count(),
@@ -319,10 +323,11 @@ where
     }
 }
 
-impl<T, R, V> Iterator for TreeIter<T, R, V>
+impl<T, R, Q, V> Iterator for TreeIter<T, R, Q, V>
 where
     T: TreeTypes,
     R: ReadOnlyStore<T::Link>,
+    Q: Query<T>,
     V: TreeVisitor<T, R>,
 {
     #[allow(clippy::type_complexity)]
