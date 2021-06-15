@@ -114,7 +114,7 @@ impl ZstdDagCborSeq {
     ) -> anyhow::Result<(Self, bool)> {
         let mut links = BTreeSet::new();
         let t0 = Instant::now();
-        let mut encoder = zstd::Encoder::new(Vec::new(), 0)?;
+        let mut encoder = zstd::Encoder::new(Vec::new(), zstd_level)?;
         // decompress into the encoder, if necessary
         //
         // also init decompressed size
