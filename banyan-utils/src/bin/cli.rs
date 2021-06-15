@@ -379,8 +379,8 @@ async fn main() -> Result<()> {
             }
         }
         Command::DumpBlock { hash } => {
-            let nonce = chacha20::XNonce::try_from(*TT::NONCE).unwrap();
-            dump::dump_json(store, hash, value_key, nonce, &mut std::io::stdout())?;
+            let nonce = <&chacha20::XNonce>::try_from(TT::NONCE).unwrap();
+            dump::dump_json(store, hash, &value_key, &nonce, &mut std::io::stdout())?;
         }
         Command::Stream { root } => {
             let tree = forest.load_tree::<String>(secrets, root)?;
