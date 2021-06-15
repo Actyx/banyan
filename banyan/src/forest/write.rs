@@ -296,7 +296,7 @@ where
             return Ok(index.clone());
         }
         let secrets = stream.secrets().clone();
-        Ok(match self.load_node(&secrets, index) {
+        Ok(match self.node_info(&secrets, index) {
             NodeInfo::Leaf(index, leaf) => {
                 tracing::debug!("extending existing leaf");
                 let leaf = leaf.load()?;

@@ -7,7 +7,7 @@
 use crate::{
     forest::TreeTypes,
     index::{BranchIndex, CompactSeq, LeafIndex},
-    util::{BoolSliceExt, RangeBoundsExt},
+    util::{MutBoolSliceExt, RangeBoundsExt},
 };
 use std::{fmt::Debug, ops::RangeBounds, sync::Arc};
 

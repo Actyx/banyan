@@ -1,6 +1,6 @@
 //! helper methods to stream trees
 use crate::{
-    index::IndexRef,
+    index::NodeInfo,
     store::{BanyanValue, ReadOnlyStore},
     tree::Tree,
     util::{take_until_condition, ToStreamExt},
@@ -50,7 +50,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
         Q: Query<T> + Clone,
         V: BanyanValue,
         E: Send + 'static,
-        F: Send + Sync + 'static + Fn(IndexRef<T>) -> E,
+        F: Send + Sync + 'static + Fn(&NodeInfo<T, R>) -> E,
     {
         let end = *range.end();
         let start_offset_ref = Arc::new(AtomicU64::new(*range.start()));
@@ -104,7 +104,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
         Q: Query<T> + Clone,
         V: BanyanValue,
         E: Send + 'static,
-        F: Send + Sync + 'static + Fn(IndexRef<T>) -> E,
+        F: Send + Sync + 'static + Fn(&NodeInfo<T, R>) -> E,
     {
         let offset = Arc::new(AtomicU64::new(*range.start()));
         let forest = self.clone();
@@ -151,7 +151,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
         Q: Query<T> + Clone,
         V: BanyanValue,
         E: Send + 'static,
-        F: Send + Sync + 'static + Fn(IndexRef<T>) -> E,
+        F: Send + Sync + 'static + Fn(&NodeInfo<T, R>) -> E,
     {
         let start = *range.start();
         let end_offset_ref = Arc::new(AtomicU64::new(*range.end()));

@@ -9,7 +9,7 @@ mod read;
 mod stream;
 mod write;
 pub(crate) use index_iter::IndexIter;
-pub(crate) use read::TreeIter;
+pub(crate) use read::{ChunkVisitor, TreeIter};
 
 /// Trees can be parametrized with the key type and the sequence type. Also, to avoid a dependency
 /// on a link type with all its baggage, we parameterize the link type.

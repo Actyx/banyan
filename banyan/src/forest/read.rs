@@ -1,8 +1,8 @@
 use super::{BranchCache, Config, FilteredChunk, Forest, Secrets, TreeTypes};
 use crate::{
     index::{
-        deserialize_compressed, Branch, BranchIndex, BranchLoader, CompactSeq, Index, IndexRef,
-        Leaf, LeafIndex, LeafLoader, NodeInfo,
+        deserialize_compressed, Branch, BranchIndex, BranchLoader, CompactSeq, Index, Leaf,
+        LeafIndex, LeafLoader, NodeInfo,
     },
     query::Query,
     store::ZstdDagCborSeq,
@@ -14,21 +14,106 @@ use futures::{prelude::*, stream::BoxStream};
 use libipld::cbor::DagCbor;
 use smallvec::{smallvec, SmallVec};
 
-use std::{iter, marker::PhantomData, ops::Range, time::Instant};
+use std::{iter, marker::PhantomData, ops::Range, sync::Arc, time::Instant};
+
+pub(crate) trait TreeVisitor<T: TreeTypes, R> {
+    type Item;
+    /// We are going to skip a branch or leaf. Compute placeholder item.
+    fn skip(&self, range: Range<u64>, index: &NodeInfo<T, R>) -> Self::Item;
+    /// We made it all the way to a leaf. Compute a value from it.
+    ///
+    /// Here we have the choice of loading the leaf or not. Since the loading
+    /// can fail, this method returns a Result.
+    fn leaf(
+        &self,
+        range: Range<u64>,
+        index: Arc<LeafIndex<T>>,
+        leaf: LeafLoader<T, R>,
+        mask: &[bool],
+    ) -> Result<Self::Item>;
+}
+
+/// A tree visitor that produces chunks, consisting of value triples and some
+/// arbitary extra data.
+pub(crate) struct ChunkVisitor<F, X>
+where
+    F: 'static,
+{
+    mk_extra: &'static F,
+    _p: PhantomData<X>,
+}
+
+impl<F, X> ChunkVisitor<F, X> {
+    pub fn new(mk_extra: &'static F) -> Self {
+        Self {
+            mk_extra,
+            _p: PhantomData,
+        }
+    }
+}
+
+impl<T, R, F, V, E> TreeVisitor<T, R> for ChunkVisitor<F, (V, E)>
+where
+    T: TreeTypes,
+    R: ReadOnlyStore<T::Link>,
+    V: BanyanValue,
+    F: Fn(&NodeInfo<T, R>) -> E + Send + Sync + 'static,
+{
+    type Item = FilteredChunk<(u64, T::Key, V), E>;
+
+    fn skip(&self, range: Range<u64>, index: &NodeInfo<T, R>) -> Self::Item {
+        // produce an empy chunk with just the range and the extra set
+        FilteredChunk {
+            range,
+            data: vec![],
+            extra: (self.mk_extra)(index),
+        }
+    }
+
+    fn leaf(
+        &self,
+        range: Range<u64>,
+        index: Arc<LeafIndex<T>>,
+        leaf: LeafLoader<T, R>,
+        matching: &[bool],
+    ) -> Result<Self::Item> {
+        // materialize the actual (offset, key, value) triples for the matching bits
+        let data = if matching.any() {
+            tracing::debug!("loading leaf {:?}", range);
+            let leaf = leaf.load()?;
+            let offsets = matching
+                .iter()
+                .enumerate()
+                .filter(|(_, m)| **m)
+                .map(|(i, _)| range.start + i as u64);
+            let keys = index.select_keys(&matching);
+            let elems: Vec<V> = leaf.as_ref().select(&matching)?;
+            offsets
+                .zip(keys)
+                .zip(elems)
+                .map(|((o, k), v)| (o, k, v))
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+        let extra = (self.mk_extra)(&NodeInfo::Leaf(index, leaf));
+        Ok(FilteredChunk { range, data, extra })
+    }
+}
+
 #[derive(PartialEq)]
 enum Mode {
     Forward,
     Backward,
 }
-pub(crate) struct TreeIter<T: TreeTypes, V, R, Q, F> {
+pub(crate) struct TreeIter<T: TreeTypes, R, Q, V> {
     forest: Forest<T, R>,
     secrets: Secrets,
     offset: u64,
-    query: Q,
-    mk_extra: F,
     stack: SmallVec<[TraverseState<T>; 5]>,
     mode: Mode,
-    _v: PhantomData<V>,
+    query: Q,
+    visitor: V,
 }
 
 struct TraverseState<T: TreeTypes> {
@@ -65,21 +150,19 @@ impl<T: TreeTypes> TraverseState<T> {
     }
 }
 
-impl<T: TreeTypes, V, R, Q, E, F> TreeIter<T, V, R, Q, F>
+impl<T: TreeTypes, R, Q, V> TreeIter<T, R, Q, V>
 where
     T: TreeTypes,
-    V: BanyanValue,
     R: ReadOnlyStore<T::Link>,
     Q: Query<T>,
-    E: Send + 'static,
-    F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
+    V: TreeVisitor<T, R>,
 {
     pub(crate) fn new(
         forest: Forest<T, R>,
         secrets: Secrets,
         query: Q,
+        visitor: V,
         index: Index<T>,
-        mk_extra: F,
     ) -> Self {
         let mode = Mode::Forward;
         let stack = smallvec![TraverseState::new(index)];
@@ -88,19 +171,18 @@ where
             forest,
             secrets,
             offset: 0,
-            query,
-            mk_extra,
             stack,
             mode,
-            _v: PhantomData,
+            query,
+            visitor,
         }
     }
     pub(crate) fn new_rev(
         forest: Forest<T, R>,
         secrets: Secrets,
         query: Q,
+        visitor: V,
         index: Index<T>,
-        mk_extra: F,
     ) -> Self {
         let offset = index.count();
         let mode = Mode::Backward;
@@ -110,18 +192,17 @@ where
             forest,
             secrets,
             offset,
-            query,
-            mk_extra,
             stack,
             mode,
-            _v: PhantomData,
+            query,
+            visitor,
         }
     }
 
     /// common code for early returns. Pop a state from the stack and completely skip the index.
     ///
     /// this can only be called before the index is partially processed.
-    fn skip(&mut self, range: Range<u64>) -> FilteredChunk<(u64, T::Key, V), E> {
+    fn skip(&mut self, range: Range<u64>) -> V::Item {
         let TraverseState { index, .. } = self.stack.pop().expect("not empty");
         // Ascend to parent's node. This might be none in case the
         // tree's root node is a `PurgedBranch`.
@@ -132,15 +213,12 @@ where
             Mode::Forward => self.offset += index.count(),
             Mode::Backward => self.offset -= index.count(),
         };
-        FilteredChunk {
-            range,
-            data: vec![],
-            extra: (self.mk_extra)(index.as_index_ref()),
-        }
+        let info = self.forest.node_info(&self.secrets, &index);
+        self.visitor.skip(range, &info)
     }
 
     #[allow(clippy::type_complexity)]
-    fn next_fallible(&mut self) -> Result<Option<FilteredChunk<(u64, T::Key, V), E>>> {
+    fn next_fallible(&mut self) -> Result<Option<V::Item>> {
         Ok(Some(loop {
             let head = match self.stack.last_mut() {
                 Some(i) => i,
@@ -167,7 +245,8 @@ where
                 Mode::Backward => self.offset.saturating_sub(head.index.count())..self.offset,
             };
 
-            match self.forest.load_node(&self.secrets, &head.index) {
+            let info = self.forest.node_info(&self.secrets, &head.index);
+            match info {
                 NodeInfo::Branch(index, branch) => {
                     if head.filter.is_empty() {
                         // we hit this branch node for the first time. Apply the
@@ -205,41 +284,20 @@ where
                                 self.offset.saturating_sub(index.count())..self.offset
                             }
                         };
+                        let info = self.forest.node_info(&self.secrets, index);
                         // move offset
                         match self.mode {
                             Mode::Forward => self.offset += index.count(),
                             Mode::Backward => self.offset -= index.count(),
                         };
-                        break FilteredChunk {
-                            range,
-                            data: vec![],
-                            extra: (self.mk_extra)(index.as_index_ref()),
-                        };
+                        break self.visitor.skip(range, &info);
                     }
                 }
 
                 NodeInfo::Leaf(index, leaf) => {
                     let mut matching: SmallVec<[_; 32]> = smallvec![true; index.keys.len()];
                     self.query.containing(range.start, &index, &mut matching);
-                    let data = if matching.any() {
-                        tracing::debug!("loading leaf {:?}", range);
-                        let leaf = leaf.load()?;
-                        let offsets = matching
-                            .iter()
-                            .enumerate()
-                            .filter(|(_, m)| **m)
-                            .map(|(i, _)| range.start + i as u64);
-                        let keys = index.select_keys(&matching);
-                        let elems: Vec<V> = leaf.as_ref().select(&matching)?;
-                        offsets
-                            .zip(keys)
-                            .zip(elems)
-                            .map(|((o, k), v)| (o, k, v))
-                            .collect::<Vec<_>>()
-                    } else {
-                        Vec::new()
-                    };
-                    let extra = (self.mk_extra)(IndexRef::Leaf(&index));
+                    let result = self.visitor.leaf(range, index.clone(), leaf, &matching)?;
                     match self.mode {
                         Mode::Backward => self.offset -= index.keys.count(),
                         Mode::Forward => self.offset += index.keys.count(),
@@ -250,7 +308,7 @@ where
                     if let Some(last) = self.stack.last_mut() {
                         last.next_pos(&self.mode);
                     }
-                    break FilteredChunk { range, data, extra };
+                    break result;
                 }
 
                 // even for purged leafs and branches or ignored chunks,
@@ -265,17 +323,15 @@ where
     }
 }
 
-impl<T: TreeTypes, V, R, Q, E, F> Iterator for TreeIter<T, V, R, Q, F>
+impl<T, R, Q, V> Iterator for TreeIter<T, R, Q, V>
 where
     T: TreeTypes,
-    V: BanyanValue,
     R: ReadOnlyStore<T::Link>,
     Q: Query<T>,
-    E: Send + 'static,
-    F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
+    V: TreeVisitor<T, R>,
 {
     #[allow(clippy::type_complexity)]
-    type Item = Result<FilteredChunk<(u64, T::Key, V), E>>;
+    type Item = Result<V::Item>;
 
     fn next(&mut self) -> Option<<Self as Iterator>::Item> {
         match self.next_fallible() {
@@ -383,7 +439,7 @@ where
         result
     }
 
-    pub(crate) fn load_node(&self, secrets: &Secrets, index: &Index<T>) -> NodeInfo<T, R> {
+    pub(crate) fn node_info(&self, secrets: &Secrets, index: &Index<T>) -> NodeInfo<T, R> {
         match index {
             Index::Branch(index) => match index.link {
                 Some(link) => {
@@ -426,7 +482,7 @@ where
         if offset >= index.count() {
             return Ok(None);
         }
-        match self.load_node(stream, index) {
+        match self.node_info(stream, index) {
             NodeInfo::Branch(_, info) => {
                 let node = info.load_cached()?;
                 for child in node.children.iter() {
@@ -458,7 +514,7 @@ where
         if offset >= index.count() {
             return Ok(());
         }
-        match self.load_node(stream, index) {
+        match self.node_info(stream, index) {
             NodeInfo::Branch(_, node) => {
                 for child in node.load_cached()?.children.iter() {
                     if offset < child.count() {
@@ -508,7 +564,7 @@ where
         Q: Query<T>,
         V: BanyanValue,
         E: Send + 'static,
-        F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
+        F: Fn(&NodeInfo<T, R>) -> E + Send + Sync + 'static,
     >(
         &self,
         secrets: Secrets,
@@ -556,7 +612,7 @@ where
         Q: Query<T>,
         V: BanyanValue,
         E: Send + 'static,
-        F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
+        F: Fn(&NodeInfo<T, R>) -> E + Send + Sync + 'static,
     >(
         &self,
         secrets: &Secrets,
@@ -572,7 +628,7 @@ where
     }
 
     pub(crate) fn dump0(&self, secrets: &Secrets, index: &Index<T>, prefix: &str) -> Result<()> {
-        match self.load_node(secrets, index) {
+        match self.node_info(secrets, index) {
             NodeInfo::Branch(index, branch) => {
                 let branch = branch.load_cached()?;
                 println!(
@@ -648,7 +704,7 @@ where
         if !index.sealed() {
             *level = (*level).min((index.level() as i32) - 1);
         }
-        match self.load_node(secrets, index) {
+        match self.node_info(secrets, index) {
             NodeInfo::Leaf(index, leaf) => {
                 let leaf = leaf.load()?;
                 let value_count = leaf.as_ref().count()?;
@@ -688,7 +744,7 @@ where
     /// Checks if a node is packed to the left
     pub(crate) fn is_packed0(&self, secrets: &Secrets, index: &Index<T>) -> Result<bool> {
         Ok(
-            if let NodeInfo::Branch(index, branch) = self.load_node(secrets, index) {
+            if let NodeInfo::Branch(index, branch) = self.node_info(secrets, index) {
                 if index.sealed {
                     // sealed nodes, for themselves, are packed
                     true

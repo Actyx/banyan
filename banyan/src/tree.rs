@@ -1,7 +1,10 @@
 //! creation and traversal of banyan trees
 use super::index::*;
 use crate::{
-    forest::{Config, FilteredChunk, Forest, IndexIter, Secrets, Transaction, TreeIter, TreeTypes},
+    forest::{
+        ChunkVisitor, Config, FilteredChunk, Forest, IndexIter, Secrets, Transaction, TreeIter,
+        TreeTypes,
+    },
     store::{BanyanValue, BlockWriter},
 };
 use crate::{query::Query, store::ReadOnlyStore, util::IterExt, StreamBuilder, StreamBuilderState};
@@ -149,7 +152,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
         Q: Query<T>,
         V: BanyanValue,
         E: Send + 'static,
-        F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
+        F: Fn(&NodeInfo<T, R>) -> E + Send + Sync + 'static,
     >(
         &self,
         secrets: Secrets,
@@ -157,14 +160,20 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
         index: Index<T>,
         mk_extra: &'static F,
     ) -> impl Iterator<Item = Result<FilteredChunk<(u64, T::Key, V), E>>> {
-        TreeIter::new(self.clone(), secrets, query, index, mk_extra)
+        TreeIter::new(
+            self.clone(),
+            secrets,
+            query,
+            ChunkVisitor::new(mk_extra),
+            index,
+        )
     }
 
     pub(crate) fn traverse_rev0<
         Q: Query<T>,
         V: BanyanValue,
         E: Send + 'static,
-        F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
+        F: Fn(&NodeInfo<T, R>) -> E + Send + Sync + 'static,
     >(
         &self,
         secrets: Secrets,
@@ -172,7 +181,13 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
         index: Index<T>,
         mk_extra: &'static F,
     ) -> impl Iterator<Item = Result<FilteredChunk<(u64, T::Key, V), E>>> {
-        TreeIter::new_rev(self.clone(), secrets, query, index, mk_extra)
+        TreeIter::new_rev(
+            self.clone(),
+            secrets,
+            query,
+            ChunkVisitor::new(mk_extra),
+            index,
+        )
     }
 
     fn index_iter0<Q: Query<T> + Clone + Send + 'static>(
@@ -204,7 +219,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
         let mut edges = vec![];
         let mut nodes: BTreeMap<usize, S> = Default::default();
 
-        let node = self.load_node(secrets, index);
+        let node = self.node_info(secrets, index);
         if let Some(p) = parent_id {
             edges.push((p, next_id));
         }
@@ -386,7 +401,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
         Q: Query<T>,
         V: BanyanValue,
         E: Send + 'static,
-        F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
+        F: Fn(&NodeInfo<T, R>) -> E + Send + Sync + 'static,
     {
         match &tree.0 {
             Some((index, secrets, _)) => self
@@ -406,7 +421,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
         Q: Query<T>,
         V: BanyanValue,
         E: Send + 'static,
-        F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
+        F: Fn(&NodeInfo<T, R>) -> E + Send + Sync + 'static,
     {
         match &tree.0 {
             Some((index, secrets, _)) => self
@@ -426,7 +441,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
         Q: Query<T>,
         V: BanyanValue,
         E: Send + 'static,
-        F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
+        F: Fn(&NodeInfo<T, R>) -> E + Send + Sync + 'static,
     {
         match &tree.0 {
             Some((index, secrets, _)) => self
@@ -446,7 +461,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
         Q: Query<T>,
         V: BanyanValue,
         E: Send + 'static,
-        F: Fn(IndexRef<T>) -> E + Send + Sync + 'static,
+        F: Fn(&NodeInfo<T, R>) -> E + Send + Sync + 'static,
     {
         match &tree.0 {
             Some((index, secrets, _)) => self
