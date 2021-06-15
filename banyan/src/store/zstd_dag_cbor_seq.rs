@@ -62,15 +62,24 @@ impl ZstdDagCborSeq {
         I: IntoIterator<Item = &'a T> + 'a,
         T: Encode<DagCborCodec> + 'a,
     {
-        let mut encoder = zstd::Encoder::new(Vec::new(), zstd_level)?;
+        let t0 = Instant::now();
+        let mut encoder = zstd::Encoder::new(Vec::new(), 0)?;
         let mut links = BTreeSet::new();
+        let mut size: usize = 0;
         for item in iter.into_iter() {
             let encoded = DagCborCodec.encode(item)?;
+            size += encoded.len();
             scrape_links(encoded.as_ref(), &mut links)?;
             encoder.write_all(encoded.as_ref())?;
         }
         // call finish to write the zstd frame
         let data = encoder.finish()?;
+        tracing::debug!(
+            "ZstdArray::from_iter elapsed={} compressed={} uncompressed={}",
+            t0.elapsed().as_secs_f64(),
+            data.len(),
+            size
+        );
         // box into an arc
         Ok(Self::new(data, links.into_iter().collect()))
     }
@@ -105,7 +114,7 @@ impl ZstdDagCborSeq {
     ) -> anyhow::Result<(Self, bool)> {
         let mut links = BTreeSet::new();
         let t0 = Instant::now();
-        let mut encoder = zstd::Encoder::new(Vec::new(), zstd_level)?;
+        let mut encoder = zstd::Encoder::new(Vec::new(), 0)?;
         // decompress into the encoder, if necessary
         //
         // also init decompressed size
