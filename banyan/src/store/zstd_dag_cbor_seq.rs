@@ -63,7 +63,7 @@ impl ZstdDagCborSeq {
         T: Encode<DagCborCodec> + 'a,
     {
         let t0 = Instant::now();
-        let mut encoder = zstd::Encoder::new(Vec::new(), 0)?;
+        let mut encoder = zstd::Encoder::new(Vec::new(), zstd_level)?;
         let mut links = BTreeSet::new();
         let mut size: usize = 0;
         for item in iter.into_iter() {
