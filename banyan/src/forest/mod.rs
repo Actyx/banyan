@@ -195,7 +195,7 @@ impl Config {
             max_leaf_count: 10,
             max_key_branches: 4,
             max_summary_branches: 4,
-            zstd_level: 10,
+            zstd_level: 0,
             max_uncompressed_leaf_size: 16 * 1024 * 1024,
         }
     }
@@ -207,7 +207,7 @@ impl Config {
             max_leaf_count: 1 << 14,
             max_summary_branches: 32,
             max_key_branches: 32,
-            zstd_level: 10,
+            zstd_level: 0,
             max_uncompressed_leaf_size: 16 * 1024 * 1024,
         }
     }
