@@ -63,6 +63,7 @@ pub mod store;
 mod stream_builder;
 mod tree;
 mod util;
+use prometheus::Registry;
 use stream_builder::{CipherOffset, StreamBuilderState};
 
 pub use chacha20;
@@ -75,3 +76,9 @@ extern crate quickcheck;
 #[cfg(test)]
 #[macro_use(quickcheck)]
 extern crate quickcheck_macros;
+
+/// Register all prometheus metrics
+pub fn register(registry: Registry) -> anyhow::Result<()> {
+    forest::register(registry)?;
+    Ok(())
+}

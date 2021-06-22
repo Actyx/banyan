@@ -15,9 +15,11 @@ chacha20 = "0.7.1"
 derive_more = "0.99.13"
 fnv = "1.0.7"
 futures = { version = "0.3.14", features = ["thread-pool"] }
+lazy_static = "1.4.0"
 libipld = { version = "0.12.0", features = ["unleashed"] }
 maplit = "1.0.2"
 parking_lot = "0.11.1"
+prometheus = "0.12.0"
 smallvec = "1.6.1"
 tracing = "0.1.25"
 weight-cache = "0.2.3"

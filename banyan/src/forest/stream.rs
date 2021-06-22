@@ -106,30 +106,76 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
         E: Send + 'static,
         F: Send + Sync + 'static + Fn(&NodeInfo<T, R>) -> E,
     {
-        let offset = Arc::new(AtomicU64::new(*range.start()));
+        let end = *range.end();
+        let start_offset_ref = Arc::new(AtomicU64::new(*range.start()));
         let forest = self.clone();
-        trees
+        let result = trees
             .filter_map(move |tree| future::ready(tree.into_inner()))
             .flat_map(move |(index, secrets, _)| {
                 // create an intersection of a range query and the main query
                 // and wrap it in an arc so it is cheap to clone
-                let range = offset.load(Ordering::SeqCst)..=*range.end();
+                let range = start_offset_ref.load(Ordering::SeqCst)..=*range.end();
                 let query = AndQuery(OffsetRangeQuery::from(range), query.clone()).boxed();
-                let offset = offset.clone();
+                let start_offset_ref = start_offset_ref.clone();
                 let iter = forest
                     .clone()
                     .traverse0(secrets, query, index, mk_extra)
                     .take_while(move |result| {
                         if let Ok(chunk) = result {
                             // update the offset
-                            offset.fetch_max(chunk.range.end, Ordering::SeqCst);
+                            start_offset_ref.fetch_max(chunk.range.end, Ordering::SeqCst);
                         }
                         // abort at the first non-ok offset
                         result.is_ok()
                     });
                 iter.into_stream(1, thread_pool.clone())
-            })
+            });
+        // make sure we terminate when `end` is reached
+        take_until_condition(result, move |chunk| match chunk {
+            // end is inclusive, whereas `chunk.range.end` is exclusive
+            Ok(chunk) => chunk.range.end > end,
+            Err(_) => true,
+        })
     }
+    // pub fn stream_trees_chunked_threaded<S, Q, V, E, F>(
+    //     &self,
+    //     query: Q,
+    //     trees: S,
+    //     range: RangeInclusive<u64>,
+    //     mk_extra: &'static F,
+    //     thread_pool: ThreadPool,
+    // ) -> impl Stream<Item = anyhow::Result<FilteredChunk<(u64, T::Key, V), E>>> + Send + 'static
+    // where
+    //     S: Stream<Item = Tree<T, V>> + Send + 'static,
+    //     Q: Query<T> + Clone,
+    //     V: BanyanValue,
+    //     E: Send + 'static,
+    //     F: Send + Sync + 'static + Fn(&NodeInfo<T, R>) -> E,
+    // {
+    //     let offset = Arc::new(AtomicU64::new(*range.start()));
+    //     let forest = self.clone();
+    //     trees
+    //         .filter_map(move |tree| future::ready(tree.into_inner()))
+    //         .flat_map(move |(index, secrets, _)| {
+    //             // create an intersection of a range query and the main query
+    //             // and wrap it in an arc so it is cheap to clone
+    //             let range = offset.load(Ordering::SeqCst)..=*range.end();
+    //             let query = AndQuery(OffsetRangeQuery::from(range), query.clone()).boxed();
+    //             let offset = offset.clone();
+    //             let iter = forest
+    //                 .clone()
+    //                 .traverse0(secrets, query, index, mk_extra)
+    //                 .take_while(move |result| {
+    //                     if let Ok(chunk) = result {
+    //                         // update the offset
+    //                         offset.fetch_max(chunk.range.end, Ordering::SeqCst);
+    //                     }
+    //                     // abort at the first non-ok offset
+    //                     result.is_ok()
+    //                 });
+    //             iter.into_stream(1, thread_pool.clone())
+    //         })
+    // }
 
     /// Given a sequence of roots, will stream chunks in reverse order until it arrives at `range.start()`.
     ///

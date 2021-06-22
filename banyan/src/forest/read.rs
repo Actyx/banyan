@@ -11,10 +11,32 @@ use crate::{
 };
 use anyhow::{anyhow, Result};
 use futures::{prelude::*, stream::BoxStream};
+use lazy_static::lazy_static;
 use libipld::cbor::DagCbor;
+use prometheus::{linear_buckets, Histogram, HistogramOpts, Registry};
 use smallvec::{smallvec, SmallVec};
-
 use std::{iter, marker::PhantomData, ops::Range, sync::Arc, time::Instant};
+
+lazy_static! {
+    pub static ref LEAF_LOAD_HIST: Histogram = Histogram::with_opts(
+        HistogramOpts::new("leaf_load_time", "Time to load leafs",)
+            .namespace("banyan")
+            .buckets(linear_buckets(0.0, 10.0, 100).unwrap()),
+    )
+    .unwrap();
+    pub static ref BRANCH_LOAD_HIST: Histogram = Histogram::with_opts(
+        HistogramOpts::new("branch_load_time", "Time to load branches",)
+            .namespace("banyan")
+            .buckets(linear_buckets(0.0, 10.0, 100).unwrap()),
+    )
+    .unwrap();
+}
+
+pub(crate) fn register(registry: Registry) -> anyhow::Result<()> {
+    registry.register(Box::new(LEAF_LOAD_HIST.clone()))?;
+    registry.register(Box::new(BRANCH_LOAD_HIST.clone()))?;
+    Ok(())
+}
 
 pub(crate) trait TreeVisitor<T: TreeTypes, R> {
     type Item;
@@ -362,9 +384,7 @@ where
     /// load a leaf given a leaf index
     pub(crate) fn load_leaf(&self, stream: &Secrets, index: &LeafIndex<T>) -> Result<Option<Leaf>> {
         Ok(if let Some(link) = &index.link {
-            let data = &self.store().get(link)?;
-            let (items, range) = ZstdDagCborSeq::decrypt(data, stream.value_key(), nonce::<T>())?;
-            Some(Leaf::new(items, range))
+            Some(self.load_leaf_from_link(stream, link)?)
         } else {
             None
         })
@@ -372,8 +392,10 @@ where
 
     /// load a leaf given a leaf index
     pub(crate) fn load_leaf_from_link(&self, stream: &Secrets, link: &T::Link) -> Result<Leaf> {
+        let timer = LEAF_LOAD_HIST.start_timer();
         let data = &self.store().get(link)?;
         let (items, range) = ZstdDagCborSeq::decrypt(data, stream.value_key(), nonce::<T>())?;
+        drop(timer);
         Ok(Leaf::new(items, range))
     }
 
@@ -428,14 +450,14 @@ where
         secrets: &Secrets,
         link: &T::Link,
     ) -> Result<Branch<T>> {
-        let t0 = Instant::now();
+        let timer = BRANCH_LOAD_HIST.start_timer();
         let result = Ok({
             let bytes = self.store.get(&link)?;
             let (children, byte_range) =
                 deserialize_compressed(secrets.index_key(), nonce::<T>(), &bytes)?;
             Branch::<T>::new(children, byte_range)
         });
-        tracing::debug!("load_branch {}", t0.elapsed().as_secs_f64());
+        drop(timer);
         result
     }
 
