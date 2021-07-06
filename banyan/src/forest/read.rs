@@ -11,12 +11,15 @@ use crate::{
 };
 use anyhow::{anyhow, Result};
 use futures::{prelude::*, stream::BoxStream};
+#[cfg(feature = "metrics")]
 use lazy_static::lazy_static;
 use libipld::cbor::DagCbor;
+#[cfg(feature = "metrics")]
 use prometheus::{linear_buckets, Histogram, HistogramOpts, Registry};
 use smallvec::{smallvec, SmallVec};
 use std::{iter, marker::PhantomData, ops::Range, sync::Arc, time::Instant};
 
+#[cfg(feature = "metrics")]
 lazy_static! {
     pub static ref LEAF_LOAD_HIST: Histogram = Histogram::with_opts(
         HistogramOpts::new("leaf_load_time", "Time to load leafs",)
@@ -32,6 +35,7 @@ lazy_static! {
     .unwrap();
 }
 
+#[cfg(feature = "metrics")]
 pub(crate) fn register(registry: Registry) -> anyhow::Result<()> {
     registry.register(Box::new(LEAF_LOAD_HIST.clone()))?;
     registry.register(Box::new(BRANCH_LOAD_HIST.clone()))?;
@@ -392,10 +396,10 @@ where
 
     /// load a leaf given a leaf index
     pub(crate) fn load_leaf_from_link(&self, stream: &Secrets, link: &T::Link) -> Result<Leaf> {
-        let timer = LEAF_LOAD_HIST.start_timer();
+        #[cfg(feature = "metrics")]
+        let _timer = LEAF_LOAD_HIST.start_timer();
         let data = &self.store().get(link)?;
         let (items, range) = ZstdDagCborSeq::decrypt(data, stream.value_key(), nonce::<T>())?;
-        drop(timer);
         Ok(Leaf::new(items, range))
     }
 
@@ -450,15 +454,14 @@ where
         secrets: &Secrets,
         link: &T::Link,
     ) -> Result<Branch<T>> {
-        let timer = BRANCH_LOAD_HIST.start_timer();
-        let result = Ok({
+        #[cfg(feature = "metrics")]
+        let _timer = BRANCH_LOAD_HIST.start_timer();
+        Ok({
             let bytes = self.store.get(&link)?;
             let (children, byte_range) =
                 deserialize_compressed(secrets.index_key(), nonce::<T>(), &bytes)?;
             Branch::<T>::new(children, byte_range)
-        });
-        drop(timer);
-        result
+        })
     }
 
     pub(crate) fn node_info(&self, secrets: &Secrets, index: &Index<T>) -> NodeInfo<T, R> {

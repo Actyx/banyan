@@ -3,14 +3,17 @@ use super::index::*;
 use crate::store::{BlockWriter, BranchCache, ReadOnlyStore};
 use core::{fmt::Debug, hash::Hash, iter::FromIterator, ops::Range};
 use libipld::cbor::DagCbor;
-use prometheus::Registry;
 use std::{fmt::Display, sync::Arc};
 mod index_iter;
 mod read;
 mod stream;
 mod write;
 pub(crate) use index_iter::IndexIter;
-pub(crate) use read::{register, ChunkVisitor, TreeIter};
+#[cfg(feature = "metrics")]
+use prometheus::Registry;
+#[cfg(feature = "metrics")]
+pub(crate) use read::register;
+pub(crate) use read::{ChunkVisitor, TreeIter};
 
 /// Trees can be parametrized with the key type and the sequence type. Also, to avoid a dependency
 /// on a link type with all its baggage, we parameterize the link type.
@@ -51,6 +54,7 @@ pub trait TreeTypes: Debug + Send + Sync + Clone + 'static {
 pub struct ForestInner<T: TreeTypes, R> {
     pub(crate) store: R,
     pub(crate) branch_cache: BranchCache<T>,
+    #[cfg(feature = "metrics")]
     pub(crate) registry: Registry,
 }
 
@@ -65,11 +69,11 @@ impl<TT: TreeTypes, R> Clone for Forest<TT, R> {
 
 impl<TT: TreeTypes, R: Clone> Forest<TT, R> {
     pub fn new(store: R, branch_cache: BranchCache<TT>) -> Self {
-        let registry = Registry::new();
         Self(Arc::new(ForestInner {
             store,
             branch_cache,
-            registry,
+            #[cfg(feature = "metrics")]
+            registry: Registry::new(),
         }))
     }
 
