@@ -265,6 +265,15 @@ fn build_pack_1() {
     assert!(do_build_pack(xss).unwrap());
 }
 
+#[test]
+fn build_pack_2() {
+    let xss = (0..200).map(|i| {
+        (0..200).map(|j| (Key(i), j)).collect::<Vec<_>>()
+    }).collect::<Vec<_>>();
+    assert!(do_build_pack(xss).unwrap());
+}
+
+
 fn do_retain(t: TestTree) -> anyhow::Result<bool> {
     let (mut builder, txn, xs) = t.builder()?;
     let tree0 = builder.snapshot();
