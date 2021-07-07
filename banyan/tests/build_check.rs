@@ -10,6 +10,7 @@ use libipld::{cbor::DagCborCodec, codec::Codec, Cid};
 use quickcheck::TestResult;
 use quickcheck_macros::quickcheck;
 use std::{convert::TryInto, iter, str::FromStr};
+use tracing_subscriber::{fmt::format::FmtSpan, EnvFilter};
 
 use crate::common::no_offset_overlap;
 
@@ -267,13 +268,16 @@ fn build_pack_1() {
 
 #[test]
 fn build_pack_2() {
-    tracing_subscriber::fmt::init();
-    let xss = (0..200).map(|i| {
-        (0..200).map(|j| (Key(i), j)).collect::<Vec<_>>()
-    }).collect::<Vec<_>>();
+    let builder = tracing_subscriber::fmt()
+        .with_span_events(FmtSpan::CLOSE)
+        .with_env_filter(crate::EnvFilter::from_default_env());
+
+    builder.try_init().unwrap();
+    let xss = (0..200)
+        .map(|i| (0..200).map(|j| (Key(i), j)).collect::<Vec<_>>())
+        .collect::<Vec<_>>();
     assert!(do_build_pack(xss).unwrap());
 }
-
 
 fn do_retain(t: TestTree) -> anyhow::Result<bool> {
     let (mut builder, txn, xs) = t.builder()?;
