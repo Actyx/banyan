@@ -1,5 +1,5 @@
 //! # ZStd decompressor that uses thread local buffers to prevent allocations
-use std::cell::RefCell;
+use std::{cell::RefCell, time::Instant};
 use zstd::block::Decompressor;
 
 /// minimum size of the buffer.
@@ -64,10 +64,15 @@ impl DecompressionState {
     where
         F: FnMut(&[u8]) -> R,
     {
+        let span = tracing::debug_span!("decompress_and_transform");
+        let _entered = span.enter();
+        let t0 = Instant::now();
         let len = self.decompress(compressed)?;
         let result = f(&self.buffer[0..len]);
         self.buffer.truncate(MIN_CAPACITY);
         self.buffer.shrink_to_fit();
+        let dt = t0.elapsed();
+        tracing::debug!("decompress_and_transform took {}", dt.as_secs_f64());
         Ok((len, result))
     }
 }

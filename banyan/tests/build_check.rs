@@ -267,6 +267,7 @@ fn build_pack_1() {
 
 #[test]
 fn build_pack_2() {
+    tracing_subscriber::fmt::init();
     let xss = (0..200).map(|i| {
         (0..200).map(|j| (Key(i), j)).collect::<Vec<_>>()
     }).collect::<Vec<_>>();
