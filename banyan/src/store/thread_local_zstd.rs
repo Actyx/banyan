@@ -41,10 +41,11 @@ impl DecompressionState {
         let mut cap = MIN_CAPACITY;
         // todo: do not resize but use a temp buffer as soon as we are above min_capacity
         loop {
+            tracing::info!("resize cap={} len={} to={}", self.buffer.capacity(), self.buffer.len(), cap);
             self.buffer.resize(cap, 0);
             let res = self
                 .decompressor
-                .decompress_to_buffer(data, &mut self.buffer);
+                .decompress_to_buffer(data, &mut self.buffer[..]);
             if res.is_ok() || cap >= MAX_CAPACITY {
                 return res;
             } else {
