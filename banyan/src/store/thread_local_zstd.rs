@@ -34,7 +34,9 @@ impl DecompressionState {
     where
         F: FnMut(&[u8]) -> R,
     {
-        let capacity = Decompressor::upper_bound(compressed).unwrap_or(MAX_CAPACITY);
+        let capacity = Decompressor::upper_bound(compressed)
+            .unwrap_or(MAX_CAPACITY)
+            .min(MAX_CAPACITY);
         let mut tmp = Vec::new();
         let buffer = if capacity <= MIN_CAPACITY {
             &mut self.buffer[..]
