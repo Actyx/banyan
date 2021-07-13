@@ -1,54 +1,27 @@
 //! # ZStd decompressor that uses thread local buffers to prevent allocations
-use smallvec::SmallVec;
 use std::cell::RefCell;
 use zstd::block::Decompressor;
 
-/// max capacity we are going to allocate.
-///
-/// The maximum decompressed size the buffer can grow to before giving up.
+/// The size of the thread local buffer
+const MIN_CAPACITY: usize = 1024 * 1024 * 4;
+
+/// Max capacity we are going to allocate.
 const MAX_CAPACITY: usize = 1024 * 1024 * 16;
 
 /// thread-local decompression state
 pub(crate) struct DecompressionState {
     /// reused zstd decompressor
     decompressor: Decompressor,
+    buffer: Vec<u8>,
 }
 
 impl DecompressionState {
     fn new() -> Self {
         Self {
             decompressor: Decompressor::new(),
+            buffer: vec![0u8; MIN_CAPACITY],
         }
     }
-
-    // fn decompress(&mut self, data: &[u8]) -> std::io::Result<usize> {
-    //     if let Some(bound) = Decompressor::upper_bound(data) {
-    //         if bound <= 1024 {
-    //             let buffer = [0u8; 1024];
-    //             let res = self
-    //                 .decompressor
-    //                 .decompress_to_buffer(data, &mut self.buffer);
-    //         }
-    //     }
-    //     let mut cap = MIN_CAPACITY;
-    //     // todo: do not resize but use a temp buffer as soon as we are above min_capacity
-    //     loop {
-    //         let t0 = Instant::now();
-    //         self.buffer = vec![0u8; cap];
-    //         tracing::info!("resize buffer {}", t0.elapsed().as_secs_f64());
-    //         let t0 = Instant::now();
-    //         let res = self
-    //             .decompressor
-    //             .decompress_to_buffer(data, &mut self.buffer);
-    //         if res.is_ok() || cap >= MAX_CAPACITY {
-    //             tracing::info!("decompress inne {} {}", t0.elapsed().as_secs_f64(), res.is_ok());
-    //             return res;
-    //         } else {
-    //             tracing::info!("had to resize");
-    //             cap *= 2;
-    //         }
-    //     }
-    // }
 
     /// Decompress some data and apply a transform to it, e.g. deserialization.
     ///
@@ -62,13 +35,17 @@ impl DecompressionState {
         F: FnMut(&[u8]) -> R,
     {
         let capacity = Decompressor::upper_bound(compressed).unwrap_or(MAX_CAPACITY);
-        // use a smallvec so in case capacity is very small, it all happens on the stack.
-        let mut buffer: SmallVec<[u8; 1024]> = smallvec::smallvec![0u8; capacity];
+        let mut tmp = Vec::new();
+        let buffer = if capacity <= MIN_CAPACITY {
+            &mut self.buffer[..]
+        } else {
+            tmp.resize(capacity, 0u8);
+            &mut tmp
+        };
+
         let span = tracing::debug_span!("decompress_and_transform");
         let _entered = span.enter();
-        let len = self
-            .decompressor
-            .decompress_to_buffer(compressed, buffer.as_mut())?;
+        let len = self.decompressor.decompress_to_buffer(compressed, buffer)?;
         let result = f(&buffer[0..len]);
         Ok((len, result))
     }

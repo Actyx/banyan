@@ -268,11 +268,7 @@ fn build_pack_1() {
 
 #[test]
 fn build_pack_2() {
-    let builder = tracing_subscriber::fmt()
-        .with_span_events(FmtSpan::CLOSE)
-        .with_env_filter(crate::EnvFilter::from_default_env());
-
-    builder.try_init().unwrap();
+    try_init_logging();
     let xss = (0..200)
         .map(|i| (0..200).map(|j| (Key(i), j)).collect::<Vec<_>>())
         .collect::<Vec<_>>();
@@ -820,4 +816,12 @@ fn build1() -> anyhow::Result<()> {
     forest.dump(&tree.snapshot())?;
     // let foo = Tree::empty()
     Ok(())
+}
+
+fn try_init_logging() {
+    let builder = tracing_subscriber::fmt()
+        .with_span_events(FmtSpan::CLOSE)
+        .with_env_filter(EnvFilter::from_default_env());
+
+    let _ = builder.try_init();
 }
