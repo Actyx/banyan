@@ -1,3 +1,5 @@
+#[cfg(feature = "metrics")]
+use super::prom;
 use super::{BranchCache, Config, FilteredChunk, Forest, Secrets, TreeTypes};
 use crate::{
     index::{
@@ -11,36 +13,9 @@ use crate::{
 };
 use anyhow::{anyhow, Result};
 use futures::{prelude::*, stream::BoxStream};
-#[cfg(feature = "metrics")]
-use lazy_static::lazy_static;
 use libipld::cbor::DagCbor;
-#[cfg(feature = "metrics")]
-use prometheus::{linear_buckets, Histogram, HistogramOpts, Registry};
 use smallvec::{smallvec, SmallVec};
 use std::{iter, marker::PhantomData, ops::Range, sync::Arc, time::Instant};
-
-#[cfg(feature = "metrics")]
-lazy_static! {
-    pub static ref LEAF_LOAD_HIST: Histogram = Histogram::with_opts(
-        HistogramOpts::new("leaf_load_time", "Time to load leafs",)
-            .namespace("banyan")
-            .buckets(linear_buckets(0.0, 10.0, 100).unwrap()),
-    )
-    .unwrap();
-    pub static ref BRANCH_LOAD_HIST: Histogram = Histogram::with_opts(
-        HistogramOpts::new("branch_load_time", "Time to load branches",)
-            .namespace("banyan")
-            .buckets(linear_buckets(0.0, 10.0, 100).unwrap()),
-    )
-    .unwrap();
-}
-
-#[cfg(feature = "metrics")]
-pub(crate) fn register(registry: Registry) -> anyhow::Result<()> {
-    registry.register(Box::new(LEAF_LOAD_HIST.clone()))?;
-    registry.register(Box::new(BRANCH_LOAD_HIST.clone()))?;
-    Ok(())
-}
 
 pub(crate) trait TreeVisitor<T: TreeTypes, R> {
     type Item;
@@ -397,8 +372,8 @@ where
     /// load a leaf given a leaf index
     pub(crate) fn load_leaf_from_link(&self, stream: &Secrets, link: &T::Link) -> Result<Leaf> {
         #[cfg(feature = "metrics")]
-        let _timer = LEAF_LOAD_HIST.start_timer();
-        let data = &self.store().get(link)?;
+        let _timer = prom::LEAF_LOAD_HIST.start_timer();
+        let data = &self.get_block(link)?;
         let (items, range) = ZstdDagCborSeq::decrypt(data, stream.value_key(), nonce::<T>())?;
         Ok(Leaf::new(items, range))
     }
@@ -409,9 +384,8 @@ where
         sealed: impl Fn(&[Index<T>], u32) -> bool,
         link: T::Link,
     ) -> Result<(Index<T>, Range<u64>)> {
-        let store = self.store.clone();
         let index_key = secrets.index_key();
-        let bytes = store.get(&link)?;
+        let bytes = self.get_block(&link)?;
         let (children, byte_range) = deserialize_compressed::<T>(index_key, nonce::<T>(), &bytes)?;
         let level = children.iter().map(|x| x.level()).max().unwrap() + 1;
         let count = children.iter().map(|x| x.count()).sum();
@@ -448,6 +422,12 @@ where
         }
     }
 
+    fn get_block(&self, link: &T::Link) -> anyhow::Result<Box<[u8]>> {
+        #[cfg(feature = "metrics")]
+        let _timer = prom::BLOCK_GET_HIST.start_timer();
+        self.store.get(link)
+    }
+
     /// load a branch given a branch index
     pub(crate) fn load_branch_from_link(
         &self,
@@ -455,9 +435,9 @@ where
         link: &T::Link,
     ) -> Result<Branch<T>> {
         #[cfg(feature = "metrics")]
-        let _timer = BRANCH_LOAD_HIST.start_timer();
+        let _timer = prom::BRANCH_LOAD_HIST.start_timer();
         Ok({
-            let bytes = self.store.get(&link)?;
+            let bytes = self.get_block(&link)?;
             let (children, byte_range) =
                 deserialize_compressed(secrets.index_key(), nonce::<T>(), &bytes)?;
             Branch::<T>::new(children, byte_range)
@@ -487,7 +467,7 @@ where
     ) -> Result<Option<Branch<T>>> {
         let t0 = Instant::now();
         let result = Ok(if let Some(link) = &index.link {
-            let bytes = self.store.get(&link)?;
+            let bytes = self.get_block(&link)?;
             let (children, byte_range) =
                 deserialize_compressed(secrets.index_key(), nonce::<T>(), &bytes)?;
             Some(Branch::<T>::new(children, byte_range))

@@ -5,14 +5,16 @@ use core::{fmt::Debug, hash::Hash, iter::FromIterator, ops::Range};
 use libipld::cbor::DagCbor;
 use std::{fmt::Display, sync::Arc};
 mod index_iter;
+#[cfg(feature = "metrics")]
+mod prom;
 mod read;
 mod stream;
 mod write;
 pub(crate) use index_iter::IndexIter;
 #[cfg(feature = "metrics")]
-use prometheus::Registry;
+pub(crate) use prom::register;
 #[cfg(feature = "metrics")]
-pub(crate) use read::register;
+use prometheus::Registry;
 pub(crate) use read::{ChunkVisitor, TreeIter};
 
 /// Trees can be parametrized with the key type and the sequence type. Also, to avoid a dependency
