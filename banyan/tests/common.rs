@@ -40,7 +40,7 @@ pub struct Key(pub u64);
 pub struct KeyRange(pub u64, pub u64);
 
 impl KeyRange {
-    fn to_range_set(&self) -> RangeSet<u64> {
+    fn as_range_set(&self) -> RangeSet<u64> {
         RangeSet::from(self.0..self.1.saturating_add(1))
     }
 }
@@ -57,7 +57,7 @@ impl Query<TT> for KeyQuery {
 
     fn intersecting(&self, _offset: u64, index: &banyan::index::BranchIndex<TT>, res: &mut [bool]) {
         for (res, range) in res.iter_mut().zip(index.summaries()) {
-            *res = *res && !self.0.is_disjoint(&range.to_range_set());
+            *res = *res && !self.0.is_disjoint(&range.as_range_set());
         }
     }
 }

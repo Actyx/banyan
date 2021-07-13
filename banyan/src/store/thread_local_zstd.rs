@@ -2,54 +2,24 @@
 use std::cell::RefCell;
 use zstd::block::Decompressor;
 
-/// minimum size of the buffer.
-///
-/// The buffer will shrink back to this capacity after each use, so this should be
-/// large enough for the vast majority of cases, otherwise it defeats the purpose of
-/// having a thread local buffer.
-///
-/// The maximum memory size is MIN_CAPACITY times the maximum number of threads doing
-/// decompression.
-///
-/// Note that this whole contraption will be worth it mostly when decompressing very
-/// small things. When decompressing larger things the overhead of allocating a buffer
-/// will be negligible.
+/// The size of the thread local buffer
 const MIN_CAPACITY: usize = 1024 * 1024 * 4;
-/// max capacity the buffer will grow to.
-///
-/// The maximum decompressed size the buffer can grow to before giving up.
+
+/// Max capacity we are going to allocate.
 const MAX_CAPACITY: usize = 1024 * 1024 * 16;
 
 /// thread-local decompression state
 pub(crate) struct DecompressionState {
     /// reused zstd decompressor
     decompressor: Decompressor,
-    /// buffer that can grow up to MAX_CAPACITY
     buffer: Vec<u8>,
 }
 
 impl DecompressionState {
     fn new() -> Self {
-        let buffer: Vec<u8> = Vec::with_capacity(MIN_CAPACITY);
         Self {
             decompressor: Decompressor::new(),
-            buffer,
-        }
-    }
-
-    fn decompress(&mut self, data: &[u8]) -> std::io::Result<usize> {
-        let mut cap = MIN_CAPACITY;
-        // todo: do not resize but use a temp buffer as soon as we are above min_capacity
-        loop {
-            self.buffer.resize(cap, 0);
-            let res = self
-                .decompressor
-                .decompress_to_buffer(data, &mut self.buffer);
-            if res.is_ok() || cap >= MAX_CAPACITY {
-                return res;
-            } else {
-                cap *= 2;
-            }
+            buffer: vec![0u8; MIN_CAPACITY],
         }
     }
 
@@ -64,10 +34,21 @@ impl DecompressionState {
     where
         F: FnMut(&[u8]) -> R,
     {
-        let len = self.decompress(compressed)?;
-        let result = f(&self.buffer[0..len]);
-        self.buffer.truncate(MIN_CAPACITY);
-        self.buffer.shrink_to_fit();
+        let capacity = Decompressor::upper_bound(compressed)
+            .unwrap_or(MAX_CAPACITY)
+            .min(MAX_CAPACITY);
+        let mut tmp = Vec::new();
+        let buffer = if capacity <= MIN_CAPACITY {
+            &mut self.buffer[..]
+        } else {
+            tmp.resize(capacity, 0u8);
+            &mut tmp
+        };
+
+        let span = tracing::debug_span!("decompress_and_transform");
+        let _entered = span.enter();
+        let len = self.decompressor.decompress_to_buffer(compressed, buffer)?;
+        let result = f(&buffer[0..len]);
         Ok((len, result))
     }
 }

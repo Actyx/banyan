@@ -51,7 +51,7 @@ impl<L, S: BlockWriter<L> + Send + Sync> BlockWriter<L> for OpsCountingStore<S> 
     }
 }
 
-#[allow(clippy::clippy::type_complexity)]
+#[allow(clippy::type_complexity)]
 fn test_ops_count(
     name: &str,
     forest: &Forest<TT, OpsCountingStore<MemStore<Sha256Digest>>>,

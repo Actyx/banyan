@@ -10,6 +10,7 @@ use libipld::{cbor::DagCborCodec, codec::Codec, Cid};
 use quickcheck::TestResult;
 use quickcheck_macros::quickcheck;
 use std::{convert::TryInto, iter, str::FromStr};
+use tracing_subscriber::{fmt::format::FmtSpan, EnvFilter};
 
 use crate::common::no_offset_overlap;
 
@@ -262,6 +263,15 @@ fn build_pack(xss: Vec<Vec<(Key, u64)>>) -> anyhow::Result<bool> {
 #[test]
 fn build_pack_1() {
     let xss = vec![vec![(Key(8702892647260624503), 0)]];
+    assert!(do_build_pack(xss).unwrap());
+}
+
+#[test]
+fn build_pack_2() {
+    try_init_logging();
+    let xss = (0..200)
+        .map(|i| (0..200).map(|j| (Key(i), j)).collect::<Vec<_>>())
+        .collect::<Vec<_>>();
     assert!(do_build_pack(xss).unwrap());
 }
 
@@ -806,4 +816,12 @@ fn build1() -> anyhow::Result<()> {
     forest.dump(&tree.snapshot())?;
     // let foo = Tree::empty()
     Ok(())
+}
+
+fn try_init_logging() {
+    let builder = tracing_subscriber::fmt()
+        .with_span_events(FmtSpan::CLOSE)
+        .with_env_filter(EnvFilter::from_default_env());
+
+    let _ = builder.try_init();
 }

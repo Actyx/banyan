@@ -263,11 +263,10 @@ async fn build_tree(
             .collect::<Vec<_>>();
         if unbalanced {
             forest.extend_unpacked(&mut tree, v)?;
-            forest.assert_invariants(&tree)?;
         } else {
             forest.extend(&mut tree, v)?;
-            forest.assert_invariants(&tree)?;
         }
+        forest.assert_invariants(&tree)?;
     }
     Ok(tree)
 }
@@ -319,11 +318,10 @@ async fn bench_build(
     for v in data {
         if unbalanced {
             forest.extend_unpacked(&mut tree, v)?;
-            forest.assert_invariants(&tree)?;
         } else {
             forest.extend(&mut tree, v)?;
-            forest.assert_invariants(&tree)?;
         }
+        forest.assert_invariants(&tree)?;
     }
     let t1 = std::time::Instant::now();
     Ok((tree.snapshot(), t1 - t0))
