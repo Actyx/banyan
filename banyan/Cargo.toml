@@ -21,6 +21,8 @@ parking_lot = "0.11.1"
 smallvec = "1.6.1"
 tracing = "0.1.25"
 weight-cache = "0.2.3"
+# the only experimental feature we are using is ZSTD_decompressBound,
+# which is not actually experimental according to the zstd C docs.
 zstd = { version = "0.9.0", features = ["experimental"] }
 
 [dev-dependencies]
