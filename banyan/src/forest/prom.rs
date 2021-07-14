@@ -38,6 +38,18 @@ lazy_static! {
             .buckets(exponential_buckets(0.00001, 2.0, 17).unwrap()),
     )
     .unwrap();
+    pub static ref BLOCK_PUT_SIZE_HIST: Histogram = Histogram::with_opts(
+        HistogramOpts::new("block_put_size", "Size of blocks being written",)
+            .namespace("banyan")
+            .buckets(exponential_buckets(64.0, 2.0, 16).unwrap()),
+    )
+    .unwrap();
+    pub static ref BLOCK_GET_SIZE_HIST: Histogram = Histogram::with_opts(
+        HistogramOpts::new("block_get_size", "Size of blocks being read",)
+            .namespace("banyan")
+            .buckets(exponential_buckets(64.0, 2.0, 16).unwrap()),
+    )
+    .unwrap();
 }
 
 pub(crate) fn register(registry: &Registry) -> anyhow::Result<()> {
@@ -47,5 +59,7 @@ pub(crate) fn register(registry: &Registry) -> anyhow::Result<()> {
     registry.register(Box::new(BRANCH_STORE_HIST.clone()))?;
     registry.register(Box::new(BLOCK_PUT_HIST.clone()))?;
     registry.register(Box::new(BLOCK_GET_HIST.clone()))?;
+    registry.register(Box::new(BLOCK_PUT_SIZE_HIST.clone()))?;
+    registry.register(Box::new(BLOCK_GET_SIZE_HIST.clone()))?;
     Ok(())
 }

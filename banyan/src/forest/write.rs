@@ -45,6 +45,8 @@ where
     fn put_block(&self, data: Vec<u8>) -> anyhow::Result<T::Link> {
         #[cfg(feature = "metrics")]
         let _timer = prom::BLOCK_PUT_HIST.start_timer();
+        #[cfg(feature = "metrics")]
+        prom::BLOCK_PUT_SIZE_HIST.observe(data.len() as f64);
         self.writer.put(data)
     }
 

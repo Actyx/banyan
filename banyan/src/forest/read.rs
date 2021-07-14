@@ -425,7 +425,12 @@ where
     fn get_block(&self, link: &T::Link) -> anyhow::Result<Box<[u8]>> {
         #[cfg(feature = "metrics")]
         let _timer = prom::BLOCK_GET_HIST.start_timer();
-        self.store.get(link)
+        let res = self.store.get(link);
+        #[cfg(feature = "metrics")]
+        if let Ok(x) = &res {
+            prom::BLOCK_GET_SIZE_HIST.observe(x.len() as f64);
+        }
+        res
     }
 
     /// load a branch given a branch index
