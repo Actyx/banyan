@@ -65,6 +65,9 @@ mod tree;
 mod util;
 use stream_builder::{CipherOffset, StreamBuilderState};
 
+#[cfg(feature = "metrics")]
+use prometheus::Registry;
+
 pub use chacha20;
 pub use forest::{Config, FilteredChunk, Forest, Secrets, Transaction, TreeTypes};
 pub use stream_builder::{StreamBuilder, StreamTransaction};
@@ -75,3 +78,10 @@ extern crate quickcheck;
 #[cfg(test)]
 #[macro_use(quickcheck)]
 extern crate quickcheck_macros;
+
+/// Register all prometheus metrics
+#[cfg(feature = "metrics")]
+pub fn register(registry: &Registry) -> anyhow::Result<()> {
+    forest::register(registry)?;
+    Ok(())
+}

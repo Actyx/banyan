@@ -1,3 +1,5 @@
+#[cfg(feature = "metrics")]
+use super::prom;
 use crate::{
     forest::{BranchResult, Config, CreateMode, Forest, Transaction, TreeTypes},
     index::{zip_with_offset_ref, NodeInfo},
@@ -17,7 +19,7 @@ use crate::{
 };
 use anyhow::{ensure, Result};
 use libipld::cbor::DagCbor;
-use std::{iter, time::Instant};
+use std::iter;
 
 /// basic random access append only tree
 impl<T, R, W> Transaction<T, R, W>
@@ -40,6 +42,14 @@ where
         self.extend_leaf(&[], None, from, stream)
     }
 
+    fn put_block(&self, data: Vec<u8>) -> anyhow::Result<T::Link> {
+        #[cfg(feature = "metrics")]
+        let _timer = prom::BLOCK_PUT_HIST.start_timer();
+        #[cfg(feature = "metrics")]
+        prom::BLOCK_PUT_SIZE_HIST.observe(data.len() as f64);
+        self.writer.put(data)
+    }
+
     /// Creates a leaf from a sequence that either contains all items from the sequence, or is full
     ///
     /// The result is the index of the leaf. The iterator will contain the elements that did not fit.
@@ -50,7 +60,8 @@ where
         from: &mut iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
         stream: &mut StreamBuilderState,
     ) -> Result<LeafIndex<T>> {
-        let t0 = Instant::now();
+        #[cfg(feature = "metrics")]
+        let _timer = prom::LEAF_STORE_HIST.start_timer();
         assert!(from.peek().is_some());
         let mut keys = keys.map(|keys| keys.to_vec()).unwrap_or_default();
         let (data, sealed) = ZstdDagCborSeq::fill(
@@ -69,9 +80,8 @@ where
             &mut stream.offset,
         )?;
         let keys = keys.into_iter().collect::<T::KeySeq>();
-        let encrypted_len = encrypted.len();
         // store leaf
-        let link = self.writer.put(encrypted)?;
+        let link = self.put_block(encrypted)?;
         let index: LeafIndex<T> = LeafIndex {
             link: Some(link),
             value_bytes,
@@ -83,11 +93,6 @@ where
             index.keys.count(),
             index.value_bytes,
             index.sealed
-        );
-        tracing::debug!(
-            "extend_leaf {} {}",
-            t0.elapsed().as_secs_f64(),
-            encrypted_len
         );
         Ok(index)
     }
@@ -349,14 +354,13 @@ where
         items: &[Index<T>],
         stream: &mut StreamBuilderState,
     ) -> Result<(T::Link, u64)> {
-        let t0 = Instant::now();
+        #[cfg(feature = "metrics")]
+        let _timer = prom::BRANCH_STORE_HIST.start_timer();
         let level = stream.config().zstd_level;
         let key = *stream.index_key();
         let cbor = serialize_compressed(&key, nonce::<T>(), &mut stream.offset, &items, level)?;
         let len = cbor.len() as u64;
-        let result = Ok((self.writer.put(cbor)?, len));
-        tracing::debug!("persist_branch {}", t0.elapsed().as_secs_f64());
-        result
+        Ok((self.put_block(cbor)?, len))
     }
 
     pub(crate) fn retain0<Q: Query<T> + Send + Sync>(

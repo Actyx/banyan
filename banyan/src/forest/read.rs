@@ -1,3 +1,5 @@
+#[cfg(feature = "metrics")]
+use super::prom;
 use super::{BranchCache, Config, FilteredChunk, Forest, Secrets, TreeTypes};
 use crate::{
     index::{
@@ -13,7 +15,6 @@ use anyhow::{anyhow, Result};
 use futures::{prelude::*, stream::BoxStream};
 use libipld::cbor::DagCbor;
 use smallvec::{smallvec, SmallVec};
-
 use std::{iter, marker::PhantomData, ops::Range, sync::Arc, time::Instant};
 
 pub(crate) trait TreeVisitor<T: TreeTypes, R> {
@@ -362,9 +363,7 @@ where
     /// load a leaf given a leaf index
     pub(crate) fn load_leaf(&self, stream: &Secrets, index: &LeafIndex<T>) -> Result<Option<Leaf>> {
         Ok(if let Some(link) = &index.link {
-            let data = &self.store().get(link)?;
-            let (items, range) = ZstdDagCborSeq::decrypt(data, stream.value_key(), nonce::<T>())?;
-            Some(Leaf::new(items, range))
+            Some(self.load_leaf_from_link(stream, link)?)
         } else {
             None
         })
@@ -372,7 +371,9 @@ where
 
     /// load a leaf given a leaf index
     pub(crate) fn load_leaf_from_link(&self, stream: &Secrets, link: &T::Link) -> Result<Leaf> {
-        let data = &self.store().get(link)?;
+        #[cfg(feature = "metrics")]
+        let _timer = prom::LEAF_LOAD_HIST.start_timer();
+        let data = &self.get_block(link)?;
         let (items, range) = ZstdDagCborSeq::decrypt(data, stream.value_key(), nonce::<T>())?;
         Ok(Leaf::new(items, range))
     }
@@ -383,9 +384,8 @@ where
         sealed: impl Fn(&[Index<T>], u32) -> bool,
         link: T::Link,
     ) -> Result<(Index<T>, Range<u64>)> {
-        let store = self.store.clone();
         let index_key = secrets.index_key();
-        let bytes = store.get(&link)?;
+        let bytes = self.get_block(&link)?;
         let (children, byte_range) = deserialize_compressed::<T>(index_key, nonce::<T>(), &bytes)?;
         let level = children.iter().map(|x| x.level()).max().unwrap() + 1;
         let count = children.iter().map(|x| x.count()).sum();
@@ -422,21 +422,31 @@ where
         }
     }
 
+    fn get_block(&self, link: &T::Link) -> anyhow::Result<Box<[u8]>> {
+        #[cfg(feature = "metrics")]
+        let _timer = prom::BLOCK_GET_HIST.start_timer();
+        let res = self.store.get(link);
+        #[cfg(feature = "metrics")]
+        if let Ok(x) = &res {
+            prom::BLOCK_GET_SIZE_HIST.observe(x.len() as f64);
+        }
+        res
+    }
+
     /// load a branch given a branch index
     pub(crate) fn load_branch_from_link(
         &self,
         secrets: &Secrets,
         link: &T::Link,
     ) -> Result<Branch<T>> {
-        let t0 = Instant::now();
-        let result = Ok({
-            let bytes = self.store.get(&link)?;
+        #[cfg(feature = "metrics")]
+        let _timer = prom::BRANCH_LOAD_HIST.start_timer();
+        Ok({
+            let bytes = self.get_block(&link)?;
             let (children, byte_range) =
                 deserialize_compressed(secrets.index_key(), nonce::<T>(), &bytes)?;
             Branch::<T>::new(children, byte_range)
-        });
-        tracing::debug!("load_branch {}", t0.elapsed().as_secs_f64());
-        result
+        })
     }
 
     pub(crate) fn node_info(&self, secrets: &Secrets, index: &Index<T>) -> NodeInfo<T, R> {
@@ -462,7 +472,7 @@ where
     ) -> Result<Option<Branch<T>>> {
         let t0 = Instant::now();
         let result = Ok(if let Some(link) = &index.link {
-            let bytes = self.store.get(&link)?;
+            let bytes = self.get_block(&link)?;
             let (children, byte_range) =
                 deserialize_compressed(secrets.index_key(), nonce::<T>(), &bytes)?;
             Some(Branch::<T>::new(children, byte_range))
