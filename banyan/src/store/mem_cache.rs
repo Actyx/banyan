@@ -42,7 +42,7 @@ impl<L: Eq + Hash + Copy, I> MemCache<L, I> {
         }
     }
 
-    /// get the value, just from ourselves, as a MemBlock
+    /// get the value, just from ourselves, as a
     fn get0(&self, key: &L) -> Option<Box<[u8]>> {
         self.cache
             .as_ref()
