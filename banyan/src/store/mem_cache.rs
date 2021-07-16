@@ -29,7 +29,7 @@ pub struct MemCache<L, I> {
     max_size: usize,
 }
 
-impl<L: Eq + Hash + Copy, I> MemCache<L, I> {
+impl<L: Eq + Hash + Copy, I: ReadOnlyStore<L>> MemCache<L, I> {
     /// create a new MemCache
     /// `max_size` the maximum size for a block to be considered for caching
     /// `capacity` the total capacity of the cache, 0 to disable
@@ -50,10 +50,8 @@ impl<L: Eq + Hash + Copy, I> MemCache<L, I> {
     }
 }
 
-impl<
-        L: Eq + Hash + Send + Sync + Copy + 'static,
-        I: ReadOnlyStore<L> + Send + Sync + Clone + 'static,
-    > ReadOnlyStore<L> for MemCache<L, I>
+impl<L: Eq + Hash + Send + Sync + Copy + 'static, I: ReadOnlyStore<L> + Send + Sync + 'static>
+    ReadOnlyStore<L> for MemCache<L, I>
 {
     fn get(&self, link: &L) -> anyhow::Result<Box<[u8]>> {
         match self.get0(link) {
@@ -63,8 +61,27 @@ impl<
     }
 }
 
+pub struct MemWriter<L, I> {
+    inner: I,
+    /// the actual cache, disabled if a capacity of 0 was configured
+    cache: Option<Arc<Mutex<WeightCache<L, MemBlock>>>>,
+    /// maximum size of blocks to cache
+    /// we want this to remain very small, so we only cache tiny blocks
+    max_size: usize,
+}
+
+impl<L, I> MemWriter<L, I> {
+    pub fn new(inner: I, w: MemCache<L, I>) -> Self {
+        Self {
+            inner,
+            cache: w.cache,
+            max_size: w.max_size,
+        }
+    }
+}
+
 impl<L: Eq + Hash + Send + Sync + Copy + 'static, I: BlockWriter<L> + Send + Sync + 'static>
-    BlockWriter<L> for MemCache<L, I>
+    BlockWriter<L> for MemWriter<L, I>
 {
     fn put(&self, data: Vec<u8>) -> anyhow::Result<L> {
         if let Some(cache) = self.cache.as_ref() {
