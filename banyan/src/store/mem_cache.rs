@@ -1,5 +1,5 @@
 use parking_lot::Mutex;
-use std::{convert::TryInto, hash::Hash, sync::Arc, usize};
+use std::{convert::TryInto, hash::Hash, num::NonZeroUsize, sync::Arc, usize};
 use weight_cache::{Weighable, WeightCache};
 
 use super::{BlockWriter, ReadOnlyStore};
@@ -19,7 +19,7 @@ struct Cache<L> {
     cache: Arc<Mutex<WeightCache<L, MemBlock>>>,
     /// maximum size of blocks to cache
     /// we want this to remain very small, so we only cache tiny blocks
-    max_size: usize,
+    max_size: NonZeroUsize,
 }
 
 impl<L: Eq + Hash> Cache<L> {
@@ -61,7 +61,7 @@ impl<L: Eq + Hash + Copy, I: ReadOnlyStore<L>> MemCache<L, I> {
     /// offer some data just to the cache, without writing it to the underlying store
     pub fn offer(&self, link: &L, data: &[u8]) {
         if let Some(cache) = self.cache.as_ref() {
-            if data.len() <= cache.max_size {
+            if data.len() <= cache.max_size.into() {
                 let copy: Box<[u8]> = data.into();
                 let _ = cache.cache.lock().put(*link, MemBlock(copy));
             }
@@ -111,7 +111,7 @@ impl<L: Eq + Hash + Send + Sync + Copy + 'static, I: BlockWriter<L> + Send + Syn
 {
     fn put(&self, data: Vec<u8>) -> anyhow::Result<L> {
         if let Some(cache) = self.cache.as_ref() {
-            if data.len() <= cache.max_size {
+            if data.len() <= cache.max_size.into() {
                 let copy: Box<[u8]> = data.as_slice().into();
                 let link = self.inner.put(data)?;
                 let _ = cache.cache.lock().put(link, MemBlock(copy));
