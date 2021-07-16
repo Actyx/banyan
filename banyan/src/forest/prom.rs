@@ -52,7 +52,7 @@ lazy_static! {
     .unwrap();
 }
 
-pub(crate) fn register(registry: &Registry) -> anyhow::Result<()> {
+pub(crate) fn register_metrics(registry: &Registry) -> anyhow::Result<()> {
     registry.register(Box::new(LEAF_LOAD_HIST.clone()))?;
     registry.register(Box::new(BRANCH_LOAD_HIST.clone()))?;
     registry.register(Box::new(LEAF_STORE_HIST.clone()))?;
