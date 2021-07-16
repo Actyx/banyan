@@ -5,11 +5,9 @@ use core::hash::Hash;
 use fnv::FnvHashMap;
 use libipld::cbor::DagCbor;
 use parking_lot::Mutex;
-use std::{
-    num::NonZeroUsize,
-    sync::{Arc, RwLock},
-};
+use std::{num::NonZeroUsize, sync::Arc};
 use weight_cache::{Weighable, WeightCache};
+mod mem_cache;
 mod thread_local_zstd;
 mod zstd_dag_cbor_seq;
 
@@ -79,7 +77,7 @@ impl<R: ReadOnlyStore<L> + Send + Sync + 'static, L: Copy + Eq + Hash + Send + S
 pub struct MemStore<L>(Arc<Inner<L>>);
 
 struct Inner<L> {
-    blocks: RwLock<Blocks<L>>,
+    blocks: Mutex<Blocks<L>>,
     digest: Arc<dyn Fn(&[u8]) -> L + Send + Sync>,
     max_size: usize,
 }
@@ -94,7 +92,7 @@ impl<L: Eq + Hash + Copy> MemStore<L> {
     pub fn new(max_size: usize, digest: impl Fn(&[u8]) -> L + Send + Sync + 'static) -> Self {
         Self(Arc::new(Inner {
             digest: Arc::new(digest),
-            blocks: RwLock::new(Blocks {
+            blocks: Mutex::new(Blocks {
                 map: FnvHashMap::default(),
                 current_size: 0,
             }),
@@ -104,19 +102,19 @@ impl<L: Eq + Hash + Copy> MemStore<L> {
 
     pub fn into_inner(self) -> anyhow::Result<FnvHashMap<L, Box<[u8]>>> {
         let inner = Arc::try_unwrap(self.0).map_err(|_| anyhow!("busy"))?;
-        let blocks = inner.blocks.into_inner().map_err(|_| anyhow!("poisoned"))?;
+        let blocks = inner.blocks.into_inner();
         Ok(blocks.map)
     }
 
     fn get0(&self, link: &L) -> Option<Box<[u8]>> {
-        let blocks = self.0.as_ref().blocks.read().unwrap();
+        let blocks = self.0.as_ref().blocks.lock();
         blocks.map.get(link).cloned()
     }
 
     fn put0(&self, data: Vec<u8>) -> anyhow::Result<L> {
         let digest = (self.0.digest)(&data);
         let len = data.len();
-        let mut blocks = self.0.blocks.write().unwrap();
+        let mut blocks = self.0.blocks.lock();
         if blocks.current_size + data.len() > self.0.max_size {
             anyhow::bail!("full");
         }
