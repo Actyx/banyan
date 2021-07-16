@@ -9,7 +9,7 @@ mod zstd_dag_cbor_seq;
 
 pub use branch_cache::BranchCache;
 pub use mem_cache::{MemCache, MemWriter};
-pub use mem_store::{MemReader, MemStore};
+pub use mem_store::MemStore;
 pub(crate) use thread_local_zstd::decompress_and_transform;
 pub use zstd_dag_cbor_seq::ZstdDagCborSeq;
 
