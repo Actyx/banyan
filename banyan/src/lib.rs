@@ -81,7 +81,7 @@ extern crate quickcheck_macros;
 
 /// Register all prometheus metrics
 #[cfg(feature = "metrics")]
-pub fn register(registry: &Registry) -> anyhow::Result<()> {
-    forest::register(registry)?;
+pub fn register_metrics(registry: &Registry) -> anyhow::Result<()> {
+    forest::register_metrics(registry)?;
     Ok(())
 }

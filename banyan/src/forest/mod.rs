@@ -12,7 +12,7 @@ mod stream;
 mod write;
 pub(crate) use index_iter::IndexIter;
 #[cfg(feature = "metrics")]
-pub(crate) use prom::register;
+pub(crate) use prom::register_metrics;
 #[cfg(feature = "metrics")]
 use prometheus::Registry;
 pub(crate) use read::{ChunkVisitor, TreeIter};
