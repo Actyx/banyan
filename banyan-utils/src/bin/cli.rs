@@ -1,4 +1,4 @@
-use banyan::{LocalLink, StreamId, TreeTypes};
+use banyan::{GlobalLink, LocalLink, StreamId, TreeTypes};
 use futures::future::poll_fn;
 use futures::prelude::*;
 use ipfs_sqlite_block_store::BlockStore;
@@ -37,11 +37,11 @@ enum Storage {
     Sqlite(SqliteStore<DefaultParams>),
 }
 impl ReadOnlyStore for Storage {
-    fn get(&self, stream_id: StreamId, link: LocalLink) -> Result<Box<[u8]>> {
+    fn get(&self, link: GlobalLink) -> Result<Box<[u8]>> {
         match self {
-            Self::Memory(m) => m.get(stream_id, link),
-            Storage::Ipfs(i) => i.get(stream_id, link),
-            Storage::Sqlite(s) => s.get(stream_id, link),
+            Self::Memory(m) => m.get(link),
+            Storage::Ipfs(i) => i.get(link),
+            Storage::Sqlite(s) => s.get(link),
         }
     }
 }
@@ -122,7 +122,7 @@ enum Command {
         unbalanced: bool,
         #[structopt(long)]
         /// Base on which to build
-        base: Option<LocalLink>,
+        base: Option<GlobalLink>,
     },
     /// Traverse a tree and dump its output as dot. Can be piped directly:
     /// `banyan-cli graph --root <..> | dot -Tpng output.png`.
@@ -131,31 +131,31 @@ enum Command {
     Graph {
         #[structopt(long)]
         /// The root hash to use
-        root: LocalLink,
+        root: GlobalLink,
     },
     /// Dump a tree
     Dump {
         #[structopt(long)]
         /// The root hash to use
-        root: LocalLink,
+        root: GlobalLink,
     },
     /// Dump a block as json to stdout
     DumpBlock {
         #[structopt(long)]
         /// The root hash to use
-        hash: LocalLink,
+        hash: GlobalLink,
     },
     /// Dumps all values of a tree as json to stdout, newline separated
     DumpValues {
         #[structopt(long)]
         /// The root hash to use
-        root: LocalLink,
+        root: GlobalLink,
     },
     /// Stream a tree, filtered
     Filter {
         #[structopt(long)]
         /// The root hash to use
-        root: LocalLink,
+        root: GlobalLink,
         #[structopt(long)]
         /// Tags to filter
         tag: Vec<String>,
@@ -164,7 +164,7 @@ enum Command {
     Forget {
         #[structopt(long)]
         /// The root hash to use
-        root: LocalLink,
+        root: GlobalLink,
         #[structopt(long)]
         /// The offset before which to forget data
         before: u64,
@@ -173,7 +173,7 @@ enum Command {
     Pack {
         #[structopt(long)]
         /// The root hash to use
-        root: LocalLink,
+        root: GlobalLink,
     },
     /// Receive a stream
     RecvStream {
@@ -185,7 +185,7 @@ enum Command {
     Repair {
         #[structopt(long)]
         /// The root hash to use
-        root: LocalLink,
+        root: GlobalLink,
     },
     /// Send a stream
     SendStream {
@@ -197,7 +197,7 @@ enum Command {
     Stream {
         #[structopt(long)]
         /// The root hash to use
-        root: LocalLink,
+        root: GlobalLink,
     },
 }
 
@@ -350,7 +350,6 @@ async fn main() -> Result<()> {
     let index_key: chacha20::Key = opts.index_pass.map(create_chacha_key).unwrap_or_default();
     let value_key: chacha20::Key = opts.value_pass.map(create_chacha_key).unwrap_or_default();
     let config = Config::debug_fast();
-    let secrets = Secrets::new(index_key, value_key, 0);
     let txn = || {
         Txn::new(
             Forest::new(store.clone(), BranchCache::default()),
@@ -360,16 +359,19 @@ async fn main() -> Result<()> {
     let forest = txn();
     match opts.cmd {
         Command::Graph { root } => {
-            let tree = forest.load_tree::<String>(secrets, root)?;
+            let secrets = Secrets::new(index_key, value_key, root.stream_id());
+            let tree = forest.load_tree::<String>(secrets, root.link())?;
             let mut stdout = std::io::stdout();
             dump::graph(&forest, &tree, &mut stdout)?;
         }
         Command::Dump { root } => {
-            let tree = forest.load_tree::<String>(secrets, root)?;
+            let secrets = Secrets::new(index_key, value_key, root.stream_id());
+            let tree = forest.load_tree::<String>(secrets, root.link())?;
             forest.dump(&tree)?;
         }
         Command::DumpValues { root } => {
-            let tree = forest.load_tree::<String>(secrets, root)?;
+            let secrets = Secrets::new(index_key, value_key, root.stream_id());
+            let tree = forest.load_tree::<String>(secrets, root.link())?;
             let iter = forest.iter_from(&tree);
             for res in iter {
                 let (i, k, v) = res?;
@@ -381,7 +383,8 @@ async fn main() -> Result<()> {
             dump::dump_json(store, hash, &value_key, &nonce, &mut std::io::stdout())?;
         }
         Command::Stream { root } => {
-            let tree = forest.load_tree::<String>(secrets, root)?;
+            let secrets = Secrets::new(index_key, value_key, root.stream_id());
+            let tree = forest.load_tree::<String>(secrets, root.link())?;
             let mut stream = forest.stream_filtered(&tree, AllQuery).enumerate();
             while let Some((i, Ok(v))) = stream.next().await {
                 if i % 1000 == 0 {
@@ -399,7 +402,7 @@ async fn main() -> Result<()> {
                 "building a tree with {} batches of {} values, unbalanced: {}",
                 batches, count, unbalanced
             );
-            let tree = build_tree(&forest, base, batches, count, unbalanced, 1000).await?;
+            let tree = build_tree(&forest, base.map(|x| x.link()), batches, count, unbalanced, 1000).await?;
             forest.dump(&tree.snapshot())?;
         }
         Command::Bench { count } => {
@@ -458,7 +461,7 @@ async fn main() -> Result<()> {
             let query = DnfQuery(tags).boxed();
             let secrets = Secrets::default();
             let config = Config::debug();
-            let tree = forest.load_stream_builder::<String>(secrets, config, root)?;
+            let tree = forest.load_stream_builder::<String>(secrets, config, root.link())?;
             forest.dump(&tree.snapshot())?;
             let mut stream = forest.stream_filtered(&tree.snapshot(), query).enumerate();
             while let Some((i, Ok(v))) = stream.next().await {
@@ -470,7 +473,7 @@ async fn main() -> Result<()> {
         Command::Forget { root, before } => {
             let secrets = Secrets::default();
             let config = Config::debug();
-            let mut tree = forest.load_stream_builder::<String>(secrets, config, root)?;
+            let mut tree = forest.load_stream_builder::<String>(secrets, config, root.link())?;
             forest.retain(&mut tree, &OffsetRangeQuery::from(before..))?;
             forest.dump(&tree.snapshot())?;
             println!("{:?}", tree);
@@ -478,7 +481,7 @@ async fn main() -> Result<()> {
         Command::Pack { root } => {
             let secrets = Secrets::default();
             let config = Config::debug();
-            let mut tree = forest.load_stream_builder::<String>(secrets, config, root)?;
+            let mut tree = forest.load_stream_builder::<String>(secrets, config, root.link())?;
             forest.dump(&tree.snapshot())?;
             forest.pack(&mut tree)?;
             forest.assert_invariants(&tree)?;
@@ -507,12 +510,14 @@ async fn main() -> Result<()> {
             }
         }
         Command::Repair { root } => {
-            let mut tree = forest.load_stream_builder::<String>(secrets, config, root)?;
+            let secrets = Secrets::new(index_key, value_key, 0);
+            let mut tree = forest.load_stream_builder::<String>(secrets, config, root.link())?;
             let _ = forest.repair(&mut tree)?;
             forest.dump(&tree.snapshot())?;
             println!("{:?}", tree);
         }
         Command::SendStream { topic } => {
+            let secrets = Secrets::new(index_key, value_key, 0);
             let mut ticks = tokio::time::interval(Duration::from_secs(1));
             let mut tree = StreamBuilder::<TT, String>::new(config, secrets);
             let mut offset = 0;

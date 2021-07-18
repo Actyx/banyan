@@ -27,6 +27,14 @@ impl LocalLink {
     pub fn new(offset: u64, len: usize) -> anyhow::Result<Self> {
         Ok(Self(offset, len.try_into()?))
     }
+
+    pub fn offset(&self) -> u64 {
+        self.0
+    }
+
+    pub fn len(&self) -> usize {
+        self.1 as usize
+    }
 }
 
 impl fmt::Display for LocalLink {
@@ -47,8 +55,16 @@ impl std::str::FromStr for LocalLink {
 pub struct GlobalLink(StreamId, LocalLink);
 
 impl GlobalLink {
-    pub fn new(stream: StreamId, link: LocalLink) -> anyhow::Result<Self> {
-        Ok(Self(stream, link))
+    pub fn new(stream: StreamId, link: LocalLink) -> Self {
+        Self(stream, link)
+    }
+
+    pub fn stream_id(&self) -> StreamId {
+        self.0
+    }
+
+    pub fn link(&self) -> LocalLink {
+        self.1
     }
 }
 
@@ -75,5 +91,5 @@ pub trait BlockWriter: Send + Sync + 'static {
 }
 
 pub trait ReadOnlyStore: Clone + Send + Sync + 'static {
-    fn get(&self, stream_id: StreamId, link: LocalLink) -> Result<Box<[u8]>>;
+    fn get(&self, link: GlobalLink) -> Result<Box<[u8]>>;
 }

@@ -1,11 +1,6 @@
 #![allow(clippy::upper_case_acronyms, dead_code, clippy::type_complexity)]
 //! helper methods for the tests
-use banyan::{
-    index::{CompactSeq, Summarizable, VecSeq},
-    query::{AllQuery, AndQuery, OffsetRangeQuery, Query},
-    store::{BranchCache, MemStore, ReadOnlyStore},
-    LocalLink, StreamBuilder, Transaction, Tree, TreeTypes,
-};
+use banyan::{GlobalLink, StreamBuilder, Transaction, Tree, TreeTypes, index::{CompactSeq, Summarizable, VecSeq}, query::{AllQuery, AndQuery, OffsetRangeQuery, Query}, store::{BranchCache, MemStore, ReadOnlyStore}};
 use futures::Future;
 use libipld::{cbor::DagCborCodec, codec::Codec, Cid, DagCbor, Ipld};
 use quickcheck::{Arbitrary, Gen, TestResult};
@@ -274,13 +269,16 @@ impl Arbitrary for UnpackedTestTree {
 pub fn links(
     forest: &Forest,
     tree: &Tree<TT, u64>,
-    links: &mut HashSet<LocalLink>,
+    links: &mut HashSet<GlobalLink>,
 ) -> anyhow::Result<()> {
     let link_opts = forest
         .iter_index(&tree, AllQuery)
         .map(|x| x.map(|x| x.link().as_ref().cloned()))
         .collect::<anyhow::Result<Vec<_>>>()?;
-    links.extend(link_opts.into_iter().flatten());
+    let stream_id = tree.secrets().map(|s| *s.stream_id());
+    links.extend(link_opts.into_iter().filter_map(|link| {
+        Some(GlobalLink::new(stream_id?, link?))
+    }));
     Ok(())
 }
 
@@ -312,9 +310,9 @@ impl IpldNode {
     }
 }
 
-fn block_range(forest: &Forest, hash: LocalLink) -> anyhow::Result<Range<u64>> {
+fn block_range(forest: &Forest, link: GlobalLink) -> anyhow::Result<Range<u64>> {
     // TODO
-    let blob = forest.store().get(0, hash)?;
+    let blob = forest.store().get(link)?;
     let (offset, _, encrypted) = DagCborCodec.decode::<IpldNode>(&blob)?.into_data()?;
     let len = encrypted.len() as u64;
     let end_offset = offset
@@ -324,11 +322,11 @@ fn block_range(forest: &Forest, hash: LocalLink) -> anyhow::Result<Range<u64>> {
 }
 
 /// check that for the given blocks, ranges do not overlap
-fn no_range_overlap(forest: &Forest, hashes: HashSet<LocalLink>) -> anyhow::Result<bool> {
+fn no_range_overlap(forest: &Forest, links: HashSet<GlobalLink>) -> anyhow::Result<bool> {
     let mut ranges = OffsetSet::empty();
     let mut result = true;
-    for hash in hashes {
-        let range = OffsetSet::from(block_range(forest, hash)?);
+    for link in links {
+        let range = OffsetSet::from(block_range(forest, link)?);
         // println!("{} {:?}", hash, range);
         if !ranges.is_disjoint(&range) {
             result = false;
@@ -345,12 +343,12 @@ pub fn no_offset_overlap<'a>(
 ) -> anyhow::Result<bool> {
     let mut trees = trees.into_iter().peekable();
     if let Some(first) = trees.peek().cloned() {
-        let mut hashes = HashSet::new();
+        let mut link_set = HashSet::new();
         for tree in trees {
             anyhow::ensure!(same_secrets(first, tree), "not the same secrets");
-            links(forest, tree, &mut hashes)?;
+            links(forest, tree, &mut link_set)?;
         }
-        no_range_overlap(forest, hashes)
+        no_range_overlap(forest, link_set)
     } else {
         Ok(true)
     }

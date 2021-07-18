@@ -8,11 +8,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use banyan::{
-    query::{OffsetRangeQuery, Query},
-    store::{BlockWriter, BranchCache, MemStore, ReadOnlyStore},
-    Config, Forest, LocalLink, Secrets, StreamBuilder, Transaction, Tree,
-};
+use banyan::{Config, Forest, GlobalLink, Secrets, StreamBuilder, StreamId, Transaction, Tree, query::{OffsetRangeQuery, Query}, store::{BlockWriter, BranchCache, MemStore, ReadOnlyStore}};
 use banyan_utils::{
     tag_index::TagSet,
     tags::{Key, TT},
@@ -40,14 +36,14 @@ impl<S> OpsCountingStore<S> {
 }
 
 impl<S: ReadOnlyStore> ReadOnlyStore for OpsCountingStore<S> {
-    fn get(&self, stream_id: u128, link: LocalLink) -> anyhow::Result<Box<[u8]>> {
+    fn get(&self, link: GlobalLink) -> anyhow::Result<Box<[u8]>> {
         self.reads.fetch_add(1, Ordering::SeqCst);
-        self.inner.get(stream_id, link)
+        self.inner.get(link)
     }
 }
 
 impl<S: BlockWriter + Send + Sync> BlockWriter for OpsCountingStore<S> {
-    fn put(&self, stream_id: u128, offset: u64, data: Vec<u8>) -> anyhow::Result<()> {
+    fn put(&self, stream_id: StreamId, offset: u64, data: Vec<u8>) -> anyhow::Result<()> {
         self.writes.fetch_add(1, Ordering::SeqCst);
         self.inner.put(stream_id, offset, data)
     }

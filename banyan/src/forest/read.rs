@@ -1,17 +1,10 @@
 #[cfg(feature = "metrics")]
 use super::prom;
 use super::{BranchCache, Config, FilteredChunk, Forest, Secrets, TreeTypes};
-use crate::{
-    index::{
+use crate::{GlobalLink, LocalLink, index::{
         deserialize_compressed, Branch, BranchIndex, BranchLoader, CompactSeq, Index, Leaf,
         LeafIndex, LeafLoader, NodeInfo,
-    },
-    query::Query,
-    store::ZstdDagCborSeq,
-    store::{BanyanValue, ReadOnlyStore},
-    util::{nonce, BoolSliceExt, IterExt},
-    LocalLink, StreamId,
-};
+    }, query::Query, store::ZstdDagCborSeq, store::{BanyanValue, ReadOnlyStore}, util::{nonce, BoolSliceExt, IterExt}};
 use anyhow::{anyhow, Result};
 use futures::{prelude::*, stream::BoxStream};
 use libipld::cbor::DagCbor;
@@ -374,7 +367,8 @@ where
     pub(crate) fn load_leaf_from_link(&self, stream: &Secrets, link: &LocalLink) -> Result<Leaf> {
         #[cfg(feature = "metrics")]
         let _timer = prom::LEAF_LOAD_HIST.start_timer();
-        let data = &self.get_block(stream.stream_id, *link)?;
+        let link = GlobalLink::new(stream.stream_id, *link);
+        let data = &self.get_block(link)?;
         let (items, range) = ZstdDagCborSeq::decrypt(data, stream.value_key(), nonce::<T>())?;
         Ok(Leaf::new(items, range))
     }
@@ -386,7 +380,7 @@ where
         link: LocalLink,
     ) -> Result<(Index<T>, Range<u64>)> {
         let index_key = secrets.index_key();
-        let bytes = self.get_block(secrets.stream_id, link)?;
+        let bytes = self.get_block(GlobalLink::new(secrets.stream_id, link))?;
         let (children, byte_range) = deserialize_compressed::<T>(index_key, nonce::<T>(), &bytes)?;
         let level = children.iter().map(|x| x.level()).max().unwrap() + 1;
         let count = children.iter().map(|x| x.count()).sum();
@@ -423,10 +417,10 @@ where
         }
     }
 
-    fn get_block(&self, stream_id: StreamId, link: LocalLink) -> anyhow::Result<Box<[u8]>> {
+    fn get_block(&self, link: GlobalLink) -> anyhow::Result<Box<[u8]>> {
         #[cfg(feature = "metrics")]
         let _timer = prom::BLOCK_GET_HIST.start_timer();
-        let res = self.store.get(stream_id, link);
+        let res = self.store.get(link);
         #[cfg(feature = "metrics")]
         if let Ok(x) = &res {
             prom::BLOCK_GET_SIZE_HIST.observe(x.len() as f64);
@@ -443,7 +437,8 @@ where
         #[cfg(feature = "metrics")]
         let _timer = prom::BRANCH_LOAD_HIST.start_timer();
         Ok({
-            let bytes = self.get_block(secrets.stream_id, *link)?;
+            let link = GlobalLink::new(secrets.stream_id, *link);
+            let bytes = self.get_block(link)?;
             let (children, byte_range) =
                 deserialize_compressed(secrets.index_key(), nonce::<T>(), &bytes)?;
             Branch::<T>::new(children, byte_range)
@@ -473,7 +468,8 @@ where
     ) -> Result<Option<Branch<T>>> {
         let t0 = Instant::now();
         let result = Ok(if let Some(link) = &index.link {
-            let bytes = self.get_block(secrets.stream_id, *link)?;
+            let link = GlobalLink::new(secrets.stream_id, *link);
+            let bytes = self.get_block(link)?;
             let (children, byte_range) =
                 deserialize_compressed(secrets.index_key(), nonce::<T>(), &bytes)?;
             Some(Branch::<T>::new(children, byte_range))

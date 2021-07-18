@@ -163,6 +163,10 @@ impl Secrets {
     pub fn value_key(&self) -> &chacha20::Key {
         &self.value_key
     }
+
+    pub fn stream_id(&self) -> &StreamId {
+        &self.stream_id
+    }
 }
 
 impl Default for Secrets {

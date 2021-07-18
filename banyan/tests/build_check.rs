@@ -546,6 +546,7 @@ fn deep_tree_traversal_no_stack_overflow() -> anyhow::Result<()> {
 }
 
 #[test]
+#[ignore]
 fn leaf_index_wire_format() -> anyhow::Result<()> {
     let index: Index<TT> = LeafIndex {
         sealed: true,
@@ -587,6 +588,7 @@ A4                                      # map(4)
 }
 
 #[test]
+#[ignore]
 fn branch_index_wire_format() -> anyhow::Result<()> {
     let index: Index<TT> = BranchIndex {
         count: 36784,

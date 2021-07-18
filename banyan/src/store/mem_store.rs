@@ -1,4 +1,4 @@
-use crate::{LocalLink, StreamId};
+use crate::{GlobalLink, LocalLink, StreamId};
 
 use super::{BlockWriter, ReadOnlyStore};
 use anyhow::anyhow;
@@ -11,13 +11,13 @@ use std::sync::Arc;
 pub struct MemStore(Arc<Inner>);
 
 struct Inner {
-    blocks: Mutex<Blocks<LocalLink>>,
+    blocks: Mutex<Blocks>,
     max_size: usize,
 }
 
 #[derive(Debug)]
-struct Blocks<L> {
-    map: FnvHashMap<L, Box<[u8]>>,
+struct Blocks {
+    map: FnvHashMap<GlobalLink, Box<[u8]>>,
     current_size: usize,
 }
 
@@ -32,25 +32,25 @@ impl MemStore {
         }))
     }
 
-    pub fn into_inner(self) -> anyhow::Result<FnvHashMap<LocalLink, Box<[u8]>>> {
+    pub fn into_inner(self) -> anyhow::Result<FnvHashMap<GlobalLink, Box<[u8]>>> {
         let inner = Arc::try_unwrap(self.0).map_err(|_| anyhow!("busy"))?;
         let blocks = inner.blocks.into_inner();
         Ok(blocks.map)
     }
 
-    fn get0(&self, _stream_id: StreamId, link: LocalLink) -> Option<Box<[u8]>> {
+    fn get0(&self, link: GlobalLink) -> Option<Box<[u8]>> {
         let blocks = self.0.as_ref().blocks.lock();
         blocks.map.get(&link).cloned()
     }
 
-    fn put0(&self, _stream_id: StreamId, offset: u64, data: Vec<u8>) -> anyhow::Result<()> {
-        let digest = LocalLink::new(offset, data.len())?;
+    fn put0(&self, stream_id: StreamId, offset: u64, data: Vec<u8>) -> anyhow::Result<()> {
         let len = data.len();
+        let link = GlobalLink::new(stream_id, LocalLink::new(offset, len)?);
         let mut blocks = self.0.blocks.lock();
-        if blocks.current_size + data.len() > self.0.max_size {
+        if blocks.current_size + len > self.0.max_size {
             anyhow::bail!("full");
         }
-        let new = blocks.map.insert(digest, data.into()).is_none();
+        let new = blocks.map.insert(link, data.into()).is_none();
         if new {
             blocks.current_size += len;
         }
@@ -60,8 +60,8 @@ impl MemStore {
 }
 
 impl ReadOnlyStore for MemStore {
-    fn get(&self, stream_id: StreamId, link: LocalLink) -> anyhow::Result<Box<[u8]>> {
-        if let Some(value) = self.get0(stream_id, link) {
+    fn get(&self, link: GlobalLink) -> anyhow::Result<Box<[u8]>> {
+        if let Some(value) = self.get0(link) {
             Ok(value)
         } else {
             Err(anyhow!("not there"))
