@@ -141,7 +141,8 @@ pub fn dump_json<Link: 'static>(
     nonce: &chacha20::XNonce,
     mut writer: impl std::io::Write,
 ) -> anyhow::Result<()> {
-    let bytes = store.get(&hash)?;
+    // TODO
+    let bytes = store.get(0, &hash)?;
     let (dag_cbor, _) = ZstdDagCborSeq::decrypt(&bytes, value_key, nonce)?;
     let ipld_ast = dag_cbor.items::<libipld::Ipld>()?;
     for x in ipld_ast {

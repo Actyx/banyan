@@ -37,21 +37,21 @@ enum Storage {
     Sqlite(SqliteStore<DefaultParams>),
 }
 impl ReadOnlyStore<Sha256Digest> for Storage {
-    fn get(&self, link: &Sha256Digest) -> Result<Box<[u8]>> {
+    fn get(&self, stream_id: u128, link: &Sha256Digest) -> Result<Box<[u8]>> {
         match self {
-            Self::Memory(m) => m.get(link),
-            Storage::Ipfs(i) => i.get(link),
-            Storage::Sqlite(s) => s.get(link),
+            Self::Memory(m) => m.get(stream_id, link),
+            Storage::Ipfs(i) => i.get(stream_id, link),
+            Storage::Sqlite(s) => s.get(stream_id, link),
         }
     }
 }
 
 impl BlockWriter<Sha256Digest> for Storage {
-    fn put(&self, data: Vec<u8>) -> Result<Sha256Digest> {
+    fn put(&self, stream_id: u128, offset: u64, data: Vec<u8>) -> Result<Sha256Digest> {
         match self {
-            Self::Memory(m) => m.put(data),
-            Storage::Ipfs(i) => i.put(data),
-            Storage::Sqlite(s) => s.put(data),
+            Self::Memory(m) => m.put(stream_id, offset, data),
+            Storage::Ipfs(i) => i.put(stream_id, offset, data),
+            Storage::Sqlite(s) => s.put(stream_id, offset, data),
         }
     }
 }

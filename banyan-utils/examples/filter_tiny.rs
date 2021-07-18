@@ -40,16 +40,16 @@ impl<S> OpsCountingStore<S> {
 }
 
 impl<L, S: ReadOnlyStore<L>> ReadOnlyStore<L> for OpsCountingStore<S> {
-    fn get(&self, link: &L) -> anyhow::Result<Box<[u8]>> {
+    fn get(&self, stream_id: u128, link: &L) -> anyhow::Result<Box<[u8]>> {
         self.reads.fetch_add(1, Ordering::SeqCst);
-        self.inner.get(link)
+        self.inner.get(stream_id, link)
     }
 }
 
 impl<L, S: BlockWriter<L> + Send + Sync> BlockWriter<L> for OpsCountingStore<S> {
-    fn put(&self, data: Vec<u8>) -> anyhow::Result<L> {
+    fn put(&self, stream_id: u128, offset: u64, data: Vec<u8>) -> anyhow::Result<L> {
         self.writes.fetch_add(1, Ordering::SeqCst);
-        self.inner.put(data)
+        self.inner.put(stream_id, offset, data)
     }
 }
 

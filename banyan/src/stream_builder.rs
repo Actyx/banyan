@@ -24,6 +24,10 @@ impl CipherOffset {
         Self { value }
     }
 
+    pub fn as_u64(&self) -> u64 {
+        self.value
+    }
+
     pub fn reserve(&mut self, n: usize) -> u64 {
         let result = self.value;
         self.value = self

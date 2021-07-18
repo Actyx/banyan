@@ -21,7 +21,7 @@ impl<S: StoreParams> ReadOnlyStore<Sha256Digest> for SqliteStore<S>
 where
     Ipld: References<S::Codecs>,
 {
-    fn get(&self, link: &Sha256Digest) -> Result<Box<[u8]>> {
+    fn get(&self, _stream_id: u128, link: &Sha256Digest) -> Result<Box<[u8]>> {
         let cid = Cid::from(*link);
         let block = self.0.lock().get_block(&cid)?;
         if let Some(block) = block {
@@ -36,7 +36,7 @@ impl<S: StoreParams> BlockWriter<Sha256Digest> for SqliteStore<S>
 where
     Ipld: References<S::Codecs>,
 {
-    fn put(&self, data: Vec<u8>) -> Result<Sha256Digest> {
+    fn put(&self, _stream_id: u128, _offset: u64, data: Vec<u8>) -> Result<Sha256Digest> {
         let digest = Sha256Digest::new(&data);
         let cid = digest.into();
         let block = Block::new_unchecked(cid, data);

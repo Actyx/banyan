@@ -373,7 +373,7 @@ where
     pub(crate) fn load_leaf_from_link(&self, stream: &Secrets, link: &T::Link) -> Result<Leaf> {
         #[cfg(feature = "metrics")]
         let _timer = prom::LEAF_LOAD_HIST.start_timer();
-        let data = &self.get_block(link)?;
+        let data = &self.get_block(stream.stream_id, link)?;
         let (items, range) = ZstdDagCborSeq::decrypt(data, stream.value_key(), nonce::<T>())?;
         Ok(Leaf::new(items, range))
     }
@@ -385,7 +385,7 @@ where
         link: T::Link,
     ) -> Result<(Index<T>, Range<u64>)> {
         let index_key = secrets.index_key();
-        let bytes = self.get_block(&link)?;
+        let bytes = self.get_block(secrets.stream_id, &link)?;
         let (children, byte_range) = deserialize_compressed::<T>(index_key, nonce::<T>(), &bytes)?;
         let level = children.iter().map(|x| x.level()).max().unwrap() + 1;
         let count = children.iter().map(|x| x.count()).sum();
@@ -422,10 +422,10 @@ where
         }
     }
 
-    fn get_block(&self, link: &T::Link) -> anyhow::Result<Box<[u8]>> {
+    fn get_block(&self, stream_id: u128, link: &T::Link) -> anyhow::Result<Box<[u8]>> {
         #[cfg(feature = "metrics")]
         let _timer = prom::BLOCK_GET_HIST.start_timer();
-        let res = self.store.get(link);
+        let res = self.store.get(stream_id, link);
         #[cfg(feature = "metrics")]
         if let Ok(x) = &res {
             prom::BLOCK_GET_SIZE_HIST.observe(x.len() as f64);
@@ -442,7 +442,7 @@ where
         #[cfg(feature = "metrics")]
         let _timer = prom::BRANCH_LOAD_HIST.start_timer();
         Ok({
-            let bytes = self.get_block(&link)?;
+            let bytes = self.get_block(secrets.stream_id, &link)?;
             let (children, byte_range) =
                 deserialize_compressed(secrets.index_key(), nonce::<T>(), &bytes)?;
             Branch::<T>::new(children, byte_range)
@@ -472,7 +472,7 @@ where
     ) -> Result<Option<Branch<T>>> {
         let t0 = Instant::now();
         let result = Ok(if let Some(link) = &index.link {
-            let bytes = self.get_block(&link)?;
+            let bytes = self.get_block(secrets.stream_id, &link)?;
             let (children, byte_range) =
                 deserialize_compressed(secrets.index_key(), nonce::<T>(), &bytes)?;
             Some(Branch::<T>::new(children, byte_range))

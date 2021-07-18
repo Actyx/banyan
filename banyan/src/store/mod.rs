@@ -21,9 +21,9 @@ pub trait BlockWriter<L>: Send + Sync + 'static {
     /// adds a block to a temporary staging area
     ///
     /// We might have to do this async at some point, but let's keep it sync for now.
-    fn put(&self, data: Vec<u8>) -> Result<L>;
+    fn put(&self, stream_id: u128, offset: u64, data: Vec<u8>) -> Result<L>;
 }
 
 pub trait ReadOnlyStore<L>: Clone + Send + Sync + 'static {
-    fn get(&self, link: &L) -> Result<Box<[u8]>>;
+    fn get(&self, stream_id: u128, link: &L) -> Result<Box<[u8]>>;
 }

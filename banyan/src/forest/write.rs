@@ -42,12 +42,12 @@ where
         self.extend_leaf(&[], None, from, stream)
     }
 
-    fn put_block(&self, data: Vec<u8>) -> anyhow::Result<T::Link> {
+    fn put_block(&self, stream_id: u128, offset: u64, data: Vec<u8>) -> anyhow::Result<T::Link> {
         #[cfg(feature = "metrics")]
         let _timer = prom::BLOCK_PUT_HIST.start_timer();
         #[cfg(feature = "metrics")]
         prom::BLOCK_PUT_SIZE_HIST.observe(data.len() as f64);
-        self.writer.put(data)
+        self.writer.put(stream_id, offset, data)
     }
 
     /// Creates a leaf from a sequence that either contains all items from the sequence, or is full
@@ -74,6 +74,7 @@ where
             stream.config().max_leaf_count,
         )?;
         let value_bytes = data.compressed().len() as u64;
+        let offset = stream.offset.as_u64();
         let encrypted = data.into_encrypted(
             &stream.value_key().clone(),
             nonce::<T>(),
@@ -81,7 +82,7 @@ where
         )?;
         let keys = keys.into_iter().collect::<T::KeySeq>();
         // store leaf
-        let link = self.put_block(encrypted)?;
+        let link = self.put_block(stream.secrets().stream_id, offset, encrypted)?;
         let index: LeafIndex<T> = LeafIndex {
             link: Some(link),
             value_bytes,
@@ -358,9 +359,13 @@ where
         let _timer = prom::BRANCH_STORE_HIST.start_timer();
         let level = stream.config().zstd_level;
         let key = *stream.index_key();
+        let offset = stream.offset.as_u64();
         let cbor = serialize_compressed(&key, nonce::<T>(), &mut stream.offset, &items, level)?;
         let len = cbor.len() as u64;
-        Ok((self.put_block(cbor)?, len))
+        Ok((
+            self.put_block(stream.secrets().stream_id, offset, cbor)?,
+            len,
+        ))
     }
 
     pub(crate) fn retain0<Q: Query<T> + Send + Sync>(

@@ -326,7 +326,8 @@ impl IpldNode {
 }
 
 fn block_range(forest: &Forest, hash: &Sha256Digest) -> anyhow::Result<Range<u64>> {
-    let blob = forest.store().get(hash)?;
+    // TODO
+    let blob = forest.store().get(0, hash)?;
     let (offset, _, encrypted) = DagCborCodec.decode::<IpldNode>(&blob)?.into_data()?;
     let len = encrypted.len() as u64;
     let end_offset = offset

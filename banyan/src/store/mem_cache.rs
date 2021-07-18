@@ -83,10 +83,10 @@ impl<L: Eq + Hash + Copy, I: ReadOnlyStore<L>> MemCache<L, I> {
 impl<L: Eq + Hash + Send + Sync + Copy + 'static, I: ReadOnlyStore<L> + Send + Sync + 'static>
     ReadOnlyStore<L> for MemCache<L, I>
 {
-    fn get(&self, link: &L) -> anyhow::Result<Box<[u8]>> {
+    fn get(&self, stream_id: u128, link: &L) -> anyhow::Result<Box<[u8]>> {
         match self.get0(link) {
             Some(data) => Ok(data),
-            None => self.inner.get(link),
+            None => self.inner.get(stream_id, link),
         }
     }
 }
@@ -109,15 +109,15 @@ impl<L, I> MemWriter<L, I> {
 impl<L: Eq + Hash + Send + Sync + Copy + 'static, I: BlockWriter<L> + Send + Sync + 'static>
     BlockWriter<L> for MemWriter<L, I>
 {
-    fn put(&self, data: Vec<u8>) -> anyhow::Result<L> {
+    fn put(&self, stream_id: u128, offset: u64, data: Vec<u8>) -> anyhow::Result<L> {
         if let Some(cache) = self.cache.as_ref() {
             if data.len() <= cache.max_size.into() {
                 let copy: Box<[u8]> = data.as_slice().into();
-                let link = self.inner.put(data)?;
+                let link = self.inner.put(stream_id, offset, data)?;
                 let _ = cache.cache.lock().put(link, MemBlock(copy));
                 return Ok(link);
             }
         }
-        self.inner.put(data)
+        self.inner.put(stream_id, offset, data)
     }
 }
