@@ -29,8 +29,6 @@ impl LocalLink {
     }
 }
 
-pub type GlobalLink = (u128, u64, u64);
-
 impl fmt::Display for LocalLink {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:?}", self)
@@ -38,6 +36,30 @@ impl fmt::Display for LocalLink {
 }
 
 impl std::str::FromStr for LocalLink {
+    type Err = anyhow::Error;
+
+    fn from_str(_s: &str) -> Result<Self, Self::Err> {
+        anyhow::bail!("not yet implemented")
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct GlobalLink(StreamId, LocalLink);
+
+impl GlobalLink {
+    pub fn new(stream: StreamId, link: LocalLink) -> anyhow::Result<Self> {
+        Ok(Self(stream, link))
+    }
+}
+
+
+impl fmt::Display for GlobalLink {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+impl std::str::FromStr for GlobalLink {
     type Err = anyhow::Error;
 
     fn from_str(_s: &str) -> Result<Self, Self::Err> {
