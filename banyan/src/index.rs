@@ -114,7 +114,7 @@ pub struct LeafIndex<T: TreeTypes> {
     // block is sealed
     pub sealed: bool,
     // link to the block containing the values
-    pub link: Option<T::Link>,
+    pub link: Option<(u64, u64)>,
     /// A sequence of keys with the same number of values as the data block the link points to.
     pub keys: T::KeySeq,
     // serialized size of the data
@@ -151,7 +151,7 @@ pub struct BranchIndex<T: TreeTypes> {
     // block is sealed
     pub sealed: bool,
     // link to the branch node
-    pub link: Option<T::Link>,
+    pub link: Option<(u64, u64)>,
     // extra data
     pub summaries: T::SummarySeq,
     // accumulated serialized size of all values in this tree
@@ -219,7 +219,7 @@ impl<T: TreeTypes> Index<T> {
         }
     }
 
-    pub fn link(&self) -> &Option<T::Link> {
+    pub fn link(&self) -> &Option<(u64, u64)> {
         match self {
             Index::Leaf(x) => &x.link,
             Index::Branch(x) => &x.link,
@@ -324,11 +324,11 @@ impl AsRef<ZstdDagCborSeq> for Leaf {
 pub struct BranchLoader<T: TreeTypes, R> {
     forest: Forest<T, R>,
     secrets: Secrets,
-    link: T::Link,
+    link: (u64, u64),
 }
 
-impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> BranchLoader<T, R> {
-    pub fn new(forest: &Forest<T, R>, secrets: &Secrets, link: T::Link) -> Self {
+impl<T: TreeTypes, R: ReadOnlyStore> BranchLoader<T, R> {
+    pub fn new(forest: &Forest<T, R>, secrets: &Secrets, link: (u64, u64)) -> Self {
         Self {
             forest: forest.clone(),
             secrets: secrets.clone(),
@@ -350,11 +350,11 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> BranchLoader<T, R> {
 pub struct LeafLoader<T: TreeTypes, R> {
     forest: Forest<T, R>,
     secrets: Secrets,
-    link: T::Link,
+    link: (u64, u64),
 }
 
-impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> LeafLoader<T, R> {
-    pub fn new(forest: &Forest<T, R>, secrets: &Secrets, link: T::Link) -> Self {
+impl<T: TreeTypes, R: ReadOnlyStore> LeafLoader<T, R> {
+    pub fn new(forest: &Forest<T, R>, secrets: &Secrets, link: (u64, u64)) -> Self {
         Self {
             forest: forest.clone(),
             secrets: secrets.clone(),
@@ -387,7 +387,7 @@ impl<T: TreeTypes, R> Display for NodeInfo<T, R> {
                     index.sealed,
                     index
                         .link
-                        .map(|x| format!("{}", x))
+                        .map(|x| format!("{:?}", x))
                         .unwrap_or_else(|| "".to_string())
                 )
             }
@@ -402,7 +402,7 @@ impl<T: TreeTypes, R> Display for NodeInfo<T, R> {
                     index.sealed,
                     index
                         .link
-                        .map(|x| format!("{}", x))
+                        .map(|x| format!("{:?}", x))
                         .unwrap_or_else(|| "".to_string()),
                     index.summaries.len()
                 )

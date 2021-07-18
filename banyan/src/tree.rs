@@ -30,7 +30,7 @@ impl<T: TreeTypes, V> Tree<T, V> {
         self.0.as_ref().map(|(r, _, _)| r)
     }
 
-    pub fn link(&self) -> Option<T::Link> {
+    pub fn link(&self) -> Option<(u64, u64)> {
         self.0.as_ref().and_then(|(r, _, _)| *r.link())
     }
 
@@ -55,7 +55,7 @@ impl<T: TreeTypes, V> Tree<T, V> {
     }
 
     /// root of a non-empty tree
-    pub fn root(&self) -> Option<&T::Link> {
+    pub fn root(&self) -> Option<&(u64, u64)> {
         self.0.as_ref().and_then(|(r, _, _)| r.link().as_ref())
     }
 
@@ -105,12 +105,12 @@ impl<T: TreeTypes, V> fmt::Display for Tree<T, V> {
 pub type GraphEdges = Vec<(usize, usize)>;
 pub type GraphNodes<S> = BTreeMap<usize, S>;
 
-impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
+impl<T: TreeTypes, R: ReadOnlyStore> Forest<T, R> {
     pub fn load_stream_builder<V>(
         &self,
         secrets: Secrets,
         config: Config,
-        link: T::Link,
+        link: (u64, u64),
     ) -> Result<StreamBuilder<T, V>> {
         let (index, byte_range) = self.create_index_from_link(
             &secrets,
@@ -121,7 +121,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
         Ok(StreamBuilder::new_from_index(Some(index), state))
     }
 
-    pub fn load_tree<V>(&self, secrets: Secrets, link: T::Link) -> Result<Tree<T, V>> {
+    pub fn load_tree<V>(&self, secrets: Secrets, link: (u64, u64)) -> Result<Tree<T, V>> {
         // we pass in a predicate that makes the nodes sealed, since we don't care
         let (index, byte_range) = self.create_index_from_link(&secrets, |_, _| true, link)?;
         // store the offset with the snapshot. Snapshots are immutable, so this won't change.
@@ -508,7 +508,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
     }
 }
 
-impl<T: TreeTypes, R: ReadOnlyStore<T::Link>, W: BlockWriter<T::Link>> Transaction<T, R, W> {
+impl<T: TreeTypes, R: ReadOnlyStore, W: BlockWriter> Transaction<T, R, W> {
     pub(crate) fn tree_from_roots<V>(
         &self,
         mut roots: Vec<Index<T>>,

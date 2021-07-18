@@ -1,12 +1,10 @@
 //! helper methods to work with ipfs/ipld
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use banyan::store::{BlockWriter, ReadOnlyStore};
 use ipfs_sqlite_block_store::BlockStore;
-use libipld::{codec::References, store::StoreParams, Block, Cid, Ipld};
+use libipld::{codec::References, store::StoreParams, Ipld};
 use parking_lot::Mutex;
 use std::sync::Arc;
-
-use crate::tags::Sha256Digest;
 
 #[derive(Clone)]
 pub struct SqliteStore<S: StoreParams>(Arc<Mutex<BlockStore<S>>>);
@@ -17,30 +15,32 @@ impl<S: StoreParams> SqliteStore<S> {
     }
 }
 
-impl<S: StoreParams> ReadOnlyStore<Sha256Digest> for SqliteStore<S>
+impl<S: StoreParams> ReadOnlyStore for SqliteStore<S>
 where
     Ipld: References<S::Codecs>,
 {
-    fn get(&self, _stream_id: u128, link: &Sha256Digest) -> Result<Box<[u8]>> {
-        let cid = Cid::from(*link);
-        let block = self.0.lock().get_block(&cid)?;
-        if let Some(block) = block {
-            Ok(block.into())
-        } else {
-            Err(anyhow!("block not found!"))
-        }
+    fn get(&self, _stream_id: u128, _link: (u64, u64)) -> Result<Box<[u8]>> {
+        todo!()
+        // let cid = Cid::from(*link);
+        // let block = self.0.lock().get_block(&cid)?;
+        // if let Some(block) = block {
+        //     Ok(block.into())
+        // } else {
+        //     Err(anyhow!("block not found!"))
+        // }
     }
 }
 
-impl<S: StoreParams> BlockWriter<Sha256Digest> for SqliteStore<S>
+impl<S: StoreParams> BlockWriter for SqliteStore<S>
 where
     Ipld: References<S::Codecs>,
 {
-    fn put(&self, _stream_id: u128, _offset: u64, data: Vec<u8>) -> Result<Sha256Digest> {
-        let digest = Sha256Digest::new(&data);
-        let cid = digest.into();
-        let block = Block::new_unchecked(cid, data);
-        self.0.lock().put_block(&block, None)?;
-        Ok(digest)
+    fn put(&self, _stream_id: u128, _offset: u64, _data: Vec<u8>) -> Result<()> {
+        todo!()
+        // let digest = Sha256Digest::new(&data);
+        // let cid = digest.into();
+        // let block = Block::new_unchecked(cid, data);
+        // self.0.lock().put_block(&block, None)?;
+        // Ok(digest)
     }
 }

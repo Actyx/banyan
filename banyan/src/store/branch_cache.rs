@@ -24,7 +24,7 @@ impl<T: TreeTypes> Weighable for Branch<T> {
     }
 }
 
-type CacheOrBypass<T> = Option<Arc<Mutex<WeightCache<<T as TreeTypes>::Link, Branch<T>>>>>;
+type CacheOrBypass<T> = Option<Arc<Mutex<WeightCache<(u64, u64), Branch<T>>>>>;
 
 #[derive(Debug, Clone)]
 pub struct BranchCache<T: TreeTypes>(CacheOrBypass<T>);
@@ -48,13 +48,13 @@ impl<T: TreeTypes> BranchCache<T> {
         Self(cache)
     }
 
-    pub fn get<'a>(&'a self, link: &'a T::Link) -> Option<Branch<T>> {
+    pub fn get<'a>(&'a self, link: &'a (u64, u64)) -> Option<Branch<T>> {
         self.0.as_ref().and_then(|x| x.lock().get(link).cloned())
     }
 
-    pub fn put(&self, link: T::Link, branch: Branch<T>) {
+    pub fn put(&self, link: (u64, u64), branch: Branch<T>) {
         if let Some(Err(e)) = self.0.as_ref().map(|x| x.lock().put(link, branch)) {
-            tracing::warn!("Adding {} to cache failed: {}", link, e);
+            tracing::warn!("Adding {:?} to cache failed: {}", link, e);
         }
     }
 

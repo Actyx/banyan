@@ -2,15 +2,14 @@ use super::{BlockWriter, ReadOnlyStore};
 use anyhow::anyhow;
 use fnv::FnvHashMap;
 use parking_lot::Mutex;
-use std::{hash::Hash, sync::Arc};
+use std::sync::Arc;
 
 /// A MemStore is a pure in memory store. Mostly useful for testing.
 #[derive(Clone)]
-pub struct MemStore<L>(Arc<Inner<L>>);
+pub struct MemStore(Arc<Inner>);
 
-struct Inner<L> {
-    blocks: Mutex<Blocks<L>>,
-    digest: Arc<dyn Fn(&[u8]) -> L + Send + Sync>,
+struct Inner {
+    blocks: Mutex<Blocks<(u64, u64)>>,
     max_size: usize,
 }
 
@@ -20,10 +19,9 @@ struct Blocks<L> {
     current_size: usize,
 }
 
-impl<L: Eq + Hash + Copy> MemStore<L> {
-    pub fn new(max_size: usize, digest: impl Fn(&[u8]) -> L + Send + Sync + 'static) -> Self {
+impl MemStore {
+    pub fn new(max_size: usize) -> Self {
         Self(Arc::new(Inner {
-            digest: Arc::new(digest),
             blocks: Mutex::new(Blocks {
                 map: FnvHashMap::default(),
                 current_size: 0,
@@ -32,19 +30,19 @@ impl<L: Eq + Hash + Copy> MemStore<L> {
         }))
     }
 
-    pub fn into_inner(self) -> anyhow::Result<FnvHashMap<L, Box<[u8]>>> {
+    pub fn into_inner(self) -> anyhow::Result<FnvHashMap<(u64, u64), Box<[u8]>>> {
         let inner = Arc::try_unwrap(self.0).map_err(|_| anyhow!("busy"))?;
         let blocks = inner.blocks.into_inner();
         Ok(blocks.map)
     }
 
-    fn get0(&self, _stream_id: u128, link: &L) -> Option<Box<[u8]>> {
+    fn get0(&self, _stream_id: u128, link: (u64, u64)) -> Option<Box<[u8]>> {
         let blocks = self.0.as_ref().blocks.lock();
-        blocks.map.get(link).cloned()
+        blocks.map.get(&link).cloned()
     }
 
-    fn put0(&self, _stream_id: u128, _offset: u64, data: Vec<u8>) -> anyhow::Result<L> {
-        let digest = (self.0.digest)(&data);
+    fn put0(&self, _stream_id: u128, offset: u64, data: Vec<u8>) -> anyhow::Result<()> {
+        let digest = (offset, data.len() as u64);
         let len = data.len();
         let mut blocks = self.0.blocks.lock();
         if blocks.current_size + data.len() > self.0.max_size {
@@ -55,12 +53,12 @@ impl<L: Eq + Hash + Copy> MemStore<L> {
             blocks.current_size += len;
         }
         std::mem::drop(blocks);
-        Ok(digest)
+        Ok(())
     }
 }
 
-impl<L: Eq + Hash + Copy + Send + Sync + 'static> ReadOnlyStore<L> for MemStore<L> {
-    fn get(&self, stream_id: u128, link: &L) -> anyhow::Result<Box<[u8]>> {
+impl ReadOnlyStore for MemStore {
+    fn get(&self, stream_id: u128, link: (u64, u64)) -> anyhow::Result<Box<[u8]>> {
         if let Some(value) = self.get0(stream_id, link) {
             Ok(value)
         } else {
@@ -69,8 +67,8 @@ impl<L: Eq + Hash + Copy + Send + Sync + 'static> ReadOnlyStore<L> for MemStore<
     }
 }
 
-impl<L: Eq + Hash + Send + Sync + Copy + 'static> BlockWriter<L> for MemStore<L> {
-    fn put(&self, stream_id: u128, offset: u64, data: Vec<u8>) -> anyhow::Result<L> {
+impl BlockWriter for MemStore {
+    fn put(&self, stream_id: u128, offset: u64, data: Vec<u8>) -> anyhow::Result<()> {
         self.put0(stream_id, offset, data)
     }
 }

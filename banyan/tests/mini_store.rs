@@ -4,7 +4,7 @@ use banyan::{
     store::{BranchCache, MemStore},
     Config, Forest, Secrets, StreamBuilder, Tree,
 };
-use common::{Key, KeyQuery, Sha256Digest, TT};
+use common::{Key, KeyQuery, TT};
 use fnv::FnvHashMap;
 use futures::prelude::*;
 use rand::Rng;
@@ -20,7 +20,7 @@ mod common;
 
 #[derive(Clone)]
 struct MiniStore {
-    forest: Forest<TT, MemStore<Sha256Digest>>,
+    forest: Forest<TT, MemStore>,
     builder: Arc<Mutex<StreamBuilder<TT, u64>>>,
     current: Variable<Tree<TT, u64>>,
 }
@@ -28,10 +28,7 @@ struct MiniStore {
 impl MiniStore {
     pub fn new() -> Self {
         Self {
-            forest: Forest::new(
-                MemStore::new(usize::max_value(), Sha256Digest::digest),
-                BranchCache::new(1 << 20),
-            ),
+            forest: Forest::new(MemStore::new(usize::max_value()), BranchCache::new(1 << 20)),
             builder: Arc::new(Mutex::new(StreamBuilder::new(
                 Config::debug(),
                 Secrets::default(),
@@ -48,7 +45,7 @@ impl MiniStore {
         Ok(())
     }
 
-    pub fn forest(&self) -> &Forest<TT, MemStore<Sha256Digest>> {
+    pub fn forest(&self) -> &Forest<TT, MemStore> {
         &self.forest
     }
 

@@ -108,7 +108,7 @@ pub fn graph<TT, V, R>(
 where
     TT: TreeTypes,
     V: Clone + Send + Sync + Debug + DagCbor + 'static,
-    R: ReadOnlyStore<TT::Link> + Clone + Send + Sync + 'static,
+    R: ReadOnlyStore + Clone + Send + Sync + 'static,
 {
     let (edges, nodes) = forest.dump_graph(&tree, |(id, node)| match node {
         banyan::index::NodeInfo::Branch(idx, _) | banyan::index::NodeInfo::PurgedBranch(idx) => {
@@ -134,15 +134,15 @@ where
 
 /// Takes a hash to a dagcbor encoded blob, and write it as dag-json to `writer`,
 /// each item separated by newlines.
-pub fn dump_json<Link: 'static>(
-    store: impl ReadOnlyStore<Link>,
-    hash: Link,
+pub fn dump_json(
+    store: impl ReadOnlyStore,
+    hash: (u64, u64),
     value_key: &chacha20::Key,
     nonce: &chacha20::XNonce,
     mut writer: impl std::io::Write,
 ) -> anyhow::Result<()> {
     // TODO
-    let bytes = store.get(0, &hash)?;
+    let bytes = store.get(0, hash)?;
     let (dag_cbor, _) = ZstdDagCborSeq::decrypt(&bytes, value_key, nonce)?;
     let ipld_ast = dag_cbor.items::<libipld::Ipld>()?;
     for x in ipld_ast {

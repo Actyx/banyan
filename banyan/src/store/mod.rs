@@ -17,13 +17,16 @@ pub trait BanyanValue: DagCbor + Send + 'static {}
 
 impl<T: DagCbor + Send + Sync + 'static> BanyanValue for T {}
 
-pub trait BlockWriter<L>: Send + Sync + 'static {
+pub type LocalLink = (u64, u64);
+pub type GlobalLink = (u128, u64, u64);
+
+pub trait BlockWriter: Send + Sync + 'static {
     /// adds a block to a temporary staging area
     ///
     /// We might have to do this async at some point, but let's keep it sync for now.
-    fn put(&self, stream_id: u128, offset: u64, data: Vec<u8>) -> Result<L>;
+    fn put(&self, stream_id: u128, offset: u64, data: Vec<u8>) -> Result<()>;
 }
 
-pub trait ReadOnlyStore<L>: Clone + Send + Sync + 'static {
-    fn get(&self, stream_id: u128, link: &L) -> Result<Box<[u8]>>;
+pub trait ReadOnlyStore: Clone + Send + Sync + 'static {
+    fn get(&self, stream_id: u128, link: (u64, u64)) -> Result<Box<[u8]>>;
 }

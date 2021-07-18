@@ -17,7 +17,7 @@ use banyan_utils::{
     ipfs::{pubsub_pub, pubsub_sub, IpfsStore},
     sqlite::SqliteStore,
     tag_index::{Tag, TagSet},
-    tags::{DnfQuery, Key, Sha256Digest, TT},
+    tags::{DnfQuery, Key, TT},
 };
 use libipld::DefaultParams;
 
@@ -32,12 +32,12 @@ type Txn = Transaction<TT, Storage, Storage>;
 
 #[derive(Clone)]
 enum Storage {
-    Memory(MemStore<Sha256Digest>),
+    Memory(MemStore),
     Ipfs(IpfsStore),
     Sqlite(SqliteStore<DefaultParams>),
 }
-impl ReadOnlyStore<Sha256Digest> for Storage {
-    fn get(&self, stream_id: u128, link: &Sha256Digest) -> Result<Box<[u8]>> {
+impl ReadOnlyStore for Storage {
+    fn get(&self, stream_id: u128, link: (u64, u64)) -> Result<Box<[u8]>> {
         match self {
             Self::Memory(m) => m.get(stream_id, link),
             Storage::Ipfs(i) => i.get(stream_id, link),
@@ -46,8 +46,8 @@ impl ReadOnlyStore<Sha256Digest> for Storage {
     }
 }
 
-impl BlockWriter<Sha256Digest> for Storage {
-    fn put(&self, stream_id: u128, offset: u64, data: Vec<u8>) -> Result<Sha256Digest> {
+impl BlockWriter for Storage {
+    fn put(&self, stream_id: u128, offset: u64, data: Vec<u8>) -> Result<()> {
         match self {
             Self::Memory(m) => m.put(stream_id, offset, data),
             Storage::Ipfs(i) => i.put(stream_id, offset, data),
@@ -59,7 +59,7 @@ impl FromStr for Storage {
     type Err = anyhow::Error;
     fn from_str(s: &str) -> Result<Self> {
         let s = match s {
-            "memory" => Self::Memory(MemStore::new(usize::max_value(), Sha256Digest::new)),
+            "memory" => Self::Memory(MemStore::new(usize::max_value())),
             "ipfs" => Self::Ipfs(IpfsStore::new()?),
             x => Self::Sqlite(SqliteStore::new(BlockStore::open(
                 x,
@@ -122,7 +122,7 @@ enum Command {
         unbalanced: bool,
         #[structopt(long)]
         /// Base on which to build
-        base: Option<Sha256Digest>,
+        base: Option<(u64, u64)>,
     },
     /// Traverse a tree and dump its output as dot. Can be piped directly:
     /// `banyan-cli graph --root <..> | dot -Tpng output.png`.
@@ -131,31 +131,31 @@ enum Command {
     Graph {
         #[structopt(long)]
         /// The root hash to use
-        root: Sha256Digest,
+        root: (u64, u64),
     },
     /// Dump a tree
     Dump {
         #[structopt(long)]
         /// The root hash to use
-        root: Sha256Digest,
+        root: (u64, u64),
     },
     /// Dump a block as json to stdout
     DumpBlock {
         #[structopt(long)]
         /// The root hash to use
-        hash: Sha256Digest,
+        hash: (u64, u64),
     },
     /// Dumps all values of a tree as json to stdout, newline separated
     DumpValues {
         #[structopt(long)]
         /// The root hash to use
-        root: Sha256Digest,
+        root: (u64, u64),
     },
     /// Stream a tree, filtered
     Filter {
         #[structopt(long)]
         /// The root hash to use
-        root: Sha256Digest,
+        root: (u64, u64),
         #[structopt(long)]
         /// Tags to filter
         tag: Vec<String>,
@@ -164,7 +164,7 @@ enum Command {
     Forget {
         #[structopt(long)]
         /// The root hash to use
-        root: Sha256Digest,
+        root: (u64, u64),
         #[structopt(long)]
         /// The offset before which to forget data
         before: u64,
@@ -173,7 +173,7 @@ enum Command {
     Pack {
         #[structopt(long)]
         /// The root hash to use
-        root: Sha256Digest,
+        root: (u64, u64),
     },
     /// Receive a stream
     RecvStream {
@@ -185,7 +185,7 @@ enum Command {
     Repair {
         #[structopt(long)]
         /// The root hash to use
-        root: Sha256Digest,
+        root: (u64, u64),
     },
     /// Send a stream
     SendStream {
@@ -197,7 +197,7 @@ enum Command {
     Stream {
         #[structopt(long)]
         /// The root hash to use
-        root: Sha256Digest,
+        root: (u64, u64),
     },
 }
 
@@ -219,7 +219,7 @@ impl Tagger {
 
 async fn build_tree(
     forest: &Txn,
-    base: Option<Sha256Digest>,
+    base: Option<(u64, u64)>,
     batches: u64,
     count: u64,
     unbalanced: bool,
@@ -273,7 +273,7 @@ async fn build_tree(
 
 async fn bench_build(
     forest: &Txn,
-    base: Option<Sha256Digest>,
+    base: Option<(u64, u64)>,
     batches: u64,
     count: u64,
     unbalanced: bool,
@@ -491,7 +491,7 @@ async fn main() -> Result<()> {
             let links = pubsub_sub(&*topic)?
                 .map_err(anyhow::Error::new)
                 .and_then(|data| future::ready(String::from_utf8(data).map_err(anyhow::Error::new)))
-                .and_then(|data| future::ready(Sha256Digest::from_str(&data)));
+                .and_then(|data| future::ready(<(u64, u64)>::from_str(&data)));
             let forest2 = forest.clone();
             let trees = links.filter_map(move |link| {
                 let forest = forest2.clone();
@@ -526,7 +526,7 @@ async fn main() -> Result<()> {
                 }
                 offset += 1;
                 if let Some(cid) = tree.link() {
-                    println!("publishing {} to {}", cid, topic);
+                    println!("publishing {:?} to {}", cid, topic);
                     pubsub_pub(&*topic, cid.to_string().as_bytes()).await?;
                 }
             }

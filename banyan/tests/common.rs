@@ -7,28 +7,16 @@ use banyan::{
     StreamBuilder, Transaction, Tree, TreeTypes,
 };
 use futures::Future;
-use libipld::{
-    cbor::DagCborCodec,
-    codec::{Codec, Decode, Encode},
-    Cid, DagCbor, Ipld,
-};
+use libipld::{cbor::DagCborCodec, codec::Codec, Cid, DagCbor, Ipld};
 use quickcheck::{Arbitrary, Gen, TestResult};
 use range_collections::RangeSet;
-use sha2::{Digest, Sha256};
-use std::{
-    collections::HashSet,
-    convert::{TryFrom, TryInto},
-    fmt,
-    io::{Read, Seek, Write},
-    iter::FromIterator,
-    ops::Range,
-};
+use std::{collections::HashSet, iter::FromIterator, ops::Range};
 
 #[allow(dead_code)]
-pub type Forest = banyan::Forest<TT, MemStore<Sha256Digest>>;
+pub type Forest = banyan::Forest<TT, MemStore>;
 
 #[allow(dead_code)]
-pub type Txn = Transaction<TT, MemStore<Sha256Digest>, MemStore<Sha256Digest>>;
+pub type Txn = Transaction<TT, MemStore, MemStore>;
 
 #[derive(Debug, Clone)]
 pub struct TT;
@@ -105,7 +93,6 @@ impl TreeTypes for TT {
     type KeySeq = KeySeq;
     type Summary = KeyRange;
     type SummarySeq = VecSeq<KeyRange>;
-    type Link = Sha256Digest;
 }
 
 impl Key {
@@ -121,7 +108,7 @@ impl Arbitrary for Key {
 }
 
 #[allow(dead_code)]
-pub fn txn(store: MemStore<Sha256Digest>, cache_cap: usize) -> Txn {
+pub fn txn(store: MemStore, cache_cap: usize) -> Txn {
     let branch_cache = BranchCache::new(cache_cap);
     Txn::new(Forest::new(store.clone(), branch_cache), store)
 }
@@ -223,7 +210,7 @@ pub struct PackedTestTree(Vec<(Key, u64)>);
 impl PackedTestTree {
     /// Convert this into an actual tree
     pub fn builder(self) -> anyhow::Result<(StreamBuilder<TT, u64>, Txn, Vec<(Key, u64)>)> {
-        let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
+        let store = MemStore::new(usize::max_value());
         let txn = txn(store, 1 << 20);
         let mut builder = StreamBuilder::<TT, u64>::debug();
         let xs = self.0.clone();
@@ -246,7 +233,7 @@ pub struct UnpackedTestTree(Vec<Vec<(Key, u64)>>);
 impl UnpackedTestTree {
     /// Convert this into an actual tree
     pub fn builder(self) -> anyhow::Result<(StreamBuilder<TT, u64>, Txn, Vec<(Key, u64)>)> {
-        let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
+        let store = MemStore::new(usize::max_value());
         let txn = txn(store, 1 << 20);
         let mut builder = StreamBuilder::<TT, u64>::debug();
         let xs = self.0.iter().cloned().flatten().collect();
@@ -287,7 +274,7 @@ impl Arbitrary for UnpackedTestTree {
 pub fn links(
     forest: &Forest,
     tree: &Tree<TT, u64>,
-    links: &mut HashSet<Sha256Digest>,
+    links: &mut HashSet<(u64, u64)>,
 ) -> anyhow::Result<()> {
     let link_opts = forest
         .iter_index(&tree, AllQuery)
@@ -325,7 +312,7 @@ impl IpldNode {
     }
 }
 
-fn block_range(forest: &Forest, hash: &Sha256Digest) -> anyhow::Result<Range<u64>> {
+fn block_range(forest: &Forest, hash: (u64, u64)) -> anyhow::Result<Range<u64>> {
     // TODO
     let blob = forest.store().get(0, hash)?;
     let (offset, _, encrypted) = DagCborCodec.decode::<IpldNode>(&blob)?.into_data()?;
@@ -337,11 +324,11 @@ fn block_range(forest: &Forest, hash: &Sha256Digest) -> anyhow::Result<Range<u64
 }
 
 /// check that for the given blocks, ranges do not overlap
-fn no_range_overlap(forest: &Forest, hashes: HashSet<Sha256Digest>) -> anyhow::Result<bool> {
+fn no_range_overlap(forest: &Forest, hashes: HashSet<(u64, u64)>) -> anyhow::Result<bool> {
     let mut ranges = OffsetSet::empty();
     let mut result = true;
     for hash in hashes {
-        let range = OffsetSet::from(block_range(forest, &hash)?);
+        let range = OffsetSet::from(block_range(forest, hash)?);
         // println!("{} {:?}", hash, range);
         if !ranges.is_disjoint(&range) {
             result = false;
@@ -374,63 +361,6 @@ pub async fn test<F: Future<Output = anyhow::Result<bool>>>(f: impl Fn() -> F) -
     match f().await {
         Ok(success) => TestResult::from_bool(success),
         Err(cause) => TestResult::error(cause.to_string()),
-    }
-}
-/// For tests, we use a Sha2-256 digest as a link
-#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Sha256Digest([u8; 32]);
-
-impl Decode<DagCborCodec> for Sha256Digest {
-    fn decode<R: Read + Seek>(c: DagCborCodec, r: &mut R) -> anyhow::Result<Self> {
-        Self::try_from(libipld::Cid::decode(c, r)?)
-    }
-}
-impl Encode<DagCborCodec> for Sha256Digest {
-    fn encode<W: Write>(&self, c: DagCborCodec, w: &mut W) -> anyhow::Result<()> {
-        libipld::Cid::encode(&Cid::from(*self), c, w)
-    }
-}
-
-impl Sha256Digest {
-    pub fn digest(data: &[u8]) -> Self {
-        let mut hasher = Sha256::new();
-        hasher.update(data);
-        let result = hasher.finalize();
-        Sha256Digest(result.try_into().unwrap())
-    }
-    pub fn read(data: &[u8]) -> anyhow::Result<Self> {
-        Ok(Self(data[0..32].try_into()?))
-    }
-}
-
-impl AsRef<[u8]> for Sha256Digest {
-    fn as_ref(&self) -> &[u8] {
-        &self.0
-    }
-}
-
-impl fmt::Display for Sha256Digest {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", hex::encode(self.as_ref()))
-    }
-}
-
-impl From<Sha256Digest> for Cid {
-    fn from(value: Sha256Digest) -> Self {
-        // https://github.com/multiformats/multicodec/blob/master/table.csv
-        let mh = multihash::Multihash::wrap(0x12, &value.0).unwrap();
-        Cid::new_v1(0x71, mh)
-    }
-}
-
-impl TryFrom<Cid> for Sha256Digest {
-    type Error = anyhow::Error;
-
-    fn try_from(value: Cid) -> Result<Self, Self::Error> {
-        anyhow::ensure!(value.codec() == 0x71, "Unexpected codec");
-        anyhow::ensure!(value.hash().code() == 0x12, "Unexpected hash algorithm");
-        let digest: [u8; 32] = value.hash().digest().try_into()?;
-        Ok(Self(digest))
     }
 }
 

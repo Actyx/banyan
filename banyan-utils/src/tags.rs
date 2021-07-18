@@ -1,96 +1,19 @@
 use crate::{tag_index::map_to_index_set, tag_index::TagIndex, tag_index::TagSet};
 use banyan::query::Query;
 use banyan::{index::*, TreeTypes};
-use libipld::{
-    cbor::DagCborCodec,
-    codec::{Decode, Encode},
-    Cid, DagCbor,
-};
-use multihash::{Code, MultihashDigest};
+use libipld::DagCbor;
 use serde::{Deserialize, Serialize};
-use std::{
-    convert::{TryFrom, TryInto},
-    fmt,
-    io::{Read, Seek, Write},
-    iter::FromIterator,
-    str::FromStr,
-};
+use std::iter::FromIterator;
 use vec_collections::VecSet;
 
 #[derive(Debug, Clone)]
 pub struct TT {}
-
-#[derive(Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Sha256Digest([u8; 32]);
-
-impl Decode<DagCborCodec> for Sha256Digest {
-    fn decode<R: Read + Seek>(c: DagCborCodec, r: &mut R) -> anyhow::Result<Self> {
-        Self::try_from(Cid::decode(c, r)?)
-    }
-}
-impl Encode<DagCborCodec> for Sha256Digest {
-    fn encode<W: Write>(&self, c: DagCborCodec, w: &mut W) -> anyhow::Result<()> {
-        Cid::encode(&Cid::from(*self), c, w)
-    }
-}
-
-impl Sha256Digest {
-    pub fn new(data: &[u8]) -> Self {
-        let mh = multihash::Code::Sha2_256.digest(data);
-        Sha256Digest(mh.digest().try_into().unwrap())
-    }
-
-    pub fn digest(data: &[u8]) -> Self {
-        let mh = Code::Sha2_256.digest(data);
-        Sha256Digest(mh.digest().try_into().unwrap())
-    }
-}
-
-impl From<Sha256Digest> for Cid {
-    fn from(value: Sha256Digest) -> Self {
-        // https://github.com/multiformats/multicodec/blob/master/table.csv
-        let mh = multihash::Multihash::wrap(0x12, &value.0).unwrap();
-        Cid::new_v1(0x71, mh)
-    }
-}
-
-impl TryFrom<Cid> for Sha256Digest {
-    type Error = anyhow::Error;
-
-    fn try_from(value: Cid) -> Result<Self, Self::Error> {
-        anyhow::ensure!(value.codec() == 0x71, "Unexpected codec");
-        anyhow::ensure!(value.hash().code() == 0x12, "Unexpected hash algorithm");
-        let digest: [u8; 32] = value.hash().digest().try_into()?;
-        Ok(Self(digest))
-    }
-}
-
-impl FromStr for Sha256Digest {
-    type Err = anyhow::Error;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let cid = Cid::from_str(s)?;
-        cid.try_into()
-    }
-}
-
-impl fmt::Display for Sha256Digest {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", Cid::from(*self))
-    }
-}
-
-impl fmt::Debug for Sha256Digest {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", Cid::from(*self))
-    }
-}
 
 impl TreeTypes for TT {
     type Key = Key;
     type KeySeq = KeySeq;
     type Summary = Key;
     type SummarySeq = KeySeq;
-    type Link = Sha256Digest;
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]

@@ -4,7 +4,6 @@ use banyan::{
     store::{BranchCache, MemStore},
     Forest, StreamBuilder, Transaction, Tree, TreeTypes,
 };
-use common::Sha256Digest;
 use fnv::FnvHashSet;
 use libipld::{cbor::DagCborCodec, codec::Codec, ipld, Cid, DagCbor, Ipld};
 use quickcheck::{quickcheck, Arbitrary, Gen};
@@ -12,7 +11,7 @@ use std::str::FromStr;
 
 mod common;
 
-type Txn = Transaction<TT, MemStore<Sha256Digest>, MemStore<Sha256Digest>>;
+type Txn = Transaction<TT, MemStore, MemStore>;
 
 impl Arbitrary for Key {
     fn arbitrary(g: &mut Gen) -> Self {
@@ -58,10 +57,9 @@ impl TreeTypes for TT {
     type KeySeq = VecSeq<Key>;
     type Summary = ();
     type SummarySeq = UnitSeq;
-    type Link = Sha256Digest;
 }
 
-fn txn(store: MemStore<Sha256Digest>) -> Txn {
+fn txn(store: MemStore) -> Txn {
     let branch_cache = BranchCache::default();
     Txn::new(Forest::new(store.clone(), branch_cache), store)
 }
@@ -71,7 +69,7 @@ where
     I: IntoIterator<Item = (Key, Payload)>,
     I::IntoIter: Send,
 {
-    let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
+    let store = MemStore::new(usize::max_value());
     let forest = txn(store);
     let mut tree = StreamBuilder::<TT, Payload>::debug();
     forest.extend(&mut tree, xs)?;

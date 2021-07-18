@@ -4,12 +4,12 @@ use banyan::{
     store::{BranchCache, MemStore},
     Config, Forest, Secrets, StreamBuilder, Tree,
 };
-use common::{txn, IterExt, Key, KeyRange, KeySeq, Sha256Digest, TestFilter, TestTree, TT};
+use common::{txn, IterExt, Key, KeyRange, KeySeq, TestFilter, TestTree, TT};
 use futures::prelude::*;
-use libipld::{cbor::DagCborCodec, codec::Codec, Cid};
+use libipld::{cbor::DagCborCodec, codec::Codec};
 use quickcheck::TestResult;
 use quickcheck_macros::quickcheck;
-use std::{convert::TryInto, iter, str::FromStr};
+use std::iter;
 use tracing_subscriber::{fmt::format::FmtSpan, EnvFilter};
 
 use crate::common::no_offset_overlap;
@@ -223,7 +223,7 @@ fn build_get(t: TestTree) -> anyhow::Result<bool> {
 }
 
 fn do_build_pack(xss: Vec<Vec<(Key, u64)>>) -> anyhow::Result<bool> {
-    let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
+    let store = MemStore::new(usize::max_value());
     let forest = txn(store, 1000);
     let mut builder = StreamBuilder::<TT, u64>::debug();
 
@@ -337,7 +337,7 @@ fn filter_test_simple_2() -> anyhow::Result<()> {
 
 #[test]
 fn transaction_1() -> anyhow::Result<()> {
-    let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
+    let store = MemStore::new(usize::max_value());
     let forest = txn(store, 1000);
     let mut builder = StreamBuilder::<TT, u64>::debug();
     forest.extend(&mut builder, vec![(Key(1), 1)])?;
@@ -359,7 +359,7 @@ fn transaction_1() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn stream_test_simple() -> anyhow::Result<()> {
-    let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
+    let store = MemStore::new(usize::max_value());
     let forest = txn(store, 1000);
     let mut trees = Vec::new();
     for n in 1..=10u64 {
@@ -462,7 +462,7 @@ async fn do_stream_trees_chunked_reverse_should_honour_an_inclusive_upper_bound(
 
 #[tokio::test]
 async fn stream_trees_chunked_reverse_should_complete() {
-    let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
+    let store = MemStore::new(usize::max_value());
     let forest = txn(store, 1000);
     let secrets = Secrets::default();
     let config = Config::debug();
@@ -483,7 +483,7 @@ async fn stream_trees_chunked_reverse_should_complete() {
 
 #[tokio::test]
 async fn stream_trees_chunked_should_complete() {
-    let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
+    let store = MemStore::new(usize::max_value());
     let forest = txn(store, 1000);
     let secrets = Secrets::default();
     let config = Config::debug();
@@ -520,7 +520,7 @@ fn deep_tree_traversal_no_stack_overflow() -> anyhow::Result<()> {
         .name("stack-overflow-test".into())
         .stack_size(65536)
         .spawn(|| {
-            let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
+            let store = MemStore::new(usize::max_value());
             let forest = txn(store, 1000);
             let mut builder = StreamBuilder::<TT, u64>::debug();
             let elems = (0u64..100).map(|i| (i, Key(i), i)).collect::<Vec<_>>();
@@ -552,7 +552,7 @@ fn leaf_index_wire_format() -> anyhow::Result<()> {
         value_bytes: 1234,
         keys: KeySeq(vec![Key(1), Key(2)]),
         link: Some(
-            Cid::from_str("bafyreihtx752fmf3zafbys5dtr4jxohb53yi3qtzfzf6wd5274jwtn5agu")?
+            <(u64, u64)>::from_str("bafyreihtx752fmf3zafbys5dtr4jxohb53yi3qtzfzf6wd5274jwtn5agu")?
                 .try_into()?,
         ),
     }
@@ -599,7 +599,7 @@ fn branch_index_wire_format() -> anyhow::Result<()> {
             .into_iter()
             .collect::<VecSeq<_>>(),
         link: Some(
-            Cid::from_str("bafyreihtx752fmf3zafbys5dtr4jxohb53yi3qtzfzf6wd5274jwtn5agu")?
+            <(u64, u64)>::from_str("bafyreihtx752fmf3zafbys5dtr4jxohb53yi3qtzfzf6wd5274jwtn5agu")?
                 .try_into()?,
         ),
     }
@@ -654,7 +654,7 @@ fn retain1() -> anyhow::Result<()> {
     Ok(())
 }
 
-type TreeFixture = (Forest<TT, MemStore<Sha256Digest>>, Vec<u64>, Tree<TT, u64>);
+type TreeFixture = (Forest<TT, MemStore>, Vec<u64>, Tree<TT, u64>);
 fn create_interesting_tree(n: usize) -> anyhow::Result<TreeFixture> {
     let config = Config {
         target_leaf_size: 10000,
@@ -664,7 +664,7 @@ fn create_interesting_tree(n: usize) -> anyhow::Result<TreeFixture> {
         zstd_level: 10,
         max_uncompressed_leaf_size: 16 * 1024 * 1024,
     };
-    let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
+    let store = MemStore::new(usize::max_value());
     let forest = Forest::new(store.clone(), BranchCache::new(1 << 20));
     let txn = txn(store, 1 << 20);
     let secrets = Secrets::default();
@@ -809,7 +809,7 @@ fn retain2() -> anyhow::Result<()> {
 #[test]
 fn build1() -> anyhow::Result<()> {
     let xs = (0..10).map(|i| (Key(i), i)).collect::<Vec<_>>();
-    let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
+    let store = MemStore::new(usize::max_value());
     let forest = txn(store, 1000);
     let mut tree = StreamBuilder::debug();
     forest.extend(&mut tree, xs)?;

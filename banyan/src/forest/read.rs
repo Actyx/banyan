@@ -56,7 +56,7 @@ impl<F, X> ChunkVisitor<F, X> {
 impl<T, R, F, V, E> TreeVisitor<T, R> for ChunkVisitor<F, (V, E)>
 where
     T: TreeTypes,
-    R: ReadOnlyStore<T::Link>,
+    R: ReadOnlyStore,
     V: BanyanValue,
     F: Fn(&NodeInfo<T, R>) -> E + Send + Sync + 'static,
 {
@@ -154,7 +154,7 @@ impl<T: TreeTypes> TraverseState<T> {
 impl<T: TreeTypes, R, Q, V> TreeIter<T, R, Q, V>
 where
     T: TreeTypes,
-    R: ReadOnlyStore<T::Link>,
+    R: ReadOnlyStore,
     Q: Query<T>,
     V: TreeVisitor<T, R>,
 {
@@ -327,7 +327,7 @@ where
 impl<T, R, Q, V> Iterator for TreeIter<T, R, Q, V>
 where
     T: TreeTypes,
-    R: ReadOnlyStore<T::Link>,
+    R: ReadOnlyStore,
     Q: Query<T>,
     V: TreeVisitor<T, R>,
 {
@@ -350,7 +350,7 @@ where
 impl<T, R> Forest<T, R>
 where
     T: TreeTypes,
-    R: ReadOnlyStore<T::Link>,
+    R: ReadOnlyStore,
 {
     pub fn store(&self) -> &R {
         &self.0.store
@@ -370,10 +370,10 @@ where
     }
 
     /// load a leaf given a leaf index
-    pub(crate) fn load_leaf_from_link(&self, stream: &Secrets, link: &T::Link) -> Result<Leaf> {
+    pub(crate) fn load_leaf_from_link(&self, stream: &Secrets, link: &(u64, u64)) -> Result<Leaf> {
         #[cfg(feature = "metrics")]
         let _timer = prom::LEAF_LOAD_HIST.start_timer();
-        let data = &self.get_block(stream.stream_id, link)?;
+        let data = &self.get_block(stream.stream_id, *link)?;
         let (items, range) = ZstdDagCborSeq::decrypt(data, stream.value_key(), nonce::<T>())?;
         Ok(Leaf::new(items, range))
     }
@@ -382,10 +382,10 @@ where
         &self,
         secrets: &Secrets,
         sealed: impl Fn(&[Index<T>], u32) -> bool,
-        link: T::Link,
+        link: (u64, u64),
     ) -> Result<(Index<T>, Range<u64>)> {
         let index_key = secrets.index_key();
-        let bytes = self.get_block(secrets.stream_id, &link)?;
+        let bytes = self.get_block(secrets.stream_id, link)?;
         let (children, byte_range) = deserialize_compressed::<T>(index_key, nonce::<T>(), &bytes)?;
         let level = children.iter().map(|x| x.level()).max().unwrap() + 1;
         let count = children.iter().map(|x| x.count()).sum();
@@ -409,7 +409,7 @@ where
     pub(crate) fn load_branch_cached_from_link(
         &self,
         secrets: &Secrets,
-        link: &T::Link,
+        link: &(u64, u64),
     ) -> Result<Branch<T>> {
         let res = self.branch_cache().get(link);
         match res {
@@ -422,7 +422,7 @@ where
         }
     }
 
-    fn get_block(&self, stream_id: u128, link: &T::Link) -> anyhow::Result<Box<[u8]>> {
+    fn get_block(&self, stream_id: u128, link: (u64, u64)) -> anyhow::Result<Box<[u8]>> {
         #[cfg(feature = "metrics")]
         let _timer = prom::BLOCK_GET_HIST.start_timer();
         let res = self.store.get(stream_id, link);
@@ -437,12 +437,12 @@ where
     pub(crate) fn load_branch_from_link(
         &self,
         secrets: &Secrets,
-        link: &T::Link,
+        link: &(u64, u64),
     ) -> Result<Branch<T>> {
         #[cfg(feature = "metrics")]
         let _timer = prom::BRANCH_LOAD_HIST.start_timer();
         Ok({
-            let bytes = self.get_block(secrets.stream_id, &link)?;
+            let bytes = self.get_block(secrets.stream_id, *link)?;
             let (children, byte_range) =
                 deserialize_compressed(secrets.index_key(), nonce::<T>(), &bytes)?;
             Branch::<T>::new(children, byte_range)
@@ -472,7 +472,7 @@ where
     ) -> Result<Option<Branch<T>>> {
         let t0 = Instant::now();
         let result = Ok(if let Some(link) = &index.link {
-            let bytes = self.get_block(secrets.stream_id, &link)?;
+            let bytes = self.get_block(secrets.stream_id, *link)?;
             let (children, byte_range) =
                 deserialize_compressed(secrets.index_key(), nonce::<T>(), &bytes)?;
             Some(Branch::<T>::new(children, byte_range))
@@ -650,7 +650,7 @@ where
                     index.sealed,
                     index
                         .link
-                        .map(|x| format!("{}", x))
+                        .map(|x| format!("{:?}", x))
                         .unwrap_or_else(|| "".to_string()),
                     branch.children.len()
             );

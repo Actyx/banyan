@@ -25,8 +25,8 @@ use std::iter;
 impl<T, R, W> Transaction<T, R, W>
 where
     T: TreeTypes,
-    R: ReadOnlyStore<T::Link>,
-    W: BlockWriter<T::Link>,
+    R: ReadOnlyStore,
+    W: BlockWriter,
 {
     pub fn read(&self) -> &Forest<T, R> {
         &self.read
@@ -42,7 +42,7 @@ where
         self.extend_leaf(&[], None, from, stream)
     }
 
-    fn put_block(&self, stream_id: u128, offset: u64, data: Vec<u8>) -> anyhow::Result<T::Link> {
+    fn put_block(&self, stream_id: u128, offset: u64, data: Vec<u8>) -> anyhow::Result<()> {
         #[cfg(feature = "metrics")]
         let _timer = prom::BLOCK_PUT_HIST.start_timer();
         #[cfg(feature = "metrics")]
@@ -80,9 +80,11 @@ where
             nonce::<T>(),
             &mut stream.offset,
         )?;
+        let len = encrypted.len() as u64;
         let keys = keys.into_iter().collect::<T::KeySeq>();
         // store leaf
-        let link = self.put_block(stream.secrets().stream_id, offset, encrypted)?;
+        self.put_block(stream.secrets().stream_id, offset, encrypted)?;
+        let link = (offset, len);
         let index: LeafIndex<T> = LeafIndex {
             link: Some(link),
             value_bytes,
@@ -354,7 +356,7 @@ where
         &self,
         items: &[Index<T>],
         stream: &mut StreamBuilderState,
-    ) -> Result<(T::Link, u64)> {
+    ) -> Result<((u64, u64), u64)> {
         #[cfg(feature = "metrics")]
         let _timer = prom::BRANCH_STORE_HIST.start_timer();
         let level = stream.config().zstd_level;
@@ -362,10 +364,8 @@ where
         let offset = stream.offset.as_u64();
         let cbor = serialize_compressed(&key, nonce::<T>(), &mut stream.offset, &items, level)?;
         let len = cbor.len() as u64;
-        Ok((
-            self.put_block(stream.secrets().stream_id, offset, cbor)?,
-            len,
-        ))
+        self.put_block(stream.secrets().stream_id, offset, cbor)?;
+        Ok(((offset, len), len))
     }
 
     pub(crate) fn retain0<Q: Query<T> + Send + Sync>(
@@ -471,7 +471,7 @@ where
                         // already purged, nothing to do
                     }
                     Err(cause) => {
-                        let link_txt = index.link.map(|x| x.to_string()).unwrap_or_default();
+                        let link_txt = index.link.map(|x| format!("{:?}", x)).unwrap_or_default();
                         report.push(format!("forgetting branch {} due to {}", link_txt, cause));
                         if !index.sealed {
                             report.push("warning: forgetting unsealed branch!".into());
@@ -487,7 +487,7 @@ where
                 let mut index = index.as_ref().clone();
                 // important not to hit the cache here!
                 if let Err(cause) = self.load_leaf(stream.secrets(), &index) {
-                    let link_txt = index.link.map(|x| x.to_string()).unwrap_or_default();
+                    let link_txt = index.link.map(|x| format!("{:?}", x)).unwrap_or_default();
                     report.push(format!("forgetting leaf {} due to {}", link_txt, cause));
                     if !index.sealed {
                         report.push("warning: forgetting unsealed leaf!".into());

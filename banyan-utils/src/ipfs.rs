@@ -4,9 +4,7 @@ use banyan::store::{BlockWriter, ReadOnlyStore};
 use futures::prelude::*;
 use libipld::Cid;
 use serde::{de::IgnoredAny, de::Visitor, Deserialize, Deserializer, Serialize, Serializer};
-use std::{convert::TryInto, fmt, str::FromStr};
-
-use crate::tags::Sha256Digest;
+use std::{fmt, str::FromStr};
 
 pub fn block_get(key: &Cid) -> Result<Box<[u8]>> {
     let url = reqwest::Url::parse_with_params(
@@ -140,23 +138,25 @@ impl IpfsStore {
     }
 }
 
-impl ReadOnlyStore<Sha256Digest> for IpfsStore {
-    fn get(&self, _stream_id: u128, link: &Sha256Digest) -> Result<Box<[u8]>> {
-        let cid: Cid = (*link).into();
-        std::thread::spawn(move || crate::ipfs::block_get(&cid))
-            .join()
-            .map_err(|_| anyhow!("join error!"))?
+impl ReadOnlyStore for IpfsStore {
+    fn get(&self, _stream_id: u128, _link: (u64, u64)) -> Result<Box<[u8]>> {
+        todo!()
+        // let cid: Cid = (*link).into();
+        // std::thread::spawn(move || crate::ipfs::block_get(&cid))
+        //     .join()
+        //     .map_err(|_| anyhow!("join error!"))?
     }
 }
 
-impl BlockWriter<Sha256Digest> for IpfsStore {
-    fn put(&self, _stream_id: u128, _offset: u64, data: Vec<u8>) -> Result<Sha256Digest> {
-        let cid = std::thread::spawn(move || crate::ipfs::block_put(&data, 0x71, false))
-            .join()
-            .map_err(|_| anyhow!("join error!"))??;
-        assert!(cid.hash().code() == 0x12);
-        assert!(cid.hash().digest().len() == 32);
-        cid.try_into()
+impl BlockWriter for IpfsStore {
+    fn put(&self, _stream_id: u128, _offset: u64, _data: Vec<u8>) -> Result<()> {
+        todo!()
+        // let cid = std::thread::spawn(move || crate::ipfs::block_put(&data, 0x71, false))
+        //     .join()
+        //     .map_err(|_| anyhow!("join error!"))??;
+        // assert!(cid.hash().code() == 0x12);
+        // assert!(cid.hash().digest().len() == 32);
+        // cid.try_into()
     }
 }
 

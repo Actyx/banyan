@@ -1,9 +1,9 @@
 //! creation and traversal of banyan trees
 use super::index::*;
 use crate::store::{BlockWriter, BranchCache, ReadOnlyStore};
-use core::{fmt::Debug, hash::Hash, iter::FromIterator, ops::Range};
+use core::{fmt::Debug, iter::FromIterator, ops::Range};
 use libipld::cbor::DagCbor;
-use std::{fmt::Display, sync::Arc};
+use std::sync::Arc;
 mod index_iter;
 #[cfg(feature = "metrics")]
 mod prom;
@@ -45,8 +45,6 @@ pub trait TreeTypes: Debug + Send + Sync + Clone + 'static {
         + Send
         + Sync
         + Summarizable<Self::Summary>;
-    /// link type to use over block boundaries
-    type Link: Display + Debug + Hash + Eq + Clone + Copy + Send + Sync + DagCbor;
 
     const NONCE: &'static [u8; 24] = &[0u8; 24];
 }
@@ -79,7 +77,7 @@ impl<TT: TreeTypes, R: Clone> Forest<TT, R> {
         }))
     }
 
-    pub fn transaction<W: BlockWriter<TT::Link>>(
+    pub fn transaction<W: BlockWriter>(
         &self,
         f: impl FnOnce(R) -> (R, W),
     ) -> Transaction<TT, R, W> {
@@ -120,8 +118,8 @@ impl<T: TreeTypes, R, W> Transaction<T, R, W> {
 
 impl<T: TreeTypes, R, W> Transaction<T, R, W>
 where
-    R: ReadOnlyStore<T::Link>,
-    W: BlockWriter<T::Link>,
+    R: ReadOnlyStore,
+    W: BlockWriter,
 {
     /// create a new transaction.
     ///

@@ -15,7 +15,7 @@ use banyan::{
 };
 use banyan_utils::{
     tag_index::TagSet,
-    tags::{Key, Sha256Digest, TT},
+    tags::{Key, TT},
 };
 
 #[derive(Clone)]
@@ -39,15 +39,15 @@ impl<S> OpsCountingStore<S> {
     }
 }
 
-impl<L, S: ReadOnlyStore<L>> ReadOnlyStore<L> for OpsCountingStore<S> {
-    fn get(&self, stream_id: u128, link: &L) -> anyhow::Result<Box<[u8]>> {
+impl<S: ReadOnlyStore> ReadOnlyStore for OpsCountingStore<S> {
+    fn get(&self, stream_id: u128, link: (u64, u64)) -> anyhow::Result<Box<[u8]>> {
         self.reads.fetch_add(1, Ordering::SeqCst);
         self.inner.get(stream_id, link)
     }
 }
 
-impl<L, S: BlockWriter<L> + Send + Sync> BlockWriter<L> for OpsCountingStore<S> {
-    fn put(&self, stream_id: u128, offset: u64, data: Vec<u8>) -> anyhow::Result<L> {
+impl<S: BlockWriter + Send + Sync> BlockWriter for OpsCountingStore<S> {
+    fn put(&self, stream_id: u128, offset: u64, data: Vec<u8>) -> anyhow::Result<()> {
         self.writes.fetch_add(1, Ordering::SeqCst);
         self.inner.put(stream_id, offset, data)
     }
@@ -56,7 +56,7 @@ impl<L, S: BlockWriter<L> + Send + Sync> BlockWriter<L> for OpsCountingStore<S> 
 #[allow(clippy::type_complexity)]
 fn test_ops_count(
     name: &str,
-    forest: &Forest<TT, OpsCountingStore<MemStore<Sha256Digest>>>,
+    forest: &Forest<TT, OpsCountingStore<MemStore>>,
     tree: &Tree<TT, u64>,
     query: impl Query<TT> + Clone + 'static,
 ) -> (Vec<anyhow::Result<(u64, Key, u64)>>, Duration, u64) {
@@ -75,7 +75,7 @@ fn main() -> anyhow::Result<()> {
     let xs = (0..n)
         .map(|i| (Key::single(i, i, TagSet::empty()), i))
         .collect::<Vec<_>>();
-    let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
+    let store = MemStore::new(usize::max_value());
     let store = OpsCountingStore::new(store);
     let branch_cache = BranchCache::<TT>::new(capacity);
     let txn = Transaction::new(Forest::new(store.clone(), branch_cache), store);
