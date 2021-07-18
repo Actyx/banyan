@@ -5,7 +5,7 @@ use crate::{
     index::{zip_with_offset_ref, NodeInfo},
     store::{BlockWriter, ReadOnlyStore},
     util::nonce,
-    StreamBuilderState,
+    LocalLink, StreamBuilderState, StreamId,
 };
 use crate::{
     index::serialize_compressed,
@@ -42,7 +42,7 @@ where
         self.extend_leaf(&[], None, from, stream)
     }
 
-    fn put_block(&self, stream_id: u128, offset: u64, data: Vec<u8>) -> anyhow::Result<()> {
+    fn put_block(&self, stream_id: StreamId, offset: u64, data: Vec<u8>) -> anyhow::Result<()> {
         #[cfg(feature = "metrics")]
         let _timer = prom::BLOCK_PUT_HIST.start_timer();
         #[cfg(feature = "metrics")]
@@ -80,11 +80,11 @@ where
             nonce::<T>(),
             &mut stream.offset,
         )?;
-        let len = encrypted.len() as u64;
+        let len = encrypted.len();
         let keys = keys.into_iter().collect::<T::KeySeq>();
         // store leaf
         self.put_block(stream.secrets().stream_id, offset, encrypted)?;
-        let link = (offset, len);
+        let link = LocalLink::new(offset, len)?;
         let index: LeafIndex<T> = LeafIndex {
             link: Some(link),
             value_bytes,
@@ -356,16 +356,17 @@ where
         &self,
         items: &[Index<T>],
         stream: &mut StreamBuilderState,
-    ) -> Result<((u64, u64), u64)> {
+    ) -> Result<(LocalLink, u64)> {
         #[cfg(feature = "metrics")]
         let _timer = prom::BRANCH_STORE_HIST.start_timer();
         let level = stream.config().zstd_level;
         let key = *stream.index_key();
         let offset = stream.offset.as_u64();
         let cbor = serialize_compressed(&key, nonce::<T>(), &mut stream.offset, &items, level)?;
-        let len = cbor.len() as u64;
+        let len = cbor.len();
         self.put_block(stream.secrets().stream_id, offset, cbor)?;
-        Ok(((offset, len), len))
+        let link = LocalLink::new(offset, len)?;
+        Ok((link, len as u64))
     }
 
     pub(crate) fn retain0<Q: Query<T> + Send + Sync>(

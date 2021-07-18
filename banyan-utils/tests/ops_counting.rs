@@ -9,7 +9,7 @@ use std::{
 use banyan::{
     query::{AllQuery, OffsetRangeQuery, Query},
     store::{BlockWriter, BranchCache, MemStore, ReadOnlyStore},
-    Config, Forest, Secrets, StreamBuilder, Transaction, Tree,
+    Config, Forest, LocalLink, Secrets, StreamBuilder, Transaction, Tree,
 };
 use banyan_utils::{
     tag_index::TagSet,
@@ -38,7 +38,7 @@ impl<S> OpsCountingStore<S> {
 }
 
 impl<S: ReadOnlyStore> ReadOnlyStore for OpsCountingStore<S> {
-    fn get(&self, stream_id: u128, link: (u64, u64)) -> anyhow::Result<Box<[u8]>> {
+    fn get(&self, stream_id: u128, link: LocalLink) -> anyhow::Result<Box<[u8]>> {
         self.reads.fetch_add(1, Ordering::SeqCst);
         self.inner.get(stream_id, link)
     }

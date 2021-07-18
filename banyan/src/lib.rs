@@ -70,6 +70,7 @@ use prometheus::Registry;
 
 pub use chacha20;
 pub use forest::{Config, FilteredChunk, Forest, Secrets, Transaction, TreeTypes};
+pub use store::{GlobalLink, LocalLink, StreamId};
 pub use stream_builder::{StreamBuilder, StreamTransaction};
 pub use tree::Tree;
 

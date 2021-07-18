@@ -4,7 +4,7 @@ use banyan::{
     index::{CompactSeq, Summarizable, VecSeq},
     query::{AllQuery, AndQuery, OffsetRangeQuery, Query},
     store::{BranchCache, MemStore, ReadOnlyStore},
-    StreamBuilder, Transaction, Tree, TreeTypes,
+    LocalLink, StreamBuilder, Transaction, Tree, TreeTypes,
 };
 use futures::Future;
 use libipld::{cbor::DagCborCodec, codec::Codec, Cid, DagCbor, Ipld};
@@ -274,7 +274,7 @@ impl Arbitrary for UnpackedTestTree {
 pub fn links(
     forest: &Forest,
     tree: &Tree<TT, u64>,
-    links: &mut HashSet<(u64, u64)>,
+    links: &mut HashSet<LocalLink>,
 ) -> anyhow::Result<()> {
     let link_opts = forest
         .iter_index(&tree, AllQuery)
@@ -312,7 +312,7 @@ impl IpldNode {
     }
 }
 
-fn block_range(forest: &Forest, hash: (u64, u64)) -> anyhow::Result<Range<u64>> {
+fn block_range(forest: &Forest, hash: LocalLink) -> anyhow::Result<Range<u64>> {
     // TODO
     let blob = forest.store().get(0, hash)?;
     let (offset, _, encrypted) = DagCborCodec.decode::<IpldNode>(&blob)?.into_data()?;
@@ -324,7 +324,7 @@ fn block_range(forest: &Forest, hash: (u64, u64)) -> anyhow::Result<Range<u64>> 
 }
 
 /// check that for the given blocks, ranges do not overlap
-fn no_range_overlap(forest: &Forest, hashes: HashSet<(u64, u64)>) -> anyhow::Result<bool> {
+fn no_range_overlap(forest: &Forest, hashes: HashSet<LocalLink>) -> anyhow::Result<bool> {
     let mut ranges = OffsetSet::empty();
     let mut result = true;
     for hash in hashes {

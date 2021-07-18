@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 
 use banyan::{
     store::{ReadOnlyStore, ZstdDagCborSeq},
-    Tree, {Forest, TreeTypes},
+    LocalLink, Tree, {Forest, TreeTypes},
 };
 use libipld::{cbor::DagCbor, codec::Codec, json::DagJsonCodec};
 
@@ -136,7 +136,7 @@ where
 /// each item separated by newlines.
 pub fn dump_json(
     store: impl ReadOnlyStore,
-    hash: (u64, u64),
+    hash: LocalLink,
     value_key: &chacha20::Key,
     nonce: &chacha20::XNonce,
     mut writer: impl std::io::Write,

@@ -1,6 +1,6 @@
 //! creation and traversal of banyan trees
 use super::index::*;
-use crate::store::{BlockWriter, BranchCache, ReadOnlyStore};
+use crate::store::{BlockWriter, BranchCache, ReadOnlyStore, StreamId};
 use core::{fmt::Debug, iter::FromIterator, ops::Range};
 use libipld::cbor::DagCbor;
 use std::sync::Arc;
@@ -140,7 +140,7 @@ impl<T: TreeTypes, R, W> std::ops::Deref for Transaction<T, R, W> {
 
 #[derive(Debug, Clone)]
 pub struct Secrets {
-    stream_id: u128,
+    stream_id: StreamId,
     /// chacha20 key to decrypt index nodes
     index_key: chacha20::Key,
     /// chacha20 key to decrypt value nodes
@@ -148,7 +148,7 @@ pub struct Secrets {
 }
 
 impl Secrets {
-    pub fn new(index_key: chacha20::Key, value_key: chacha20::Key, stream_id: u128) -> Self {
+    pub fn new(index_key: chacha20::Key, value_key: chacha20::Key, stream_id: StreamId) -> Self {
         Self {
             stream_id,
             index_key,

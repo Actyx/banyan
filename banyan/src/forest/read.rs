@@ -10,6 +10,7 @@ use crate::{
     store::ZstdDagCborSeq,
     store::{BanyanValue, ReadOnlyStore},
     util::{nonce, BoolSliceExt, IterExt},
+    LocalLink, StreamId,
 };
 use anyhow::{anyhow, Result};
 use futures::{prelude::*, stream::BoxStream};
@@ -370,7 +371,7 @@ where
     }
 
     /// load a leaf given a leaf index
-    pub(crate) fn load_leaf_from_link(&self, stream: &Secrets, link: &(u64, u64)) -> Result<Leaf> {
+    pub(crate) fn load_leaf_from_link(&self, stream: &Secrets, link: &LocalLink) -> Result<Leaf> {
         #[cfg(feature = "metrics")]
         let _timer = prom::LEAF_LOAD_HIST.start_timer();
         let data = &self.get_block(stream.stream_id, *link)?;
@@ -382,7 +383,7 @@ where
         &self,
         secrets: &Secrets,
         sealed: impl Fn(&[Index<T>], u32) -> bool,
-        link: (u64, u64),
+        link: LocalLink,
     ) -> Result<(Index<T>, Range<u64>)> {
         let index_key = secrets.index_key();
         let bytes = self.get_block(secrets.stream_id, link)?;
@@ -409,7 +410,7 @@ where
     pub(crate) fn load_branch_cached_from_link(
         &self,
         secrets: &Secrets,
-        link: &(u64, u64),
+        link: &LocalLink,
     ) -> Result<Branch<T>> {
         let res = self.branch_cache().get(link);
         match res {
@@ -422,7 +423,7 @@ where
         }
     }
 
-    fn get_block(&self, stream_id: u128, link: (u64, u64)) -> anyhow::Result<Box<[u8]>> {
+    fn get_block(&self, stream_id: StreamId, link: LocalLink) -> anyhow::Result<Box<[u8]>> {
         #[cfg(feature = "metrics")]
         let _timer = prom::BLOCK_GET_HIST.start_timer();
         let res = self.store.get(stream_id, link);
@@ -437,7 +438,7 @@ where
     pub(crate) fn load_branch_from_link(
         &self,
         secrets: &Secrets,
-        link: &(u64, u64),
+        link: &LocalLink,
     ) -> Result<Branch<T>> {
         #[cfg(feature = "metrics")]
         let _timer = prom::BRANCH_LOAD_HIST.start_timer();

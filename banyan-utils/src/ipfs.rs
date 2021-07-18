@@ -1,6 +1,9 @@
 //! helper methods to work with ipfs/ipld
 use anyhow::{anyhow, Result};
-use banyan::store::{BlockWriter, ReadOnlyStore};
+use banyan::{
+    store::{BlockWriter, ReadOnlyStore},
+    LocalLink,
+};
 use futures::prelude::*;
 use libipld::Cid;
 use serde::{de::IgnoredAny, de::Visitor, Deserialize, Deserializer, Serialize, Serializer};
@@ -139,7 +142,7 @@ impl IpfsStore {
 }
 
 impl ReadOnlyStore for IpfsStore {
-    fn get(&self, _stream_id: u128, _link: (u64, u64)) -> Result<Box<[u8]>> {
+    fn get(&self, _stream_id: u128, _link: LocalLink) -> Result<Box<[u8]>> {
         todo!()
         // let cid: Cid = (*link).into();
         // std::thread::spawn(move || crate::ipfs::block_get(&cid))

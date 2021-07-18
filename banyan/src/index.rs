@@ -41,7 +41,7 @@
 use crate::{
     forest::TreeTypes,
     store::{ReadOnlyStore, ZstdDagCborSeq},
-    CipherOffset, Forest, Secrets,
+    CipherOffset, Forest, LocalLink, Secrets,
 };
 use anyhow::{anyhow, Result};
 use libipld::{
@@ -114,7 +114,7 @@ pub struct LeafIndex<T: TreeTypes> {
     // block is sealed
     pub sealed: bool,
     // link to the block containing the values
-    pub link: Option<(u64, u64)>,
+    pub link: Option<LocalLink>,
     /// A sequence of keys with the same number of values as the data block the link points to.
     pub keys: T::KeySeq,
     // serialized size of the data
@@ -151,7 +151,7 @@ pub struct BranchIndex<T: TreeTypes> {
     // block is sealed
     pub sealed: bool,
     // link to the branch node
-    pub link: Option<(u64, u64)>,
+    pub link: Option<LocalLink>,
     // extra data
     pub summaries: T::SummarySeq,
     // accumulated serialized size of all values in this tree
@@ -219,7 +219,7 @@ impl<T: TreeTypes> Index<T> {
         }
     }
 
-    pub fn link(&self) -> &Option<(u64, u64)> {
+    pub fn link(&self) -> &Option<LocalLink> {
         match self {
             Index::Leaf(x) => &x.link,
             Index::Branch(x) => &x.link,
@@ -324,11 +324,11 @@ impl AsRef<ZstdDagCborSeq> for Leaf {
 pub struct BranchLoader<T: TreeTypes, R> {
     forest: Forest<T, R>,
     secrets: Secrets,
-    link: (u64, u64),
+    link: LocalLink,
 }
 
 impl<T: TreeTypes, R: ReadOnlyStore> BranchLoader<T, R> {
-    pub fn new(forest: &Forest<T, R>, secrets: &Secrets, link: (u64, u64)) -> Self {
+    pub fn new(forest: &Forest<T, R>, secrets: &Secrets, link: LocalLink) -> Self {
         Self {
             forest: forest.clone(),
             secrets: secrets.clone(),
@@ -350,11 +350,11 @@ impl<T: TreeTypes, R: ReadOnlyStore> BranchLoader<T, R> {
 pub struct LeafLoader<T: TreeTypes, R> {
     forest: Forest<T, R>,
     secrets: Secrets,
-    link: (u64, u64),
+    link: LocalLink,
 }
 
 impl<T: TreeTypes, R: ReadOnlyStore> LeafLoader<T, R> {
-    pub fn new(forest: &Forest<T, R>, secrets: &Secrets, link: (u64, u64)) -> Self {
+    pub fn new(forest: &Forest<T, R>, secrets: &Secrets, link: LocalLink) -> Self {
         Self {
             forest: forest.clone(),
             secrets: secrets.clone(),

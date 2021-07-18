@@ -1,6 +1,6 @@
 use crate::{
     index::{Branch, CompactSeq, Index},
-    TreeTypes,
+    LocalLink, TreeTypes,
 };
 use parking_lot::Mutex;
 use std::{num::NonZeroUsize, sync::Arc};
@@ -24,7 +24,7 @@ impl<T: TreeTypes> Weighable for Branch<T> {
     }
 }
 
-type CacheOrBypass<T> = Option<Arc<Mutex<WeightCache<(u64, u64), Branch<T>>>>>;
+type CacheOrBypass<T> = Option<Arc<Mutex<WeightCache<LocalLink, Branch<T>>>>>;
 
 #[derive(Debug, Clone)]
 pub struct BranchCache<T: TreeTypes>(CacheOrBypass<T>);
@@ -48,11 +48,11 @@ impl<T: TreeTypes> BranchCache<T> {
         Self(cache)
     }
 
-    pub fn get<'a>(&'a self, link: &'a (u64, u64)) -> Option<Branch<T>> {
+    pub fn get<'a>(&'a self, link: &'a LocalLink) -> Option<Branch<T>> {
         self.0.as_ref().and_then(|x| x.lock().get(link).cloned())
     }
 
-    pub fn put(&self, link: (u64, u64), branch: Branch<T>) {
+    pub fn put(&self, link: LocalLink, branch: Branch<T>) {
         if let Some(Err(e)) = self.0.as_ref().map(|x| x.lock().put(link, branch)) {
             tracing::warn!("Adding {:?} to cache failed: {}", link, e);
         }

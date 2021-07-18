@@ -2,6 +2,8 @@ use parking_lot::Mutex;
 use std::{convert::TryInto, num::NonZeroUsize, sync::Arc, usize};
 use weight_cache::{Weighable, WeightCache};
 
+use crate::{LocalLink, StreamId};
+
 use super::{BlockWriter, ReadOnlyStore};
 
 /// Newtype wrapper for a boxed slice so we can implement Weighable
@@ -16,7 +18,7 @@ impl Weighable for MemBlock {
 
 #[derive(Debug, Clone)]
 struct Cache {
-    cache: Arc<Mutex<WeightCache<(u64, u64), MemBlock>>>,
+    cache: Arc<Mutex<WeightCache<LocalLink, MemBlock>>>,
     /// maximum size of blocks to cache
     /// we want this to remain very small, so we only cache tiny blocks
     max_size: NonZeroUsize,
@@ -59,7 +61,7 @@ impl<I: ReadOnlyStore> MemCache<I> {
     }
 
     /// offer some data just to the cache, without writing it to the underlying store
-    pub fn offer(&self, link: (u64, u64), data: &[u8]) {
+    pub fn offer(&self, link: LocalLink, data: &[u8]) {
         if let Some(cache) = self.cache.as_ref() {
             if data.len() <= cache.max_size.into() {
                 let copy: Box<[u8]> = data.into();
@@ -73,7 +75,7 @@ impl<I: ReadOnlyStore> MemCache<I> {
     }
 
     /// get the value, just from ourselves, as a
-    fn get0(&self, key: (u64, u64)) -> Option<Box<[u8]>> {
+    fn get0(&self, key: LocalLink) -> Option<Box<[u8]>> {
         self.cache
             .as_ref()
             .and_then(|cache| cache.cache.lock().get(&key).map(|x| x.0.clone()))
@@ -81,7 +83,7 @@ impl<I: ReadOnlyStore> MemCache<I> {
 }
 
 impl<I: ReadOnlyStore + Send + Sync + 'static> ReadOnlyStore for MemCache<I> {
-    fn get(&self, stream_id: u128, link: (u64, u64)) -> anyhow::Result<Box<[u8]>> {
+    fn get(&self, stream_id: StreamId, link: LocalLink) -> anyhow::Result<Box<[u8]>> {
         match self.get0(link) {
             Some(data) => Ok(data),
             None => self.inner.get(stream_id, link),
@@ -105,7 +107,7 @@ impl<I> MemWriter<I> {
 }
 
 impl<I: BlockWriter + Send + Sync + 'static> BlockWriter for MemWriter<I> {
-    fn put(&self, stream_id: u128, offset: u64, data: Vec<u8>) -> anyhow::Result<()> {
+    fn put(&self, stream_id: StreamId, offset: u64, data: Vec<u8>) -> anyhow::Result<()> {
         if let Some(cache) = self.cache.as_ref() {
             if data.len() <= cache.max_size.into() {
                 let copy: Box<[u8]> = data.as_slice().into();
@@ -113,7 +115,7 @@ impl<I: BlockWriter + Send + Sync + 'static> BlockWriter for MemWriter<I> {
                 let _ = cache
                     .cache
                     .lock()
-                    .put((offset, copy.len() as u64), MemBlock(copy));
+                    .put(LocalLink::new(offset, copy.len())?, MemBlock(copy));
                 return Ok(link);
             }
         }

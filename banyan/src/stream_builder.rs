@@ -8,6 +8,7 @@ use crate::{
     forest::{Config, Secrets, TreeTypes},
     index::Index,
     tree::Tree,
+    LocalLink,
 };
 
 /// A thing that hands out unique offsets. Parts of StreamBuilderState
@@ -149,7 +150,7 @@ impl<T: TreeTypes, V> StreamBuilder<T, V> {
             .unwrap_or_default()
     }
 
-    pub fn link(&self) -> Option<(u64, u64)> {
+    pub fn link(&self) -> Option<LocalLink> {
         self.root.as_ref().and_then(|r| *r.link())
     }
 
@@ -172,7 +173,7 @@ impl<T: TreeTypes, V> StreamBuilder<T, V> {
     }
 
     /// root of a non-empty tree
-    pub fn root(&self) -> Option<&(u64, u64)> {
+    pub fn root(&self) -> Option<&LocalLink> {
         self.root.as_ref().and_then(|index| index.link().as_ref())
     }
 

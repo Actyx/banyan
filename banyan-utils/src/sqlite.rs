@@ -1,6 +1,9 @@
 //! helper methods to work with ipfs/ipld
 use anyhow::Result;
-use banyan::store::{BlockWriter, ReadOnlyStore};
+use banyan::{
+    store::{BlockWriter, ReadOnlyStore},
+    LocalLink,
+};
 use ipfs_sqlite_block_store::BlockStore;
 use libipld::{codec::References, store::StoreParams, Ipld};
 use parking_lot::Mutex;
@@ -19,7 +22,7 @@ impl<S: StoreParams> ReadOnlyStore for SqliteStore<S>
 where
     Ipld: References<S::Codecs>,
 {
-    fn get(&self, _stream_id: u128, _link: (u64, u64)) -> Result<Box<[u8]>> {
+    fn get(&self, _stream_id: u128, _link: LocalLink) -> Result<Box<[u8]>> {
         todo!()
         // let cid = Cid::from(*link);
         // let block = self.0.lock().get_block(&cid)?;

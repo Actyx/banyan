@@ -10,6 +10,7 @@ mod zstd_dag_cbor_seq;
 pub use branch_cache::BranchCache;
 pub use mem_cache::{MemCache, MemWriter};
 pub use mem_store::MemStore;
+use std::{convert::TryInto, fmt};
 pub(crate) use thread_local_zstd::decompress_and_transform;
 pub use zstd_dag_cbor_seq::ZstdDagCborSeq;
 
@@ -17,16 +18,40 @@ pub trait BanyanValue: DagCbor + Send + 'static {}
 
 impl<T: DagCbor + Send + Sync + 'static> BanyanValue for T {}
 
-pub type LocalLink = (u64, u64);
+pub type StreamId = u128;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, libipld::DagCbor)]
+pub struct LocalLink(u64, u32);
+
+impl LocalLink {
+    pub fn new(offset: u64, len: usize) -> anyhow::Result<Self> {
+        Ok(Self(offset, len.try_into()?))
+    }
+}
+
 pub type GlobalLink = (u128, u64, u64);
+
+impl fmt::Display for LocalLink {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+impl std::str::FromStr for LocalLink {
+    type Err = anyhow::Error;
+
+    fn from_str(_s: &str) -> Result<Self, Self::Err> {
+        anyhow::bail!("not yet implemented")
+    }
+}
 
 pub trait BlockWriter: Send + Sync + 'static {
     /// adds a block to a temporary staging area
     ///
     /// We might have to do this async at some point, but let's keep it sync for now.
-    fn put(&self, stream_id: u128, offset: u64, data: Vec<u8>) -> Result<()>;
+    fn put(&self, stream_id: StreamId, offset: u64, data: Vec<u8>) -> Result<()>;
 }
 
 pub trait ReadOnlyStore: Clone + Send + Sync + 'static {
-    fn get(&self, stream_id: u128, link: (u64, u64)) -> Result<Box<[u8]>>;
+    fn get(&self, stream_id: StreamId, link: LocalLink) -> Result<Box<[u8]>>;
 }

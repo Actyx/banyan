@@ -1,4 +1,4 @@
-use banyan::TreeTypes;
+use banyan::{LocalLink, StreamId, TreeTypes};
 use futures::future::poll_fn;
 use futures::prelude::*;
 use ipfs_sqlite_block_store::BlockStore;
@@ -37,7 +37,7 @@ enum Storage {
     Sqlite(SqliteStore<DefaultParams>),
 }
 impl ReadOnlyStore for Storage {
-    fn get(&self, stream_id: u128, link: (u64, u64)) -> Result<Box<[u8]>> {
+    fn get(&self, stream_id: StreamId, link: LocalLink) -> Result<Box<[u8]>> {
         match self {
             Self::Memory(m) => m.get(stream_id, link),
             Storage::Ipfs(i) => i.get(stream_id, link),
@@ -47,7 +47,7 @@ impl ReadOnlyStore for Storage {
 }
 
 impl BlockWriter for Storage {
-    fn put(&self, stream_id: u128, offset: u64, data: Vec<u8>) -> Result<()> {
+    fn put(&self, stream_id: StreamId, offset: u64, data: Vec<u8>) -> Result<()> {
         match self {
             Self::Memory(m) => m.put(stream_id, offset, data),
             Storage::Ipfs(i) => i.put(stream_id, offset, data),
@@ -122,7 +122,7 @@ enum Command {
         unbalanced: bool,
         #[structopt(long)]
         /// Base on which to build
-        base: Option<(u64, u64)>,
+        base: Option<LocalLink>,
     },
     /// Traverse a tree and dump its output as dot. Can be piped directly:
     /// `banyan-cli graph --root <..> | dot -Tpng output.png`.
@@ -131,31 +131,31 @@ enum Command {
     Graph {
         #[structopt(long)]
         /// The root hash to use
-        root: (u64, u64),
+        root: LocalLink,
     },
     /// Dump a tree
     Dump {
         #[structopt(long)]
         /// The root hash to use
-        root: (u64, u64),
+        root: LocalLink,
     },
     /// Dump a block as json to stdout
     DumpBlock {
         #[structopt(long)]
         /// The root hash to use
-        hash: (u64, u64),
+        hash: LocalLink,
     },
     /// Dumps all values of a tree as json to stdout, newline separated
     DumpValues {
         #[structopt(long)]
         /// The root hash to use
-        root: (u64, u64),
+        root: LocalLink,
     },
     /// Stream a tree, filtered
     Filter {
         #[structopt(long)]
         /// The root hash to use
-        root: (u64, u64),
+        root: LocalLink,
         #[structopt(long)]
         /// Tags to filter
         tag: Vec<String>,
@@ -164,7 +164,7 @@ enum Command {
     Forget {
         #[structopt(long)]
         /// The root hash to use
-        root: (u64, u64),
+        root: LocalLink,
         #[structopt(long)]
         /// The offset before which to forget data
         before: u64,
@@ -173,7 +173,7 @@ enum Command {
     Pack {
         #[structopt(long)]
         /// The root hash to use
-        root: (u64, u64),
+        root: LocalLink,
     },
     /// Receive a stream
     RecvStream {
@@ -185,7 +185,7 @@ enum Command {
     Repair {
         #[structopt(long)]
         /// The root hash to use
-        root: (u64, u64),
+        root: LocalLink,
     },
     /// Send a stream
     SendStream {
@@ -197,7 +197,7 @@ enum Command {
     Stream {
         #[structopt(long)]
         /// The root hash to use
-        root: (u64, u64),
+        root: LocalLink,
     },
 }
 
@@ -219,7 +219,7 @@ impl Tagger {
 
 async fn build_tree(
     forest: &Txn,
-    base: Option<(u64, u64)>,
+    base: Option<LocalLink>,
     batches: u64,
     count: u64,
     unbalanced: bool,
@@ -273,7 +273,7 @@ async fn build_tree(
 
 async fn bench_build(
     forest: &Txn,
-    base: Option<(u64, u64)>,
+    base: Option<LocalLink>,
     batches: u64,
     count: u64,
     unbalanced: bool,
@@ -491,7 +491,7 @@ async fn main() -> Result<()> {
             let links = pubsub_sub(&*topic)?
                 .map_err(anyhow::Error::new)
                 .and_then(|data| future::ready(String::from_utf8(data).map_err(anyhow::Error::new)))
-                .and_then(|data| future::ready(<(u64, u64)>::from_str(&data)));
+                .and_then(|data| future::ready(<LocalLink>::from_str(&data)));
             let forest2 = forest.clone();
             let trees = links.filter_map(move |link| {
                 let forest = forest2.clone();

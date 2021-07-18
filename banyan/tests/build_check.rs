@@ -2,14 +2,14 @@ use banyan::{
     index::{BranchIndex, Index, LeafIndex, VecSeq},
     query::{AllQuery, EmptyQuery, OffsetRangeQuery},
     store::{BranchCache, MemStore},
-    Config, Forest, Secrets, StreamBuilder, Tree,
+    Config, Forest, LocalLink, Secrets, StreamBuilder, Tree,
 };
 use common::{txn, IterExt, Key, KeyRange, KeySeq, TestFilter, TestTree, TT};
 use futures::prelude::*;
 use libipld::{cbor::DagCborCodec, codec::Codec};
 use quickcheck::TestResult;
 use quickcheck_macros::quickcheck;
-use std::iter;
+use std::{iter, str::FromStr};
 use tracing_subscriber::{fmt::format::FmtSpan, EnvFilter};
 
 use crate::common::no_offset_overlap;
@@ -551,10 +551,9 @@ fn leaf_index_wire_format() -> anyhow::Result<()> {
         sealed: true,
         value_bytes: 1234,
         keys: KeySeq(vec![Key(1), Key(2)]),
-        link: Some(
-            <(u64, u64)>::from_str("bafyreihtx752fmf3zafbys5dtr4jxohb53yi3qtzfzf6wd5274jwtn5agu")?
-                .try_into()?,
-        ),
+        link: Some(LocalLink::from_str(
+            "bafyreihtx752fmf3zafbys5dtr4jxohb53yi3qtzfzf6wd5274jwtn5agu",
+        )?),
     }
     .into();
     let serialized = DagCborCodec.encode(&index)?;
@@ -598,10 +597,9 @@ fn branch_index_wire_format() -> anyhow::Result<()> {
         summaries: vec![KeyRange(0, 1), KeyRange(1, 2)]
             .into_iter()
             .collect::<VecSeq<_>>(),
-        link: Some(
-            <(u64, u64)>::from_str("bafyreihtx752fmf3zafbys5dtr4jxohb53yi3qtzfzf6wd5274jwtn5agu")?
-                .try_into()?,
-        ),
+        link: Some(LocalLink::from_str(
+            "bafyreihtx752fmf3zafbys5dtr4jxohb53yi3qtzfzf6wd5274jwtn5agu",
+        )?),
     }
     .into();
     let serialized = DagCborCodec.encode(&index)?;

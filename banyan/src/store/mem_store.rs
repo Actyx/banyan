@@ -1,3 +1,5 @@
+use crate::{LocalLink, StreamId};
+
 use super::{BlockWriter, ReadOnlyStore};
 use anyhow::anyhow;
 use fnv::FnvHashMap;
@@ -9,7 +11,7 @@ use std::sync::Arc;
 pub struct MemStore(Arc<Inner>);
 
 struct Inner {
-    blocks: Mutex<Blocks<(u64, u64)>>,
+    blocks: Mutex<Blocks<LocalLink>>,
     max_size: usize,
 }
 
@@ -30,19 +32,19 @@ impl MemStore {
         }))
     }
 
-    pub fn into_inner(self) -> anyhow::Result<FnvHashMap<(u64, u64), Box<[u8]>>> {
+    pub fn into_inner(self) -> anyhow::Result<FnvHashMap<LocalLink, Box<[u8]>>> {
         let inner = Arc::try_unwrap(self.0).map_err(|_| anyhow!("busy"))?;
         let blocks = inner.blocks.into_inner();
         Ok(blocks.map)
     }
 
-    fn get0(&self, _stream_id: u128, link: (u64, u64)) -> Option<Box<[u8]>> {
+    fn get0(&self, _stream_id: StreamId, link: LocalLink) -> Option<Box<[u8]>> {
         let blocks = self.0.as_ref().blocks.lock();
         blocks.map.get(&link).cloned()
     }
 
-    fn put0(&self, _stream_id: u128, offset: u64, data: Vec<u8>) -> anyhow::Result<()> {
-        let digest = (offset, data.len() as u64);
+    fn put0(&self, _stream_id: StreamId, offset: u64, data: Vec<u8>) -> anyhow::Result<()> {
+        let digest = LocalLink::new(offset, data.len())?;
         let len = data.len();
         let mut blocks = self.0.blocks.lock();
         if blocks.current_size + data.len() > self.0.max_size {
@@ -58,7 +60,7 @@ impl MemStore {
 }
 
 impl ReadOnlyStore for MemStore {
-    fn get(&self, stream_id: u128, link: (u64, u64)) -> anyhow::Result<Box<[u8]>> {
+    fn get(&self, stream_id: StreamId, link: LocalLink) -> anyhow::Result<Box<[u8]>> {
         if let Some(value) = self.get0(stream_id, link) {
             Ok(value)
         } else {
@@ -68,7 +70,7 @@ impl ReadOnlyStore for MemStore {
 }
 
 impl BlockWriter for MemStore {
-    fn put(&self, stream_id: u128, offset: u64, data: Vec<u8>) -> anyhow::Result<()> {
+    fn put(&self, stream_id: StreamId, offset: u64, data: Vec<u8>) -> anyhow::Result<()> {
         self.put0(stream_id, offset, data)
     }
 }

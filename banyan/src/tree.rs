@@ -6,6 +6,7 @@ use crate::{
         TreeTypes,
     },
     store::{BanyanValue, BlockWriter},
+    LocalLink,
 };
 use crate::{query::Query, store::ReadOnlyStore, util::IterExt, StreamBuilder, StreamBuilderState};
 use anyhow::Result;
@@ -30,7 +31,7 @@ impl<T: TreeTypes, V> Tree<T, V> {
         self.0.as_ref().map(|(r, _, _)| r)
     }
 
-    pub fn link(&self) -> Option<(u64, u64)> {
+    pub fn link(&self) -> Option<LocalLink> {
         self.0.as_ref().and_then(|(r, _, _)| *r.link())
     }
 
@@ -55,7 +56,7 @@ impl<T: TreeTypes, V> Tree<T, V> {
     }
 
     /// root of a non-empty tree
-    pub fn root(&self) -> Option<&(u64, u64)> {
+    pub fn root(&self) -> Option<&LocalLink> {
         self.0.as_ref().and_then(|(r, _, _)| r.link().as_ref())
     }
 
@@ -110,7 +111,7 @@ impl<T: TreeTypes, R: ReadOnlyStore> Forest<T, R> {
         &self,
         secrets: Secrets,
         config: Config,
-        link: (u64, u64),
+        link: LocalLink,
     ) -> Result<StreamBuilder<T, V>> {
         let (index, byte_range) = self.create_index_from_link(
             &secrets,
@@ -121,7 +122,7 @@ impl<T: TreeTypes, R: ReadOnlyStore> Forest<T, R> {
         Ok(StreamBuilder::new_from_index(Some(index), state))
     }
 
-    pub fn load_tree<V>(&self, secrets: Secrets, link: (u64, u64)) -> Result<Tree<T, V>> {
+    pub fn load_tree<V>(&self, secrets: Secrets, link: LocalLink) -> Result<Tree<T, V>> {
         // we pass in a predicate that makes the nodes sealed, since we don't care
         let (index, byte_range) = self.create_index_from_link(&secrets, |_, _| true, link)?;
         // store the offset with the snapshot. Snapshots are immutable, so this won't change.
