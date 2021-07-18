@@ -350,7 +350,7 @@ async fn main() -> Result<()> {
     let index_key: chacha20::Key = opts.index_pass.map(create_chacha_key).unwrap_or_default();
     let value_key: chacha20::Key = opts.value_pass.map(create_chacha_key).unwrap_or_default();
     let config = Config::debug_fast();
-    let secrets = Secrets::new(index_key, value_key);
+    let secrets = Secrets::new(index_key, value_key, 0);
     let txn = || {
         Txn::new(
             Forest::new(store.clone(), BranchCache::default()),
@@ -404,7 +404,7 @@ async fn main() -> Result<()> {
         }
         Command::Bench { count } => {
             let config = Config::debug_fast();
-            let secrets = Secrets::new(index_key, value_key);
+            let secrets = Secrets::new(index_key, value_key, 0);
             let branch_cache = BranchCache::default();
             let forest = Txn::new(Forest::new(store.clone(), branch_cache), store);
             let _t0 = std::time::Instant::now();

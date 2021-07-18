@@ -142,6 +142,7 @@ impl<T: TreeTypes, R, W> std::ops::Deref for Transaction<T, R, W> {
 
 #[derive(Debug, Clone)]
 pub struct Secrets {
+    stream_id: u128,
     /// chacha20 key to decrypt index nodes
     index_key: chacha20::Key,
     /// chacha20 key to decrypt value nodes
@@ -149,8 +150,9 @@ pub struct Secrets {
 }
 
 impl Secrets {
-    pub fn new(index_key: chacha20::Key, value_key: chacha20::Key) -> Self {
+    pub fn new(index_key: chacha20::Key, value_key: chacha20::Key, stream_id: u128) -> Self {
         Self {
+            stream_id,
             index_key,
             value_key,
         }
@@ -168,6 +170,7 @@ impl Secrets {
 impl Default for Secrets {
     fn default() -> Self {
         Self {
+            stream_id: 0,
             index_key: [0; 32].into(),
             value_key: [0; 32].into(),
         }
