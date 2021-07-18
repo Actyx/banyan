@@ -8,7 +8,11 @@ use std::{
     time::{Duration, Instant},
 };
 
-use banyan::{Config, Forest, GlobalLink, Secrets, StreamBuilder, StreamId, Transaction, Tree, query::{OffsetRangeQuery, Query}, store::{BlockWriter, BranchCache, MemStore, ReadOnlyStore}};
+use banyan::{
+    query::{OffsetRangeQuery, Query},
+    store::{BlockWriter, BranchCache, MemStore, ReadOnlyStore},
+    Config, Forest, GlobalLink, Secrets, StreamBuilder, StreamId, Transaction, Tree,
+};
 use banyan_utils::{
     tag_index::TagSet,
     tags::{Key, TT},
@@ -36,7 +40,7 @@ impl<S> OpsCountingStore<S> {
 }
 
 impl<S: ReadOnlyStore> ReadOnlyStore for OpsCountingStore<S> {
-    fn get(&self, link: GlobalLink) -> anyhow::Result<Box<[u8]>> {
+    fn get(&self, link: &GlobalLink) -> anyhow::Result<Box<[u8]>> {
         self.reads.fetch_add(1, Ordering::SeqCst);
         self.inner.get(link)
     }

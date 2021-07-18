@@ -75,15 +75,15 @@ impl<I: ReadOnlyStore> MemCache<I> {
     }
 
     /// get the value, just from ourselves, as a
-    fn get0(&self, key: GlobalLink) -> Option<Box<[u8]>> {
+    fn get0(&self, key: &GlobalLink) -> Option<Box<[u8]>> {
         self.cache
             .as_ref()
-            .and_then(|cache| cache.cache.lock().get(&key).map(|x| x.0.clone()))
+            .and_then(|cache| cache.cache.lock().get(key).map(|x| x.0.clone()))
     }
 }
 
 impl<I: ReadOnlyStore + Send + Sync + 'static> ReadOnlyStore for MemCache<I> {
-    fn get(&self, link: GlobalLink) -> anyhow::Result<Box<[u8]>> {
+    fn get(&self, link: &GlobalLink) -> anyhow::Result<Box<[u8]>> {
         match self.get0(link) {
             Some(data) => Ok(data),
             None => self.inner.get(link),
@@ -113,10 +113,7 @@ impl<I: BlockWriter + Send + Sync + 'static> BlockWriter for MemWriter<I> {
                 let copy: Box<[u8]> = data.as_slice().into();
                 self.inner.put(stream_id, offset, data)?;
                 let link = GlobalLink::new(stream_id, LocalLink::new(offset, copy.len())?);
-                let _ = cache
-                    .cache
-                    .lock()
-                    .put(link, MemBlock(copy));
+                let _ = cache.cache.lock().put(link, MemBlock(copy));
                 return Ok(());
             }
         }

@@ -38,9 +38,9 @@ impl MemStore {
         Ok(blocks.map)
     }
 
-    fn get0(&self, link: GlobalLink) -> Option<Box<[u8]>> {
+    fn get0(&self, link: &GlobalLink) -> Option<Box<[u8]>> {
         let blocks = self.0.as_ref().blocks.lock();
-        blocks.map.get(&link).cloned()
+        blocks.map.get(link).cloned()
     }
 
     fn put0(&self, stream_id: StreamId, offset: u64, data: Vec<u8>) -> anyhow::Result<()> {
@@ -60,7 +60,7 @@ impl MemStore {
 }
 
 impl ReadOnlyStore for MemStore {
-    fn get(&self, link: GlobalLink) -> anyhow::Result<Box<[u8]>> {
+    fn get(&self, link: &GlobalLink) -> anyhow::Result<Box<[u8]>> {
         if let Some(value) = self.get0(link) {
             Ok(value)
         } else {

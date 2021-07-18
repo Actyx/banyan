@@ -1,7 +1,10 @@
 use core::fmt::Debug;
 use std::collections::BTreeMap;
 
-use banyan::{{Forest, TreeTypes}, GlobalLink, Tree, store::{ReadOnlyStore, ZstdDagCborSeq}};
+use banyan::{
+    store::{ReadOnlyStore, ZstdDagCborSeq},
+    GlobalLink, Tree, {Forest, TreeTypes},
+};
 use libipld::{cbor::DagCbor, codec::Codec, json::DagJsonCodec};
 
 type Node<'a> = &'a NodeDescriptor;
@@ -133,7 +136,7 @@ where
 /// each item separated by newlines.
 pub fn dump_json(
     store: impl ReadOnlyStore,
-    link: GlobalLink,
+    link: &GlobalLink,
     value_key: &chacha20::Key,
     nonce: &chacha20::XNonce,
     mut writer: impl std::io::Write,

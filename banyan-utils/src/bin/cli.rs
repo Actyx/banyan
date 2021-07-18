@@ -37,7 +37,7 @@ enum Storage {
     Sqlite(SqliteStore<DefaultParams>),
 }
 impl ReadOnlyStore for Storage {
-    fn get(&self, link: GlobalLink) -> Result<Box<[u8]>> {
+    fn get(&self, link: &GlobalLink) -> Result<Box<[u8]>> {
         match self {
             Self::Memory(m) => m.get(link),
             Storage::Ipfs(i) => i.get(link),
@@ -380,7 +380,7 @@ async fn main() -> Result<()> {
         }
         Command::DumpBlock { hash } => {
             let nonce = <&chacha20::XNonce>::try_from(TT::NONCE).unwrap();
-            dump::dump_json(store, hash, &value_key, &nonce, &mut std::io::stdout())?;
+            dump::dump_json(store, &hash, &value_key, &nonce, &mut std::io::stdout())?;
         }
         Command::Stream { root } => {
             let secrets = Secrets::new(index_key, value_key, root.stream_id());
@@ -402,7 +402,15 @@ async fn main() -> Result<()> {
                 "building a tree with {} batches of {} values, unbalanced: {}",
                 batches, count, unbalanced
             );
-            let tree = build_tree(&forest, base.map(|x| x.link()), batches, count, unbalanced, 1000).await?;
+            let tree = build_tree(
+                &forest,
+                base.map(|x| x.link()),
+                batches,
+                count,
+                unbalanced,
+                1000,
+            )
+            .await?;
             forest.dump(&tree.snapshot())?;
         }
         Command::Bench { count } => {

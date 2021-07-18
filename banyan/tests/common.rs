@@ -1,6 +1,11 @@
 #![allow(clippy::upper_case_acronyms, dead_code, clippy::type_complexity)]
 //! helper methods for the tests
-use banyan::{GlobalLink, StreamBuilder, Transaction, Tree, TreeTypes, index::{CompactSeq, Summarizable, VecSeq}, query::{AllQuery, AndQuery, OffsetRangeQuery, Query}, store::{BranchCache, MemStore, ReadOnlyStore}};
+use banyan::{
+    index::{CompactSeq, Summarizable, VecSeq},
+    query::{AllQuery, AndQuery, OffsetRangeQuery, Query},
+    store::{BranchCache, MemStore, ReadOnlyStore},
+    GlobalLink, StreamBuilder, Transaction, Tree, TreeTypes,
+};
 use futures::Future;
 use libipld::{cbor::DagCborCodec, codec::Codec, Cid, DagCbor, Ipld};
 use quickcheck::{Arbitrary, Gen, TestResult};
@@ -276,9 +281,11 @@ pub fn links(
         .map(|x| x.map(|x| x.link().as_ref().cloned()))
         .collect::<anyhow::Result<Vec<_>>>()?;
     let stream_id = tree.secrets().map(|s| *s.stream_id());
-    links.extend(link_opts.into_iter().filter_map(|link| {
-        Some(GlobalLink::new(stream_id?, link?))
-    }));
+    links.extend(
+        link_opts
+            .into_iter()
+            .filter_map(|link| Some(GlobalLink::new(stream_id?, link?))),
+    );
     Ok(())
 }
 
@@ -310,7 +317,7 @@ impl IpldNode {
     }
 }
 
-fn block_range(forest: &Forest, link: GlobalLink) -> anyhow::Result<Range<u64>> {
+fn block_range(forest: &Forest, link: &GlobalLink) -> anyhow::Result<Range<u64>> {
     // TODO
     let blob = forest.store().get(link)?;
     let (offset, _, encrypted) = DagCborCodec.decode::<IpldNode>(&blob)?.into_data()?;
@@ -325,7 +332,7 @@ fn block_range(forest: &Forest, link: GlobalLink) -> anyhow::Result<Range<u64>> 
 fn no_range_overlap(forest: &Forest, links: HashSet<GlobalLink>) -> anyhow::Result<bool> {
     let mut ranges = OffsetSet::empty();
     let mut result = true;
-    for link in links {
+    for link in &links {
         let range = OffsetSet::from(block_range(forest, link)?);
         // println!("{} {:?}", hash, range);
         if !ranges.is_disjoint(&range) {

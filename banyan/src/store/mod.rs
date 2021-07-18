@@ -68,7 +68,6 @@ impl GlobalLink {
     }
 }
 
-
 impl fmt::Display for GlobalLink {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:?}", self)
@@ -91,5 +90,5 @@ pub trait BlockWriter: Send + Sync + 'static {
 }
 
 pub trait ReadOnlyStore: Clone + Send + Sync + 'static {
-    fn get(&self, link: GlobalLink) -> Result<Box<[u8]>>;
+    fn get(&self, link: &GlobalLink) -> Result<Box<[u8]>>;
 }
