@@ -45,7 +45,7 @@ impl DecompressionState {
             &mut tmp
         };
 
-        let span = tracing::debug_span!("decompress_and_transform");
+        let span = tracing::trace_span!("decompress_and_transform");
         let _entered = span.enter();
         let len = self.decompressor.decompress_to_buffer(compressed, buffer)?;
         let result = f(&buffer[0..len]);

@@ -88,7 +88,7 @@ where
             sealed,
             keys,
         };
-        tracing::debug!(
+        tracing::trace!(
             "leaf created count={} bytes={} sealed={}",
             index.keys.count(),
             index.value_bytes,
@@ -142,7 +142,7 @@ where
             children.push(child);
         }
         let index = self.new_branch(&children, stream, mode)?;
-        tracing::debug!(
+        tracing::trace!(
             "branch created count={} value_bytes={} key_bytes={} sealed={}",
             index.summaries.count(),
             index.value_bytes,
@@ -290,7 +290,7 @@ where
         from: &mut iter::Peekable<impl Iterator<Item = (T::Key, V)> + Send>,
         stream: &mut StreamBuilderState,
     ) -> Result<Index<T>> {
-        tracing::debug!(
+        tracing::trace!(
             "extend {} {} {} {}",
             index.level(),
             index.key_bytes(),
@@ -303,14 +303,14 @@ where
         let secrets = stream.secrets().clone();
         Ok(match self.node_info(&secrets, index) {
             NodeInfo::Leaf(index, leaf) => {
-                tracing::debug!("extending existing leaf");
+                tracing::trace!("extending existing leaf");
                 let leaf = leaf.load()?;
                 let keys = index.keys.clone();
                 self.extend_leaf(leaf.as_ref().compressed(), Some(keys), from, stream)?
                     .into()
             }
             NodeInfo::Branch(index, branch) => {
-                tracing::debug!("extending existing branch");
+                tracing::trace!("extending existing branch");
                 let branch = branch.load_cached()?;
                 let mut children = branch.children.to_vec();
                 if let Some(last_child) = children.last_mut() {

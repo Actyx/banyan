@@ -74,7 +74,7 @@ impl ZstdDagCborSeq {
         }
         // call finish to write the zstd frame
         let data = encoder.finish()?;
-        tracing::debug!(
+        tracing::trace!(
             "ZstdArray::from_iter elapsed={} compressed={} uncompressed={}",
             t0.elapsed().as_secs_f64(),
             data.len(),
@@ -163,7 +163,7 @@ impl ZstdDagCborSeq {
         // call finish to write the zstd frame
         let data = encoder.finish()?;
         // log elapsed time and compression rate
-        tracing::debug!(
+        tracing::trace!(
             "ZstdArray::fill elapsed={} compressed={} uncompressed={}",
             t0.elapsed().as_secs_f64(),
             data.len(),

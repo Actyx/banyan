@@ -12,7 +12,6 @@ use anyhow::Result;
 use core::fmt;
 use futures::prelude::*;
 use std::{collections::BTreeMap, iter, marker::PhantomData, usize};
-use tracing::*;
 
 #[derive(Clone)]
 pub struct Tree<T: TreeTypes, V>(Option<(Index<T>, Secrets, u64)>, PhantomData<V>);
@@ -303,7 +302,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
         if !msgs.is_empty() {
             let invariants = msgs.join(",");
             for msg in msgs {
-                error!("Invariant failed: {}", msg);
+                tracing::error!("Invariant failed: {}", msg);
             }
             panic!("assert_invariants failed {}", invariants);
         }

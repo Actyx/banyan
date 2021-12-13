@@ -80,7 +80,7 @@ where
     ) -> Result<Self::Item> {
         // materialize the actual (offset, key, value) triples for the matching bits
         let data = if matching.any() {
-            tracing::debug!("loading leaf {:?}", range);
+            tracing::trace!("loading leaf {:?}", range);
             let leaf = leaf.load()?;
             let offsets = matching
                 .iter()
@@ -479,7 +479,7 @@ where
         } else {
             None
         });
-        tracing::debug!("load_branch {}", t0.elapsed().as_secs_f64());
+        tracing::trace!("load_branch {}", t0.elapsed().as_secs_f64());
         result
     }
 
