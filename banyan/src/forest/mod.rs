@@ -116,6 +116,10 @@ impl<T: TreeTypes, R, W> Transaction<T, R, W> {
     pub fn writer(&self) -> &W {
         &self.writer
     }
+
+    pub fn writer_mut(&mut self) -> &mut W {
+        &mut self.writer
+    }
 }
 
 impl<T: TreeTypes, R, W> Transaction<T, R, W>
