@@ -87,8 +87,8 @@ where
                 .enumerate()
                 .filter(|(_, m)| **m)
                 .map(|(i, _)| range.start + i as u64);
-            let keys = index.select_keys(&matching);
-            let elems: Vec<V> = leaf.as_ref().select(&matching)?;
+            let keys = index.select_keys(matching);
+            let elems: Vec<V> = leaf.as_ref().select(matching)?;
             offsets
                 .zip(keys)
                 .zip(elems)
@@ -442,7 +442,7 @@ where
         #[cfg(feature = "metrics")]
         let _timer = prom::BRANCH_LOAD_HIST.start_timer();
         Ok({
-            let bytes = self.get_block(&link)?;
+            let bytes = self.get_block(link)?;
             let (children, byte_range) =
                 deserialize_compressed(secrets.index_key(), nonce::<T>(), &bytes)?;
             Branch::<T>::new(children, byte_range)
@@ -472,7 +472,7 @@ where
     ) -> Result<Option<Branch<T>>> {
         let t0 = Instant::now();
         let result = Ok(if let Some(link) = &index.link {
-            let bytes = self.get_block(&link)?;
+            let bytes = self.get_block(link)?;
             let (children, byte_range) =
                 deserialize_compressed(secrets.index_key(), nonce::<T>(), &bytes)?;
             Some(Branch::<T>::new(children, byte_range))

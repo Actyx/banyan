@@ -96,8 +96,8 @@ pub fn pubsub_sub(topic: &str) -> Result<impl Stream<Item = reqwest::Result<Vec<
 
 pub async fn pubsub_pub(topic: &str, data: &[u8]) -> Result<()> {
     use percent_encoding::{percent_encode, NON_ALPHANUMERIC};
-    let topic = percent_encode(&topic.as_bytes(), NON_ALPHANUMERIC).to_string();
-    let data = percent_encode(&data, NON_ALPHANUMERIC).to_string();
+    let topic = percent_encode(topic.as_bytes(), NON_ALPHANUMERIC).to_string();
+    let data = percent_encode(data, NON_ALPHANUMERIC).to_string();
     let url = reqwest::Url::parse(&format!(
         "http://localhost:5001/api/v0/pubsub/pub?arg={}&arg={}",
         topic, data

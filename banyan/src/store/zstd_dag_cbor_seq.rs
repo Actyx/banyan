@@ -465,7 +465,7 @@ mod tests {
         let mut iter = data.iter().cloned().enumerate().peekable();
         let mut keys = Vec::new();
         let (za, _) = ZstdDagCborSeq::fill(
-            &initial.compressed(),
+            initial.compressed(),
             &mut iter,
             &mut keys,
             0,

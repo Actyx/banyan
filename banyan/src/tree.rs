@@ -228,7 +228,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
             let mut cur = next_id;
             for x in branch.children.iter() {
                 let (mut e, mut n) =
-                    self.dump_graph0(secrets, Some(next_id), cur + 1, &x, f.clone())?;
+                    self.dump_graph0(secrets, Some(next_id), cur + 1, x, f.clone())?;
                 cur += n.len();
                 edges.append(&mut e);
                 nodes.append(&mut n);
@@ -291,7 +291,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
 
     pub fn is_packed<V>(&self, tree: &Tree<T, V>) -> Result<bool> {
         if let Some((root, secrets, _)) = &tree.0 {
-            self.is_packed0(secrets, &root)
+            self.is_packed0(secrets, root)
         } else {
             Ok(true)
         }

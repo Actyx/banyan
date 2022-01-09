@@ -60,7 +60,7 @@ fn test_ops_count(
 ) -> (Vec<anyhow::Result<(u64, Key, u64)>>, Duration, u64) {
     let r0 = forest.store().reads();
     let t0 = Instant::now();
-    let xs: Vec<anyhow::Result<(u64, Key, u64)>> = forest.iter_filtered(&tree, query).collect();
+    let xs: Vec<anyhow::Result<(u64, Key, u64)>> = forest.iter_filtered(tree, query).collect();
     let dt = t0.elapsed();
     let dr = forest.store().reads() - r0;
     println!("{} {} {}", name, dr, dt.as_micros());

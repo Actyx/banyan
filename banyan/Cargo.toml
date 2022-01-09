@@ -1,6 +1,6 @@
 [package]
 name = "banyan"
-version = "0.16.0"
+version = "0.17.0"
 authors = ["Rüdiger Klaehn <rklaehn@protonmail.com>", "Actyx AG"]
 edition = "2018"
 license = "MIT OR Apache-2.0"
@@ -14,35 +14,35 @@ metrics = ["prometheus", "lazy_static"]
 default = ["metrics"]
 
 [dependencies]
-anyhow = "1.0.40"
-chacha20 = "0.7.1"
-derive_more = "0.99.13"
+anyhow = "1.0.52"
+chacha20 = "0.8.1"
+derive_more = "0.99.17"
 fnv = "1.0.7"
-futures = { version = "0.3.14", features = ["thread-pool"] }
+futures = { version = "0.3.19", features = ["thread-pool"] }
 lazy_static = { version = "1.4.0", optional = true }
 libipld = { version = "0.12.0", features = ["unleashed"] }
 maplit = "1.0.2"
-parking_lot = "0.11.1"
-prometheus = { version = "0.12.0", optional = true }
-smallvec = "1.6.1"
-tracing = "0.1.25"
+parking_lot = "0.11.2"
+prometheus = { version = "0.13.0", optional = true }
+smallvec = "1.7.0"
+tracing = "0.1.29"
 weight-cache = "0.2.3"
 # the only experimental feature we are using is ZSTD_decompressBound,
 # which is not actually experimental according to the zstd C docs.
-zstd = { version = "0.9.0", features = ["experimental"] }
+zstd = { version = "0.9.2", features = ["experimental"] }
 
 [dev-dependencies]
-clap = "2.33.3"
-env_logger = "0.8.3"
-generic-array = "0.14.4"
+clap = "3.0.5"
+env_logger = "0.9.0"
+generic-array = "0.14.5"
 hex = "0.4.3"
 multihash = "0.14.0"
 quickcheck = "1.0.3"
 quickcheck_async = "0.1.1"
 quickcheck_macros = "1.0.0"
-rand_chacha = "0.3.0"
-sha2 = "0.9.3"
-tokio = { version = "1.5.0", features = ["full"] }
-tracing-subscriber = "0.2.19"
-rand = "0.8.3"
+rand_chacha = "0.3.1"
+sha2 = "0.10.1"
+tokio = { version = "1.15.0", features = ["full"] }
+tracing-subscriber = { version = "0.3.5", features = ["env-filter"] }
+rand = "0.8.4"
 range-collections = "0.1.1"

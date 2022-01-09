@@ -110,7 +110,7 @@ where
     V: Clone + Send + Sync + Debug + DagCbor + 'static,
     R: ReadOnlyStore<TT::Link> + Clone + Send + Sync + 'static,
 {
-    let (edges, nodes) = forest.dump_graph(&tree, |(id, node)| match node {
+    let (edges, nodes) = forest.dump_graph(tree, |(id, node)| match node {
         banyan::index::NodeInfo::Branch(idx, _) | banyan::index::NodeInfo::PurgedBranch(idx) => {
             NodeDescriptor::Branch {
                 level: idx.level as usize,

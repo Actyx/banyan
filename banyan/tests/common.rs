@@ -290,7 +290,7 @@ pub fn links(
     links: &mut HashSet<Sha256Digest>,
 ) -> anyhow::Result<()> {
     let link_opts = forest
-        .iter_index(&tree, AllQuery)
+        .iter_index(tree, AllQuery)
         .map(|x| x.map(|x| x.link().as_ref().cloned()))
         .collect::<anyhow::Result<Vec<_>>>()?;
     links.extend(link_opts.into_iter().flatten());

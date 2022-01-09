@@ -196,11 +196,10 @@ where
         let summaries = children
             .iter()
             .map(|child| child.summarize())
-            .collect::<Vec<_>>();
+            .collect::<T::SummarySeq>();
         let value_bytes = children.iter().map(|x| x.value_bytes()).sum();
-        let sealed = stream.config().branch_sealed(&children, level);
-        let summaries: T::SummarySeq = summaries.into_iter().collect();
-        let (link, encoded_children_len) = self.persist_branch(&children, stream)?;
+        let sealed = stream.config().branch_sealed(children, level);
+        let (link, encoded_children_len) = self.persist_branch(children, stream)?;
         let key_bytes = children.iter().map(|x| x.key_bytes()).sum::<u64>() + encoded_children_len;
         Ok(BranchIndex {
             level,
@@ -358,7 +357,7 @@ where
         let _timer = prom::BRANCH_STORE_HIST.start_timer();
         let level = stream.config().zstd_level;
         let key = *stream.index_key();
-        let cbor = serialize_compressed(&key, nonce::<T>(), &mut stream.offset, &items, level)?;
+        let cbor = serialize_compressed(&key, nonce::<T>(), &mut stream.offset, items, level)?;
         let len = cbor.len() as u64;
         Ok((self.put_block(cbor)?, len))
     }

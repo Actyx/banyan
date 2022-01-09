@@ -378,7 +378,7 @@ async fn main() -> Result<()> {
         }
         Command::DumpBlock { hash } => {
             let nonce = <&chacha20::XNonce>::try_from(TT::NONCE).unwrap();
-            dump::dump_json(store, hash, &value_key, &nonce, &mut std::io::stdout())?;
+            dump::dump_json(store, hash, &value_key, nonce, &mut std::io::stdout())?;
         }
         Command::Stream { root } => {
             let tree = forest.load_tree::<String>(secrets, root)?;
@@ -424,8 +424,8 @@ async fn main() -> Result<()> {
                 TagSet::single(Tag::from("fizz")),
             )];
             let query = DnfQuery(tags).boxed();
-            let values: Vec<_> = forest.iter_filtered(&tree, query).collect::<Vec<_>>();
-            println!("{}", values.len());
+            let values = forest.iter_filtered(&tree, query).count();
+            println!("{}", values);
             let t1 = std::time::Instant::now();
             let tfilter_common = t1 - t0;
             let t0 = std::time::Instant::now();
@@ -435,8 +435,8 @@ async fn main() -> Result<()> {
                 TagSet::single(Tag::from("fizzbuzz")),
             )];
             let query = DnfQuery(tags).boxed();
-            let values: Vec<_> = forest.iter_filtered(&tree, query).collect::<Vec<_>>();
-            println!("{}", values.len());
+            let values = forest.iter_filtered(&tree, query).count();
+            println!("{}", values);
             let t1 = std::time::Instant::now();
             let tfilter_rare = t1 - t0;
             println!("create {}", (tcreate.as_micros() as f64) / 1000000.0);
