@@ -29,7 +29,7 @@ pub trait BlockWriter<L>: Send + Sync + 'static {
     /// adds a block to a temporary staging area
     ///
     /// We might have to do this async at some point, but let's keep it sync for now.
-    fn put(&self, data: Vec<u8>) -> Result<L>;
+    fn put(&mut self, data: Vec<u8>) -> Result<L>;
 }
 
 pub trait ReadOnlyStore<L>: Clone + Send + Sync + 'static {
@@ -140,7 +140,7 @@ impl<L: Eq + Hash + Copy + Send + Sync + 'static> ReadOnlyStore<L> for MemStore<
 }
 
 impl<L: Eq + Hash + Send + Sync + Copy + 'static> BlockWriter<L> for MemStore<L> {
-    fn put(&self, data: Vec<u8>) -> anyhow::Result<L> {
+    fn put(&mut self, data: Vec<u8>) -> anyhow::Result<L> {
         self.put0(data)
     }
 }

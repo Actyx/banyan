@@ -224,7 +224,7 @@ fn build_get(t: TestTree) -> anyhow::Result<bool> {
 
 fn do_build_pack(xss: Vec<Vec<(Key, u64)>>) -> anyhow::Result<bool> {
     let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
-    let forest = txn(store, 1000);
+    let mut forest = txn(store, 1000);
     let mut builder = StreamBuilder::<TT, u64>::debug();
 
     // flattened xss for reference
@@ -276,7 +276,7 @@ fn build_pack_2() {
 }
 
 fn do_retain(t: TestTree) -> anyhow::Result<bool> {
-    let (mut builder, txn, xs) = t.builder()?;
+    let (mut builder, mut txn, xs) = t.builder()?;
     let tree0 = builder.snapshot();
     txn.retain(&mut builder, &OffsetRangeQuery::from(xs.len() as u64..))?;
     let tree1 = builder.snapshot();
@@ -338,7 +338,7 @@ fn filter_test_simple_2() -> anyhow::Result<()> {
 #[test]
 fn transaction_1() -> anyhow::Result<()> {
     let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
-    let forest = txn(store, 1000);
+    let mut forest = txn(store, 1000);
     let mut builder = StreamBuilder::<TT, u64>::debug();
     forest.extend(&mut builder, vec![(Key(1), 1)])?;
     // transaction that is dropped without committing
@@ -360,7 +360,7 @@ fn transaction_1() -> anyhow::Result<()> {
 #[tokio::test]
 async fn stream_test_simple() -> anyhow::Result<()> {
     let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
-    let forest = txn(store, 1000);
+    let mut forest = txn(store, 1000);
     let mut trees = Vec::new();
     for n in 1..=10u64 {
         let mut builder = StreamBuilder::<TT, u64>::debug();
@@ -463,7 +463,7 @@ async fn do_stream_trees_chunked_reverse_should_honour_an_inclusive_upper_bound(
 #[tokio::test]
 async fn stream_trees_chunked_reverse_should_complete() {
     let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
-    let forest = txn(store, 1000);
+    let mut forest = txn(store, 1000);
     let secrets = Secrets::default();
     let config = Config::debug();
     let mut builder = StreamBuilder::<TT, u64>::new(config, secrets);
@@ -484,7 +484,7 @@ async fn stream_trees_chunked_reverse_should_complete() {
 #[tokio::test]
 async fn stream_trees_chunked_should_complete() {
     let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
-    let forest = txn(store, 1000);
+    let mut forest = txn(store, 1000);
     let secrets = Secrets::default();
     let config = Config::debug();
     let mut builder = StreamBuilder::<TT, u64>::new(config, secrets);
@@ -521,7 +521,7 @@ fn deep_tree_traversal_no_stack_overflow() -> anyhow::Result<()> {
         .stack_size(65536)
         .spawn(|| {
             let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
-            let forest = txn(store, 1000);
+            let mut forest = txn(store, 1000);
             let mut builder = StreamBuilder::<TT, u64>::debug();
             let elems = (0u64..100).map(|i| (i, Key(i), i)).collect::<Vec<_>>();
             for (_offset, k, v) in &elems {
@@ -666,7 +666,7 @@ fn create_interesting_tree(n: usize) -> anyhow::Result<TreeFixture> {
     };
     let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
     let forest = Forest::new(store.clone(), BranchCache::new(1 << 20));
-    let txn = txn(store, 1 << 20);
+    let mut txn = txn(store, 1 << 20);
     let secrets = Secrets::default();
     let events: Vec<_> = (0..n)
         .into_iter()
@@ -810,7 +810,7 @@ fn retain2() -> anyhow::Result<()> {
 fn build1() -> anyhow::Result<()> {
     let xs = (0..10).map(|i| (Key(i), i)).collect::<Vec<_>>();
     let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
-    let forest = txn(store, 1000);
+    let mut forest = txn(store, 1000);
     let mut tree = StreamBuilder::debug();
     forest.extend(&mut tree, xs)?;
     forest.dump(&tree.snapshot())?;

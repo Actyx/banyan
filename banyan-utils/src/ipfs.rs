@@ -150,7 +150,7 @@ impl ReadOnlyStore<Sha256Digest> for IpfsStore {
 }
 
 impl BlockWriter<Sha256Digest> for IpfsStore {
-    fn put(&self, data: Vec<u8>) -> Result<Sha256Digest> {
+    fn put(&mut self, data: Vec<u8>) -> Result<Sha256Digest> {
         let cid = std::thread::spawn(move || crate::ipfs::block_put(&data, 0x71, false))
             .join()
             .map_err(|_| anyhow!("join error!"))??;

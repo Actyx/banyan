@@ -45,7 +45,7 @@ impl<L, S: ReadOnlyStore<L>> ReadOnlyStore<L> for OpsCountingStore<S> {
 }
 
 impl<L, S: BlockWriter<L> + Send + Sync> BlockWriter<L> for OpsCountingStore<S> {
-    fn put(&self, data: Vec<u8>) -> anyhow::Result<L> {
+    fn put(&mut self, data: Vec<u8>) -> anyhow::Result<L> {
         self.writes.fetch_add(1, Ordering::SeqCst);
         self.inner.put(data)
     }
@@ -88,7 +88,7 @@ fn ops_count_1() -> anyhow::Result<()> {
     let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
     let store = OpsCountingStore::new(store);
     let branch_cache = BranchCache::<TT>::new(0);
-    let txn = Transaction::new(Forest::new(store.clone(), branch_cache), store.clone());
+    let mut txn = Transaction::new(Forest::new(store.clone(), branch_cache), store.clone());
     let mut builder = StreamBuilder::new(config, Secrets::default());
     txn.extend(&mut builder, xs)?;
     let tree = builder.snapshot();

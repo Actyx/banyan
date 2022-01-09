@@ -47,7 +47,7 @@ impl ReadOnlyStore<Sha256Digest> for Storage {
 }
 
 impl BlockWriter<Sha256Digest> for Storage {
-    fn put(&self, data: Vec<u8>) -> Result<Sha256Digest> {
+    fn put(&mut self, data: Vec<u8>) -> Result<Sha256Digest> {
         match self {
             Self::Memory(m) => m.put(data),
             Storage::Ipfs(i) => i.put(data),
@@ -218,7 +218,7 @@ impl Tagger {
 }
 
 async fn build_tree(
-    forest: &Txn,
+    forest: &mut Txn,
     base: Option<Sha256Digest>,
     batches: u64,
     count: u64,
@@ -272,7 +272,7 @@ async fn build_tree(
 }
 
 async fn bench_build(
-    forest: &Txn,
+    forest: &mut Txn,
     base: Option<Sha256Digest>,
     batches: u64,
     count: u64,
@@ -357,7 +357,7 @@ async fn main() -> Result<()> {
             store.clone(),
         )
     };
-    let forest = txn();
+    let mut forest = txn();
     match opts.cmd {
         Command::Graph { root } => {
             let tree = forest.load_tree::<String>(secrets, root)?;
@@ -399,20 +399,28 @@ async fn main() -> Result<()> {
                 "building a tree with {} batches of {} values, unbalanced: {}",
                 batches, count, unbalanced
             );
-            let tree = build_tree(&forest, base, batches, count, unbalanced, 1000).await?;
+            let tree = build_tree(&mut forest, base, batches, count, unbalanced, 1000).await?;
             forest.dump(&tree.snapshot())?;
         }
         Command::Bench { count } => {
             let config = Config::debug_fast();
             let secrets = Secrets::new(index_key, value_key);
             let branch_cache = BranchCache::default();
-            let forest = Txn::new(Forest::new(store.clone(), branch_cache), store);
+            let mut forest = Txn::new(Forest::new(store.clone(), branch_cache), store);
             let _t0 = std::time::Instant::now();
             let base = None;
             let batches = 1;
             let unbalanced = false;
-            let (tree, tcreate) =
-                bench_build(&forest, base, batches, count, unbalanced, secrets, config).await?;
+            let (tree, tcreate) = bench_build(
+                &mut forest,
+                base,
+                batches,
+                count,
+                unbalanced,
+                secrets,
+                config,
+            )
+            .await?;
             let t0 = std::time::Instant::now();
             let _values: Vec<_> = forest.collect(&tree)?;
             let t1 = std::time::Instant::now();

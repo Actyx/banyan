@@ -509,7 +509,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
 
 impl<T: TreeTypes, R: ReadOnlyStore<T::Link>, W: BlockWriter<T::Link>> Transaction<T, R, W> {
     pub(crate) fn tree_from_roots<V>(
-        &self,
+        &mut self,
         mut roots: Vec<Index<T>>,
         stream: &mut StreamBuilder<T, V>,
     ) -> Result<()> {
@@ -529,7 +529,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>, W: BlockWriter<T::Link>> Transacti
     /// Likewise, sealed subtrees or leafs will be reused if possible.
     ///
     /// ![packing illustration](https://ipfs.io/ipfs/QmaEDTjHSdCKyGQ3cFMCf73kE67NvffLA5agquLW5qSEVn/packing.jpg)
-    pub fn pack<V: BanyanValue>(&self, tree: &mut StreamBuilder<T, V>) -> Result<()> {
+    pub fn pack<V: BanyanValue>(&mut self, tree: &mut StreamBuilder<T, V>) -> Result<()> {
         let initial = tree.snapshot();
         let roots = self.roots(tree)?;
         self.tree_from_roots(roots, tree)?;
@@ -555,7 +555,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>, W: BlockWriter<T::Link>> Transacti
     /// extend the node with the given iterator of key/value pairs
     ///
     /// ![extend illustration](https://ipfs.io/ipfs/QmaEDTjHSdCKyGQ3cFMCf73kE67NvffLA5agquLW5qSEVn/extend.jpg)
-    pub fn extend<I, V>(&self, tree: &mut StreamBuilder<T, V>, from: I) -> Result<()>
+    pub fn extend<I, V>(&mut self, tree: &mut StreamBuilder<T, V>, from: I) -> Result<()>
     where
         I: IntoIterator<Item = (T::Key, V)>,
         I::IntoIter: Send,
@@ -586,7 +586,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>, W: BlockWriter<T::Link>> Transacti
     /// To pack a tree, use the pack method.
     ///
     /// ![extend_unpacked illustration](https://ipfs.io/ipfs/QmaEDTjHSdCKyGQ3cFMCf73kE67NvffLA5agquLW5qSEVn/extend_unpacked.jpg)
-    pub fn extend_unpacked<I, V>(&self, tree: &mut StreamBuilder<T, V>, from: I) -> Result<()>
+    pub fn extend_unpacked<I, V>(&mut self, tree: &mut StreamBuilder<T, V>, from: I) -> Result<()>
     where
         I: IntoIterator<Item = (T::Key, V)>,
         I::IntoIter: Send,
@@ -609,7 +609,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>, W: BlockWriter<T::Link>> Transacti
     /// note that offsets will not be affected by this. Also, unsealed nodes will not be forgotten
     /// even if they do not match the query.
     pub fn retain<'a, Q: Query<T> + Send + Sync, V>(
-        &'a self,
+        &'a mut self,
         tree: &mut StreamBuilder<T, V>,
         query: &'a Q,
     ) -> Result<()> {
@@ -629,7 +629,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>, W: BlockWriter<T::Link>> Transacti
     /// Note that this is an emergency measure to recover data if the tree is not completely
     /// available. It might result in a degenerate tree that can no longer be safely added to,
     /// especially if there are repaired blocks in the non-packed part.
-    pub fn repair<V>(&self, tree: &mut StreamBuilder<T, V>) -> Result<Vec<String>> {
+    pub fn repair<V>(&mut self, tree: &mut StreamBuilder<T, V>) -> Result<Vec<String>> {
         let mut report = Vec::new();
         let index = tree.index().cloned();
         if let Some(index) = index {

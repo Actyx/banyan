@@ -88,7 +88,7 @@ checksum = "cdb031dd78e28731d87d56cc8ffef4a8f36ca26c38fe2de700543e627f8a464a"
 
 [[package]]
 name = "banyan"
-version = "0.17.0"
+version = "0.17.1"
 dependencies = [
  "anyhow",
  "chacha20",
@@ -122,7 +122,7 @@ dependencies = [
 
 [[package]]
 name = "banyan-utils"
-version = "0.10.0"
+version = "0.10.1"
 dependencies = [
  "anyhow",
  "banyan",

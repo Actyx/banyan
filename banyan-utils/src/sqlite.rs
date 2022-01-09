@@ -36,7 +36,7 @@ impl<S: StoreParams> BlockWriter<Sha256Digest> for SqliteStore<S>
 where
     Ipld: References<S::Codecs>,
 {
-    fn put(&self, data: Vec<u8>) -> Result<Sha256Digest> {
+    fn put(&mut self, data: Vec<u8>) -> Result<Sha256Digest> {
         let digest = Sha256Digest::new(&data);
         let cid = digest.into();
         let block = Block::new_unchecked(cid, data);

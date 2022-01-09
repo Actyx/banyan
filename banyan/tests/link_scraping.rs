@@ -72,7 +72,7 @@ where
     I::IntoIter: Send,
 {
     let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
-    let forest = txn(store);
+    let mut forest = txn(store);
     let mut tree = StreamBuilder::<TT, Payload>::debug();
     forest.extend(&mut tree, xs)?;
     forest.assert_invariants(&tree)?;

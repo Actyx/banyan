@@ -34,7 +34,7 @@ where
 
     /// create a leaf from scratch from an interator
     fn leaf_from_iter<V: DagCbor>(
-        &self,
+        &mut self,
         from: &mut iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
         stream: &mut StreamBuilderState,
     ) -> Result<LeafIndex<T>> {
@@ -42,7 +42,7 @@ where
         self.extend_leaf(&[], None, from, stream)
     }
 
-    fn put_block(&self, data: Vec<u8>) -> anyhow::Result<T::Link> {
+    fn put_block(&mut self, data: Vec<u8>) -> anyhow::Result<T::Link> {
         #[cfg(feature = "metrics")]
         let _timer = prom::BLOCK_PUT_HIST.start_timer();
         #[cfg(feature = "metrics")]
@@ -54,7 +54,7 @@ where
     ///
     /// The result is the index of the leaf. The iterator will contain the elements that did not fit.
     fn extend_leaf<V: DagCbor>(
-        &self,
+        &mut self,
         compressed: &[u8],
         keys: Option<T::KeySeq>,
         from: &mut iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
@@ -100,7 +100,7 @@ where
     /// given some children and some additional elements, creates a node with the given
     /// children and new children from `from` until it is full
     pub(crate) fn extend_branch<V: DagCbor>(
-        &self,
+        &mut self,
         mut children: Vec<Index<T>>,
         level: u32,
         from: &mut iter::Peekable<impl Iterator<Item = (T::Key, V)> + Send>,
@@ -164,7 +164,7 @@ where
     /// the iterator is consumed or the node is "filled". At the end of this call, the
     /// iterator will contain the remaining elements that did not "fit".
     fn fill_node<V: DagCbor>(
-        &self,
+        &mut self,
         level: u32,
         from: &mut iter::Peekable<impl Iterator<Item = (T::Key, V)> + Send>,
         stream: &mut StreamBuilderState,
@@ -182,7 +182,7 @@ where
     ///
     /// The level will be the max level of the children + 1. We do not want to support branches that are artificially high.
     fn new_branch(
-        &self,
+        &mut self,
         children: &[Index<T>],
         stream: &mut StreamBuilderState,
         mode: CreateMode,
@@ -216,7 +216,7 @@ where
     ///
     /// The result will have the max level `level`. `from` will contain all elements that did not fit.
     pub(crate) fn extend_above<V: DagCbor>(
-        &self,
+        &mut self,
         node: Option<&Index<T>>,
         level: u32,
         from: &mut iter::Peekable<impl Iterator<Item = (T::Key, V)> + Send>,
@@ -248,7 +248,7 @@ where
     }
 
     pub(crate) fn extend_unpacked0<I, V>(
-        &self,
+        &mut self,
         index: Option<&Index<T>>,
         from: I,
         stream: &mut StreamBuilderState,
@@ -284,7 +284,7 @@ where
     ///
     /// The result will have the same level as the input. `from` will contain all elements that did not fit.
     fn extend0<V: DagCbor>(
-        &self,
+        &mut self,
         index: &Index<T>,
         from: &mut iter::Peekable<impl Iterator<Item = (T::Key, V)> + Send>,
         stream: &mut StreamBuilderState,
@@ -328,7 +328,7 @@ where
 
     /// Performs a single step of simplification on a sequence of sealed roots of descending level
     pub(crate) fn simplify_roots(
-        &self,
+        &mut self,
         roots: &mut Vec<Index<T>>,
         from: usize,
         stream: &mut StreamBuilderState,
@@ -349,7 +349,7 @@ where
     }
 
     fn persist_branch(
-        &self,
+        &mut self,
         items: &[Index<T>],
         stream: &mut StreamBuilderState,
     ) -> Result<(T::Link, u64)> {
@@ -363,7 +363,7 @@ where
     }
 
     pub(crate) fn retain0<Q: Query<T> + Send + Sync>(
-        &self,
+        &mut self,
         offset: u64,
         query: &Q,
         index: &Index<T>,
@@ -430,7 +430,7 @@ where
     }
 
     pub(crate) fn repair0(
-        &self,
+        &mut self,
         index: &Index<T>,
         report: &mut Vec<String>,
         level: &mut i32,

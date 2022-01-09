@@ -224,7 +224,7 @@ impl PackedTestTree {
     /// Convert this into an actual tree
     pub fn builder(self) -> anyhow::Result<(StreamBuilder<TT, u64>, Txn, Vec<(Key, u64)>)> {
         let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
-        let txn = txn(store, 1 << 20);
+        let mut txn = txn(store, 1 << 20);
         let mut builder = StreamBuilder::<TT, u64>::debug();
         let xs = self.0.clone();
         txn.extend(&mut builder, self.0)?;
@@ -247,7 +247,7 @@ impl UnpackedTestTree {
     /// Convert this into an actual tree
     pub fn builder(self) -> anyhow::Result<(StreamBuilder<TT, u64>, Txn, Vec<(Key, u64)>)> {
         let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
-        let txn = txn(store, 1 << 20);
+        let mut txn = txn(store, 1 << 20);
         let mut builder = StreamBuilder::<TT, u64>::debug();
         let xs = self.0.iter().cloned().flatten().collect();
         for xs in self.0 {
