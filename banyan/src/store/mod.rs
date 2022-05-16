@@ -203,4 +203,11 @@ impl<T: TreeTypes> BranchCache<T> {
             *cache = WeightCache::new(capacity);
         }
     }
+
+    pub fn debug(&self) -> String {
+        self.0
+            .as_ref()
+            .map(|x| format!("{:?}", x.lock()))
+            .unwrap_or_default()
+    }
 }
