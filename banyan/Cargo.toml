@@ -15,7 +15,9 @@ default = ["metrics"]
 
 [dependencies]
 anyhow = "1.0.52"
+cbor-data = "0.8.3"
 chacha20 = "0.8.1"
+cid = "0.8.6"
 derive_more = "0.99.17"
 fnv = "1.0.7"
 futures = { version = "0.3.19", features = ["thread-pool"] }

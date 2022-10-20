@@ -21,21 +21,21 @@
 //!
 //! https://github.com/ipld/specs/blob/master/block-layer/codecs/dag-cbor.md
 //! https://tools.ietf.org/html/rfc8742
+use cbor_data::{Cbor, ItemKind, Visitor};
 use chacha20::{
     cipher::{NewCipher, StreamCipher, StreamCipherSeek},
     XChaCha20,
 };
 use libipld::{
     cbor::DagCborCodec,
-    codec::{Codec, Decode, Encode, References},
-    raw_value::IgnoredAny,
+    codec::{Codec, Decode, Encode},
     Cid, DagCbor, Ipld,
 };
 use std::{
     collections::BTreeSet,
     convert::TryFrom,
     fmt,
-    io::{Cursor, Write},
+    io::{Cursor, ErrorKind, Write},
     iter,
     ops::Range,
     time::Instant,
@@ -205,16 +205,19 @@ impl ZstdDagCborSeq {
     /// Decompress and decode a single item
     pub fn get<T: Decode<DagCborCodec>>(&self, index: u64) -> anyhow::Result<Option<T>> {
         let (_, data) = decompress_and_transform(self.compressed(), &mut |uncompressed| {
-            let mut r = Cursor::new(uncompressed);
             let mut remaining = index;
-            let len = u64::try_from(uncompressed.len())?;
-            while r.position() < len {
+            let mut bytes = uncompressed;
+            while !bytes.is_empty() {
+                // we cannot use ipld since the contained data may be arbitrary CBOR, not just IPLD-CBOR
+                let (cbor, rest) = Cbor::checked_prefix(bytes)?;
                 if remaining > 0 {
-                    // decode, but ignore the result.
-                    IgnoredAny::decode(DagCborCodec, &mut r)?;
                     remaining -= 1;
+                    bytes = rest;
                 } else {
-                    return Ok(Some(T::decode(DagCborCodec, &mut r)?));
+                    return Ok(Some(T::decode(
+                        DagCborCodec,
+                        &mut Cursor::new(cbor.as_slice()),
+                    )?));
                 }
             }
             Ok(None)
@@ -235,17 +238,16 @@ impl ZstdDagCborSeq {
         }
         let (_, data) = decompress_and_transform(self.compressed(), &mut |uncompressed| {
             let mut result: Vec<T> = Vec::new();
-            let mut r = Cursor::new(uncompressed);
-            let len = u64::try_from(uncompressed.len())?;
+            let mut bytes = uncompressed;
             for take in take.iter().cloned() {
-                if r.position() > len {
+                if bytes.is_empty() {
                     break;
                 }
+                // we cannot use ipld since the contained data may be arbitrary CBOR, not just IPLD-CBOR
+                let (cbor, rest) = Cbor::checked_prefix(bytes)?;
+                bytes = rest;
                 if take {
-                    result.push(T::decode(DagCborCodec, &mut r)?);
-                } else {
-                    // decode, but ignore the result.
-                    IgnoredAny::decode(DagCborCodec, &mut r)?;
+                    result.push(T::decode(DagCborCodec, &mut Cursor::new(cbor.as_slice()))?);
                 }
             }
             Ok(result)
@@ -336,24 +338,43 @@ impl fmt::Debug for ZstdDagCborSeq {
 
 /// count the number of items in a dag cbor seq
 fn count_cbor_items(data: &[u8]) -> anyhow::Result<u64> {
-    let mut cursor = Cursor::new(data);
     let mut count = 0;
-    let mut tmp = Vec::new();
-    let size = u64::try_from(data.len())?;
-    while cursor.position() < size {
-        // todo: use skip / IgnoredAny
-        <Ipld as References<DagCborCodec>>::references(DagCborCodec, &mut cursor, &mut tmp)?;
+    let mut bytes = data;
+    while !bytes.is_empty() {
+        // we cannot use ipld since the contained data may be arbitrary CBOR, not just IPLD-CBOR
+        let (_cbor, rest) = Cbor::checked_prefix(bytes)?;
+        bytes = rest;
         count += 1;
     }
     Ok(count)
 }
 
-/// scrape references from a dag cbor seq using libipld
+/// scrape references from a dag cbor seq using cbor-data
 fn scrape_links<C: Extend<Cid>>(data: &[u8], c: &mut C) -> anyhow::Result<()> {
-    let mut cursor = Cursor::new(data);
-    let size = u64::try_from(data.len())?;
-    while cursor.position() < size {
-        <Ipld as References<DagCborCodec>>::references(DagCborCodec, &mut cursor, c)?;
+    let mut bytes = data;
+    struct V<'a, C>(&'a mut C);
+    impl<'a, C: Extend<Cid>> Visitor<'a, cid::Error> for V<'a, C> {
+        fn visit_simple(&mut self, item: cbor_data::TaggedItem<'a>) -> Result<(), cid::Error> {
+            if let (Some(42), ItemKind::Bytes(b)) = (item.tags().single(), item.kind()) {
+                let b = b.as_cow();
+                if !b.is_empty() && b[0] == 0 {
+                    self.0.extend([Cid::read_bytes(&b[1..])?]);
+                } else {
+                    return Err(cid::Error::Io(std::io::Error::new(
+                        ErrorKind::Other,
+                        format!("invalid Link: {:?}", b),
+                    )));
+                }
+            }
+            Ok(())
+        }
+    }
+    let mut visitor = V(c);
+    while !bytes.is_empty() {
+        // we cannot use ipld since the contained data may be arbitrary CBOR, not just IPLD-CBOR
+        let (cbor, rest) = Cbor::checked_prefix(bytes)?;
+        bytes = rest;
+        cbor.visit(&mut visitor)?;
     }
     Ok(())
 }

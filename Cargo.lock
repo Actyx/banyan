@@ -91,7 +91,9 @@ name = "banyan"
 version = "0.17.1"
 dependencies = [
  "anyhow",
+ "cbor-data",
  "chacha20",
+ "cid",
  "clap 3.0.5",
  "derive_more",
  "env_logger 0.9.0",
@@ -244,6 +246,17 @@ checksum = "af4dfac631a8e77b2f327f7852bb6172771f5279c4512efe79fad6067b37be3d"
 dependencies = [
  "hashbrown",
  "once_cell",
+]
+
+[[package]]
+name = "cbor-data"
+version = "0.8.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "288f272114b335188fb312dc08f76cb538e7299d4feebcde96bd31358a90b0bd"
+dependencies = [
+ "base64",
+ "half",
+ "smallvec",
 ]
 
 [[package]]
@@ -635,6 +648,12 @@ dependencies = [
  "tokio-util",
  "tracing",
 ]
+
+[[package]]
+name = "half"
+version = "1.8.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eabb4a44450da02c90444cf74558da904edde8fb4e9035a9a6a4e15445af0bd7"
 
 [[package]]
 name = "hashbrown"
