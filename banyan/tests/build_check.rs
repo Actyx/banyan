@@ -50,11 +50,10 @@ fn compare_filtered_chunked(t: TestTree, filter: TestFilter) -> anyhow::Result<b
     let (tree, txn, xs) = t.tree()?;
     let actual = txn
         .iter_filtered_chunked(&tree, filter.query(), &|_| ())
-        .map(|chunk_result| match chunk_result {
+        .flat_map(|chunk_result| match chunk_result {
             Ok(chunk) => chunk.data.into_iter().map(Ok).boxed(),
             Err(cause) => iter::once(Err(cause)).boxed(),
         })
-        .flatten()
         .collect::<anyhow::Result<Vec<_>>>()?;
     let expected = xs
         .iter()
@@ -70,21 +69,19 @@ fn compare_filtered_chunked_with_reverse(t: TestTree, filter: TestFilter) -> any
     let (tree, txn, xs) = t.tree()?;
     let mut reverse = txn
         .iter_filtered_chunked_reverse(&tree, filter.query(), &|_| ())
-        .map(|chunk_result| match chunk_result {
+        .flat_map(|chunk_result| match chunk_result {
             Ok(chunk) => chunk.data.into_iter().rev().map(Ok).boxed(),
             Err(cause) => iter::once(Err(cause)).boxed(),
         })
-        .flatten()
         .collect::<anyhow::Result<Vec<_>>>()?;
     reverse.reverse();
 
     let forward = txn
         .iter_filtered_chunked(&tree, filter.query(), &|_| ())
-        .map(|chunk_result| match chunk_result {
+        .flat_map(|chunk_result| match chunk_result {
             Ok(chunk) => chunk.data.into_iter().map(Ok).boxed(),
             Err(cause) => iter::once(Err(cause)).boxed(),
         })
-        .flatten()
         .collect::<anyhow::Result<Vec<_>>>()?;
     let expected = xs
         .iter()
@@ -101,11 +98,10 @@ fn compare_filtered_chunked_reverse(t: TestTree, filter: TestFilter) -> anyhow::
     let (tree, txn, xs) = t.tree()?;
     let actual = txn
         .iter_filtered_chunked_reverse(&tree, filter.query(), &|_| ())
-        .map(|chunk_result| match chunk_result {
+        .flat_map(|chunk_result| match chunk_result {
             Ok(chunk) => chunk.data.into_iter().rev().map(Ok).boxed(),
             Err(cause) => iter::once(Err(cause)).boxed(),
         })
-        .flatten()
         .collect::<anyhow::Result<Vec<_>>>()?;
     let expected = xs
         .iter()
@@ -228,7 +224,7 @@ fn do_build_pack(xss: Vec<Vec<(Key, u64)>>) -> anyhow::Result<bool> {
     let mut builder = StreamBuilder::<TT, u64>::debug();
 
     // flattened xss for reference
-    let xs = xss.iter().cloned().flatten().collect::<Vec<_>>();
+    let xs = xss.iter().flatten().cloned().collect::<Vec<_>>();
     // build complex unbalanced tree
     for xs in xss.iter() {
         forest.extend_unpacked(&mut builder, xs.clone()).unwrap();
@@ -725,7 +721,7 @@ fn offset_range_test_simple() -> anyhow::Result<()> {
         let range = start as u64..=end as u64;
         let res = forest
             .iter_filtered_chunked(&tree, OffsetRangeQuery::from(range), &|_| ())
-            .map(move |item| {
+            .flat_map(move |item| {
                 item.map(|chunk| {
                     chunk
                         .data
@@ -734,7 +730,6 @@ fn offset_range_test_simple() -> anyhow::Result<()> {
                         .collect::<Vec<_>>()
                 })
             })
-            .flatten()
             .flatten()
             .collect::<Vec<_>>();
         assert_eq!(res, payloads[start..=end]);

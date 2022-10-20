@@ -40,7 +40,7 @@ where
         let digest = Sha256Digest::new(&data);
         let cid = digest.into();
         let block = Block::new_unchecked(cid, data);
-        self.0.lock().put_block(&block, None)?;
+        self.0.lock().put_block(block, None)?;
         Ok(digest)
     }
 }

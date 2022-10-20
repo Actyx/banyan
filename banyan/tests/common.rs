@@ -249,7 +249,7 @@ impl UnpackedTestTree {
         let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
         let mut txn = txn(store, 1 << 20);
         let mut builder = StreamBuilder::<TT, u64>::debug();
-        let xs = self.0.iter().cloned().flatten().collect();
+        let xs = self.0.iter().flatten().cloned().collect();
         for xs in self.0 {
             txn.extend_unpacked(&mut builder, xs)?;
         }

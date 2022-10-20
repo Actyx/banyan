@@ -13,8 +13,6 @@ mod write;
 pub(crate) use index_iter::IndexIter;
 #[cfg(feature = "metrics")]
 pub(crate) use prom::register;
-#[cfg(feature = "metrics")]
-use prometheus::Registry;
 pub(crate) use read::{ChunkVisitor, TreeIter};
 
 /// Trees can be parametrized with the key type and the sequence type. Also, to avoid a dependency
@@ -56,8 +54,6 @@ pub trait TreeTypes: Debug + Send + Sync + Clone + 'static {
 pub struct ForestInner<T: TreeTypes, R> {
     pub(crate) store: R,
     pub(crate) branch_cache: BranchCache<T>,
-    #[cfg(feature = "metrics")]
-    pub(crate) registry: Registry,
 }
 
 #[derive(Debug)]
@@ -74,8 +70,6 @@ impl<TT: TreeTypes, R: Clone> Forest<TT, R> {
         Self(Arc::new(ForestInner {
             store,
             branch_cache,
-            #[cfg(feature = "metrics")]
-            registry: Registry::new(),
         }))
     }
 

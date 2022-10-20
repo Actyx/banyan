@@ -597,11 +597,10 @@ where
         index: Index<T>,
     ) -> impl Iterator<Item = Result<(u64, T::Key, V)>> {
         self.traverse0(secrets, query, index, &|_| {})
-            .map(|res| match res {
+            .flat_map(|res| match res {
                 Ok(chunk) => chunk.data.into_iter().map(Ok).left_iter(),
                 Err(cause) => iter::once(Err(cause)).right_iter(),
             })
-            .flatten()
     }
     pub(crate) fn iter_filtered_reverse0<Q: Query<T>, V: BanyanValue>(
         &self,
@@ -610,11 +609,10 @@ where
         index: Index<T>,
     ) -> impl Iterator<Item = Result<(u64, T::Key, V)>> {
         self.traverse_rev0(secrets, query, index, &|_| {})
-            .map(|res| match res {
+            .flat_map(|res| match res {
                 Ok(chunk) => chunk.data.into_iter().map(Ok).left_iter(),
                 Err(cause) => iter::once(Err(cause)).right_iter(),
             })
-            .flatten()
     }
 
     #[allow(clippy::type_complexity)]
