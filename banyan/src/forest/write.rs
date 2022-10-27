@@ -18,7 +18,7 @@ use crate::{
     util::{is_sorted, BoolSliceExt},
 };
 use anyhow::{ensure, Result};
-use libipld::cbor::DagCbor;
+use cbor_data::codec::WriteCbor;
 use std::iter;
 
 /// basic random access append only tree
@@ -33,7 +33,7 @@ where
     }
 
     /// create a leaf from scratch from an interator
-    fn leaf_from_iter<V: DagCbor>(
+    fn leaf_from_iter<V: WriteCbor>(
         &mut self,
         from: &mut iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
         stream: &mut StreamBuilderState,
@@ -53,7 +53,7 @@ where
     /// Creates a leaf from a sequence that either contains all items from the sequence, or is full
     ///
     /// The result is the index of the leaf. The iterator will contain the elements that did not fit.
-    fn extend_leaf<V: DagCbor>(
+    fn extend_leaf<V: WriteCbor>(
         &mut self,
         compressed: &[u8],
         keys: Option<T::KeySeq>,
@@ -99,7 +99,7 @@ where
 
     /// given some children and some additional elements, creates a node with the given
     /// children and new children from `from` until it is full
-    pub(crate) fn extend_branch<V: DagCbor>(
+    pub(crate) fn extend_branch<V: WriteCbor>(
         &mut self,
         mut children: Vec<Index<T>>,
         level: u32,
@@ -163,7 +163,7 @@ where
     /// Given an iterator of values and a level, consume from the iterator until either
     /// the iterator is consumed or the node is "filled". At the end of this call, the
     /// iterator will contain the remaining elements that did not "fit".
-    fn fill_node<V: DagCbor>(
+    fn fill_node<V: WriteCbor>(
         &mut self,
         level: u32,
         from: &mut iter::Peekable<impl Iterator<Item = (T::Key, V)> + Send>,
@@ -215,7 +215,7 @@ where
     /// extends an existing node with some values
     ///
     /// The result will have the max level `level`. `from` will contain all elements that did not fit.
-    pub(crate) fn extend_above<V: DagCbor>(
+    pub(crate) fn extend_above<V: WriteCbor>(
         &mut self,
         node: Option<&Index<T>>,
         level: u32,
@@ -256,7 +256,7 @@ where
     where
         I: IntoIterator<Item = (T::Key, V)>,
         I::IntoIter: Send,
-        V: DagCbor,
+        V: WriteCbor,
     {
         let mut from = from.into_iter().peekable();
         if from.peek().is_none() {
@@ -283,7 +283,7 @@ where
     /// extends an existing node with some values
     ///
     /// The result will have the same level as the input. `from` will contain all elements that did not fit.
-    fn extend0<V: DagCbor>(
+    fn extend0<V: WriteCbor>(
         &mut self,
         index: &Index<T>,
         from: &mut iter::Peekable<impl Iterator<Item = (T::Key, V)> + Send>,

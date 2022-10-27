@@ -4,11 +4,12 @@ use banyan::{
     store::{BranchCache, MemStore},
     Forest, StreamBuilder, Transaction, Tree, TreeTypes,
 };
+use cbor_data::codec::{CodecError, ReadCbor, WriteCbor};
 use common::Sha256Digest;
 use fnv::FnvHashSet;
-use libipld::{cbor::DagCborCodec, codec::Codec, ipld, Cid, DagCbor, Ipld};
+use libipld::{cbor::DagCborCodec, codec::Codec, ipld, prelude::Decode, Cid, DagCbor, Ipld};
 use quickcheck::{quickcheck, Arbitrary, Gen};
-use std::str::FromStr;
+use std::{io::Cursor, str::FromStr};
 
 mod common;
 
@@ -52,6 +53,28 @@ struct Key(Ipld);
 
 #[derive(Debug, Clone, PartialEq, DagCbor)]
 struct Payload(Ipld);
+
+impl WriteCbor for Payload {
+    fn write_cbor<W: cbor_data::Writer>(&self, w: W) -> W::Output {
+        let bytes = DagCborCodec.encode(&self.0).unwrap();
+        w.write_trusting(&*bytes)
+    }
+}
+
+impl ReadCbor for Payload {
+    fn fmt(f: &mut impl std::fmt::Write) -> std::fmt::Result {
+        write!(f, "Payload")
+    }
+
+    fn read_cbor(cbor: &cbor_data::Cbor) -> cbor_data::codec::Result<Self>
+    where
+        Self: Sized,
+    {
+        Ipld::decode(DagCborCodec, &mut Cursor::new(cbor.as_slice()))
+            .map(Payload)
+            .map_err(|err| CodecError::Custom(err.into()))
+    }
+}
 
 impl TreeTypes for TT {
     type Key = Key;

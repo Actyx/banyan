@@ -21,14 +21,18 @@
 //!
 //! https://github.com/ipld/specs/blob/master/block-layer/codecs/dag-cbor.md
 //! https://tools.ietf.org/html/rfc8742
-use cbor_data::{Cbor, ItemKind, Visitor};
+use cbor_data::{
+    codec::{ReadCbor, WriteCbor},
+    Cbor, CborBuilder, ItemKind, Visitor,
+};
 use chacha20::{
     cipher::{NewCipher, StreamCipher, StreamCipherSeek},
     XChaCha20,
 };
 use libipld::{
     cbor::DagCborCodec,
-    codec::{Codec, Decode, Encode},
+    codec::Codec,
+    prelude::{Decode, Encode},
     Cid, DagCbor, Ipld,
 };
 use std::{
@@ -56,8 +60,38 @@ impl ZstdDagCborSeq {
         Self { data, links }
     }
 
-    /// create ZStdArray from a single serializable item
+    /// create ZStdArray from a sequence of serializable items
     pub fn from_iter<'a, I, T>(iter: I, zstd_level: i32) -> anyhow::Result<Self>
+    where
+        I: IntoIterator<Item = &'a T> + 'a,
+        T: WriteCbor + 'a,
+    {
+        let t0 = Instant::now();
+        let mut encoder = zstd::Encoder::new(Vec::new(), zstd_level)?;
+        let mut links = BTreeSet::new();
+        let mut size: usize = 0;
+        let mut encoded = Vec::new();
+        for item in iter.into_iter() {
+            encoded.clear();
+            item.write_cbor(CborBuilder::append_to(&mut encoded));
+            size += encoded.len();
+            scrape_links(encoded.as_ref(), &mut links)?;
+            encoder.write_all(encoded.as_ref())?;
+        }
+        // call finish to write the zstd frame
+        let data = encoder.finish()?;
+        tracing::trace!(
+            "ZstdArray::from_iter elapsed={} compressed={} uncompressed={}",
+            t0.elapsed().as_secs_f64(),
+            data.len(),
+            size
+        );
+        // box into an arc
+        Ok(Self::new(data, links.into_iter().collect()))
+    }
+
+    /// create ZStdArray from a single serializable item
+    pub fn from_iter_ipld<'a, I, T>(iter: I, zstd_level: i32) -> anyhow::Result<Self>
     where
         I: IntoIterator<Item = &'a T> + 'a,
         T: Encode<DagCborCodec> + 'a,
@@ -85,8 +119,16 @@ impl ZstdDagCborSeq {
     }
 
     /// create ZStdArray from a single serializable item
-    pub fn single<T: Encode<DagCborCodec>>(value: &T, zstd_level: i32) -> anyhow::Result<Self> {
+    pub fn single<T: WriteCbor>(value: &T, zstd_level: i32) -> anyhow::Result<Self> {
         Self::from_iter(std::iter::once(value), zstd_level)
+    }
+
+    /// create ZStdArray from a single serializable item
+    pub fn single_ipld<T: Encode<DagCborCodec>>(
+        value: &T,
+        zstd_level: i32,
+    ) -> anyhow::Result<Self> {
+        Self::from_iter_ipld(std::iter::once(value), zstd_level)
     }
 
     /// create a ZStdArray by filling from an iterator
@@ -103,7 +145,95 @@ impl ZstdDagCborSeq {
     ///
     /// On success, returns a tuple consisting of the `ZstdDagCborSeq` and a boolean indicating if
     /// the result is full.
-    pub fn fill<K, V: Encode<DagCborCodec>>(
+    pub fn fill<K, V: WriteCbor>(
+        compressed: &[u8],
+        from: &mut iter::Peekable<impl Iterator<Item = (K, V)>>,
+        keys: &mut Vec<K>,
+        zstd_level: i32,
+        compressed_size: usize,
+        uncompressed_size: usize,
+        max_keys: usize,
+    ) -> anyhow::Result<(Self, bool)> {
+        let mut links = BTreeSet::new();
+        let t0 = Instant::now();
+        let mut encoder = zstd::Encoder::new(Vec::new(), zstd_level)?;
+        // decompress into the encoder, if necessary
+        //
+        // also init decompressed size
+        let mut size = if !compressed.is_empty() {
+            // the first ? is to handle the io error from decompress_and_transform, the second to handle the inner io error from write_all
+            let (size, data) =
+                decompress_and_transform(compressed, &mut |decompressed| -> anyhow::Result<()> {
+                    scrape_links(decompressed, &mut links)?;
+                    encoder.write_all(decompressed)?;
+                    Ok(())
+                })?;
+            data?;
+            size
+        } else {
+            0
+        };
+        let mut full = false;
+        let mut bytes = Vec::new();
+        // fill until rough size goal exceeded
+        while let Some((_, value)) = from.peek() {
+            // do this check here, in case somebody calls us with an already full keys vec
+            if keys.len() >= max_keys {
+                break;
+            }
+            bytes.clear();
+            value.write_cbor(CborBuilder::append_to(&mut bytes));
+            // if a single item is too big, bail out
+            anyhow::ensure!(bytes.len() <= uncompressed_size, "single item too large!");
+            // check that we don't exceed the uncompressed_size goal before adding
+            if size + bytes.len() > uncompressed_size {
+                // we know that the next item does not fit, so we are full even if
+                // there is some space left.
+                full = true;
+                break;
+            }
+            // scrape links from the new item
+            scrape_links(bytes.as_ref(), &mut links)?;
+            // this is guaranteed to work because of the peek above.
+            // Now we are committed to add the item.
+            let (key, _) = from.next().unwrap();
+            size += bytes.len();
+            encoder.write_all(&bytes)?;
+            keys.push(key);
+            if encoder.get_ref().len() >= compressed_size {
+                break;
+            }
+        }
+        // call finish to write the zstd frame
+        let data = encoder.finish()?;
+        // log elapsed time and compression rate
+        tracing::trace!(
+            "ZstdArray::fill elapsed={} compressed={} uncompressed={}",
+            t0.elapsed().as_secs_f64(),
+            data.len(),
+            size
+        );
+        full |= data.len() >= compressed_size;
+        full |= keys.len() >= max_keys;
+        full |= size >= uncompressed_size;
+        Ok((Self::new(data, links.into_iter().collect()), full))
+    }
+
+    /// create a ZStdArray by filling from an iterator
+    ///
+    /// Takes the compressed data `compressed`, and extends it by pulling from the peekable
+    /// iterator `from`. Uses compression level `zstd_level`. There are three target criteria
+    /// after which it will stop pulling from the iterator: `compressed_size`, `uncompressed_size`,
+    /// and `max_keys`. `max_keys` is the maximum number of keys.
+    ///
+    /// Only values will be compressed. Keys will be pushed on the `keys` vec.
+    ///
+    /// IPLD links in V will be scraped and put into the links. So on success, links will contain
+    /// all CBOR links in both `compressed` and the added `V`s.
+    ///
+    /// On success, returns a tuple consisting of the `ZstdDagCborSeq` and a boolean indicating if
+    /// the result is full.
+    pub fn fill_ipld<K, V: Encode<DagCborCodec>>(
         compressed: &[u8],
         from: &mut iter::Peekable<impl Iterator<Item = (K, V)>>,
         keys: &mut Vec<K>,
@@ -189,7 +319,21 @@ impl ZstdDagCborSeq {
     }
 
     /// returns all items as a vec
-    pub fn items<T: Decode<DagCborCodec>>(&self) -> anyhow::Result<Vec<T>> {
+    pub fn items<T: ReadCbor>(&self) -> anyhow::Result<Vec<T>> {
+        let (_, data) = decompress_and_transform(self.compressed(), &mut |mut uncompressed| {
+            let mut result = Vec::new();
+            while !uncompressed.is_empty() {
+                let (cbor, rest) = Cbor::checked_prefix(uncompressed)?;
+                result.push(T::read_cbor(cbor)?);
+                uncompressed = rest;
+            }
+            Ok(result)
+        })?;
+        data
+    }
+
+    /// returns all items as a vec
+    pub fn items_ipld<T: Decode<DagCborCodec>>(&self) -> anyhow::Result<Vec<T>> {
         let (_, data) = decompress_and_transform(self.compressed(), &mut |uncompressed| {
             let mut result = Vec::new();
             let mut r = Cursor::new(&uncompressed);
@@ -203,7 +347,7 @@ impl ZstdDagCborSeq {
     }
 
     /// Decompress and decode a single item
-    pub fn get<T: Decode<DagCborCodec>>(&self, index: u64) -> anyhow::Result<Option<T>> {
+    pub fn get<T: ReadCbor>(&self, index: u64) -> anyhow::Result<Option<T>> {
         let (_, data) = decompress_and_transform(self.compressed(), &mut |uncompressed| {
             let mut remaining = index;
             let mut bytes = uncompressed;
@@ -214,10 +358,7 @@ impl ZstdDagCborSeq {
                     remaining -= 1;
                     bytes = rest;
                 } else {
-                    return Ok(Some(T::decode(
-                        DagCborCodec,
-                        &mut Cursor::new(cbor.as_slice()),
-                    )?));
+                    return Ok(Some(T::read_cbor(cbor)?));
                 }
             }
             Ok(None)
@@ -228,7 +369,7 @@ impl ZstdDagCborSeq {
     /// select the items marked by the bool slice and deserialize them into a vec.
     ///
     /// Other items will be skipped when deserializing, saving some unnecessary work.
-    pub fn select<T: Decode<DagCborCodec>>(&self, take: &[bool]) -> anyhow::Result<Vec<T>> {
+    pub fn select<T: ReadCbor>(&self, take: &[bool]) -> anyhow::Result<Vec<T>> {
         // shrink take so we don't needlessly decode stuff after the last match
         let take = shrink_to_fit(take);
         // this is not as useful as it looks, since usually we will only hit this if some upper
@@ -247,7 +388,7 @@ impl ZstdDagCborSeq {
                 let (cbor, rest) = Cbor::checked_prefix(bytes)?;
                 bytes = rest;
                 if take {
-                    result.push(T::decode(DagCborCodec, &mut Cursor::new(cbor.as_slice()))?);
+                    result.push(T::read_cbor(cbor)?);
                 }
             }
             Ok(result)
@@ -381,12 +522,12 @@ fn scrape_links<C: Extend<Cid>>(data: &[u8], c: &mut C) -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
-
     use super::*;
+    use cbor_data::{codec::CodecError, Writer};
     use quickcheck::quickcheck;
     use rand::{Rng, RngCore, SeedableRng};
     use rand_chacha::ChaCha8Rng;
+    use std::{collections::HashSet, convert::TryFrom, io::Cursor};
 
     #[test]
     fn zstd_array_fill_oversized() -> anyhow::Result<()> {
@@ -453,6 +594,41 @@ mod tests {
         Ok(())
     }
 
+    struct MyCid(Cid);
+
+    impl WriteCbor for MyCid {
+        fn write_cbor<W: Writer>(&self, w: W) -> W::Output {
+            let mut bytes = Vec::new();
+            self.0.write_bytes(&mut bytes).expect("writing to SmallVec");
+            w.write_bytes_chunked([&[0][..], &*bytes], [42])
+        }
+    }
+
+    impl ReadCbor for MyCid {
+        fn fmt(f: &mut impl fmt::Write) -> std::fmt::Result {
+            write!(f, "Cid")
+        }
+
+        fn read_cbor(cbor: &Cbor) -> cbor_data::codec::Result<Self>
+        where
+            Self: Sized,
+        {
+            let decoded = cbor.tagged_item();
+            if let (Some(42), ItemKind::Bytes(b)) = (decoded.tags().single(), decoded.kind()) {
+                let b = b.as_cow();
+                if b.is_empty() {
+                    Err(CodecError::string("Cid cannot be empty"))
+                } else if b[0] != 0 {
+                    Err(CodecError::string("Cid must use identity encoding"))
+                } else {
+                    Ok(MyCid(Cid::read_bytes(&b[1..]).map_err(CodecError::custom)?))
+                }
+            } else {
+                Err(CodecError::type_error("Cid", decoded))
+            }
+        }
+    }
+
     #[test]
     fn zstd_array_link_extract() -> anyhow::Result<()> {
         use std::str::FromStr;
@@ -462,9 +638,30 @@ mod tests {
             Cid::from_str("bafyreifs65kond7gvtknoqe2vehsy3rhdmhxwnuwc2xxkoti3hwpjaeadu")?,
             Cid::from_str("bafyreidiz2cvkda77gzi6ljsow6sssypt2kgdvou5wbmyi534styi5hgku")?,
         ];
-        let data = |i: usize| Ipld::List(vec![Ipld::Link(cids[i % cids.len()])]);
+        let data = |i: usize| vec![MyCid(cids[i % cids.len()])];
         let items = (0..100).map(data).collect::<Vec<_>>();
         let za = ZstdDagCborSeq::single(&items, 10)?;
+        // test that links are deduped
+        assert_eq!(za.links.len(), 4);
+        assert_eq!(
+            za.links.iter().collect::<HashSet<_>>(),
+            cids.iter().collect::<HashSet<_>>()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn zstd_array_link_extract_ipld() -> anyhow::Result<()> {
+        use std::str::FromStr;
+        let cids = [
+            Cid::from_str("bafyreihtx752fmf3zafbys5dtr4jxohb53yi3qtzfzf6wd5274jwtn5agu")?,
+            Cid::from_str("bafyreiabupkdnos4dswptmc7ujczszggedg6pyijf2zrnhsx7sv73x2umq")?,
+            Cid::from_str("bafyreifs65kond7gvtknoqe2vehsy3rhdmhxwnuwc2xxkoti3hwpjaeadu")?,
+            Cid::from_str("bafyreidiz2cvkda77gzi6ljsow6sssypt2kgdvou5wbmyi534styi5hgku")?,
+        ];
+        let data = |i: usize| Ipld::List(vec![Ipld::Link(cids[i % cids.len()])]);
+        let items = (0..100).map(data).collect::<Vec<_>>();
+        let za = ZstdDagCborSeq::single_ipld(&items, 10)?;
         // test that links are deduped
         assert_eq!(za.links.len(), 4);
         assert_eq!(
@@ -543,7 +740,7 @@ mod tests {
 
     #[test]
     fn test_disk_format() -> anyhow::Result<()> {
-        let data = vec![1u32, 2, 3, 4];
+        let data = vec![1u64, 2, 3, 4];
         let key: chacha20::Key = [0u8; 32].into();
         let nonce: chacha20::XNonce = [0u8; 24].into();
         let offset = 7u64;
@@ -574,7 +771,7 @@ mod tests {
             chacha.apply_keystream(&mut decrypted);
             let decompressed = zstd::decode_all(Cursor::new(decrypted))?;
             // finally, compare with the original data
-            let data1: Vec<u32> = DagCborCodec.decode(&decompressed)?;
+            let data1: Vec<u64> = DagCborCodec.decode(&decompressed)?;
             assert_eq!(data1, data);
         } else {
             panic!();

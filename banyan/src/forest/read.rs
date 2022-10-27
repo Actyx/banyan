@@ -12,8 +12,8 @@ use crate::{
     util::{nonce, BoolSliceExt, IterExt},
 };
 use anyhow::{anyhow, Result};
+use cbor_data::codec::ReadCbor;
 use futures::{prelude::*, stream::BoxStream};
-use libipld::cbor::DagCbor;
 use smallvec::{smallvec, SmallVec};
 use std::{iter, marker::PhantomData, ops::Range, sync::Arc, time::Instant};
 
@@ -483,7 +483,7 @@ where
         result
     }
 
-    pub(crate) fn get0<V: DagCbor>(
+    pub(crate) fn get0<V: ReadCbor>(
         &self,
         stream: &Secrets,
         index: &Index<T>,
@@ -514,7 +514,7 @@ where
         }
     }
 
-    pub(crate) fn collect0<V: DagCbor>(
+    pub(crate) fn collect0<V: ReadCbor>(
         &self,
         stream: &Secrets,
         index: &Index<T>,

@@ -9,5 +9,6 @@ members = [
 [profile.release]
 debug = true
 
-# [patch.crates-io]
+[patch.crates-io]
 # ipfs-sqlite-block-store = { path = "../ipfs-sqlite-block-store" }
+# cbor-data = { path = "../cbor-data" }

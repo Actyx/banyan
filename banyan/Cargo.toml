@@ -15,7 +15,7 @@ default = ["metrics"]
 
 [dependencies]
 anyhow = "1.0.52"
-cbor-data = "0.8.3"
+cbor-data = "0.8.8"
 chacha20 = "0.8.1"
 cid = "0.8.6"
 derive_more = "0.99.17"
