@@ -624,7 +624,7 @@ mod tests {
                     Ok(MyCid(Cid::read_bytes(&b[1..]).map_err(CodecError::custom)?))
                 }
             } else {
-                Err(CodecError::type_error("Cid", decoded))
+                Err(CodecError::type_error("Cid", &decoded))
             }
         }
     }

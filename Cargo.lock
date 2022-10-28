@@ -250,9 +250,9 @@ dependencies = [
 
 [[package]]
 name = "cbor-data"
-version = "0.8.8"
+version = "0.8.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "233e52f45fa1a8871b20d3c25b0a1f6c7e3e4845118e9e9e93169a920d693319"
+checksum = "a953ba201b776917edcf7f9c6ed79186af32a892539ca739841df31da40e0e2b"
 dependencies = [
  "base64",
  "half",
