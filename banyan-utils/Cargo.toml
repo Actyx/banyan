@@ -20,6 +20,7 @@ path = "src/bin/cli.rs"
 anyhow = "1.0.52"
 banyan = { version = "0.17.1", path = "../banyan" }
 base64 = "0.13.0"
+cbor-data = "0.8"
 chacha20 = "0.8.1"
 derive_more = "0.99.17"
 dot = "0.1.4"

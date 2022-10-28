@@ -144,6 +144,8 @@ enum Command {
         #[structopt(long)]
         /// The root hash to use
         hash: Sha256Digest,
+        #[structopt(long)]
+        cbor: bool,
     },
     /// Dumps all values of a tree as json to stdout, newline separated
     DumpValues {
@@ -376,9 +378,13 @@ async fn main() -> Result<()> {
                 println!("{:?} {:?} {:?}", i, k, v);
             }
         }
-        Command::DumpBlock { hash } => {
+        Command::DumpBlock { hash, cbor } => {
             let nonce = <&chacha20::XNonce>::try_from(TT::NONCE).unwrap();
-            dump::dump_json(store, hash, &value_key, nonce, &mut std::io::stdout())?;
+            if cbor {
+                dump::dump_cbor(store, hash, &value_key, nonce, &mut std::io::stdout())?;
+            } else {
+                dump::dump_json(store, hash, &value_key, nonce, &mut std::io::stdout())?;
+            }
         }
         Command::Stream { root } => {
             let tree = forest.load_tree::<String>(secrets, root)?;

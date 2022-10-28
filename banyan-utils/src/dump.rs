@@ -2,10 +2,11 @@ use core::fmt::Debug;
 use std::collections::BTreeMap;
 
 use banyan::{
-    store::{ReadOnlyStore, ZstdDagCborSeq},
+    store::{BanyanValue, ReadOnlyStore, ZstdDagCborSeq},
     Tree, {Forest, TreeTypes},
 };
-use libipld::{cbor::DagCbor, codec::Codec, json::DagJsonCodec};
+use cbor_data::CborOwned;
+use libipld::{codec::Codec, json::DagJsonCodec};
 
 type Node<'a> = &'a NodeDescriptor;
 type Edge<'a> = (usize, usize);
@@ -107,7 +108,7 @@ pub fn graph<TT, V, R>(
 ) -> anyhow::Result<()>
 where
     TT: TreeTypes,
-    V: Clone + Send + Sync + Debug + DagCbor + 'static,
+    V: BanyanValue + Clone + Sync + Debug,
     R: ReadOnlyStore<TT::Link> + Clone + Send + Sync + 'static,
 {
     let (edges, nodes) = forest.dump_graph(tree, |(id, node)| match node {
@@ -147,6 +148,24 @@ pub fn dump_json<Link: 'static>(
     for x in ipld_ast {
         let json = DagJsonCodec.encode(&x)?;
         writeln!(writer, "{}", std::str::from_utf8(&json)?)?;
+    }
+    Ok(())
+}
+
+/// Takes a hash to a dagcbor encoded blob, and write it as dag-json to `writer`,
+/// each item separated by newlines.
+pub fn dump_cbor<Link: 'static>(
+    store: impl ReadOnlyStore<Link>,
+    hash: Link,
+    value_key: &chacha20::Key,
+    nonce: &chacha20::XNonce,
+    mut writer: impl std::io::Write,
+) -> anyhow::Result<()> {
+    let bytes = store.get(&hash)?;
+    let (dag_cbor, _) = ZstdDagCborSeq::decrypt(&bytes, value_key, nonce)?;
+    let cs = dag_cbor.items::<CborOwned>()?;
+    for c in cs {
+        writeln!(writer, "{}", c)?;
     }
     Ok(())
 }

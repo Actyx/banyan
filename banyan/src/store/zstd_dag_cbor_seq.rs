@@ -617,9 +617,9 @@ mod tests {
             if let (Some(42), ItemKind::Bytes(b)) = (decoded.tags().single(), decoded.kind()) {
                 let b = b.as_cow();
                 if b.is_empty() {
-                    Err(CodecError::string("Cid cannot be empty"))
+                    Err(CodecError::str("Cid cannot be empty"))
                 } else if b[0] != 0 {
-                    Err(CodecError::string("Cid must use identity encoding"))
+                    Err(CodecError::str("Cid must use identity encoding"))
                 } else {
                     Ok(MyCid(Cid::read_bytes(&b[1..]).map_err(CodecError::custom)?))
                 }

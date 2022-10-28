@@ -129,6 +129,7 @@ dependencies = [
  "anyhow",
  "banyan",
  "base64",
+ "cbor-data",
  "chacha20",
  "derive_more",
  "dot",
@@ -250,9 +251,9 @@ dependencies = [
 
 [[package]]
 name = "cbor-data"
-version = "0.8.10"
+version = "0.8.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a953ba201b776917edcf7f9c6ed79186af32a892539ca739841df31da40e0e2b"
+checksum = "668d58293533725e6066b8e1d827bf343623f5df1af6221adf508e8fe70a43d9"
 dependencies = [
  "base64",
  "half",
