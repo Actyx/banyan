@@ -5,8 +5,8 @@ use banyan::{
     store::{BanyanValue, ReadOnlyStore, ZstdDagCborSeq},
     Tree, {Forest, TreeTypes},
 };
-use cbor_data::CborOwned;
-use libipld::{codec::Codec, json::DagJsonCodec};
+use cbor_data::{Cbor, CborOwned};
+use libipld::{cbor::DagCborCodec, codec::Codec, json::DagJsonCodec};
 
 type Node<'a> = &'a NodeDescriptor;
 type Edge<'a> = (usize, usize);
@@ -143,11 +143,20 @@ pub fn dump_json<Link: 'static>(
     mut writer: impl std::io::Write,
 ) -> anyhow::Result<()> {
     let bytes = store.get(&hash)?;
-    let (dag_cbor, _) = ZstdDagCborSeq::decrypt(&bytes, value_key, nonce)?;
-    let ipld_ast = dag_cbor.items_ipld::<libipld::Ipld>()?;
-    for x in ipld_ast {
-        let json = DagJsonCodec.encode(&x)?;
-        writeln!(writer, "{}", std::str::from_utf8(&json)?)?;
+    match ZstdDagCborSeq::decrypt(&bytes, value_key, nonce) {
+        Ok((dag_cbor, _)) => {
+            let ipld_ast = dag_cbor.items_ipld::<libipld::Ipld>()?;
+            writeln!(writer, "ZstdDagCborSeq")?;
+            for x in ipld_ast {
+                let json = DagJsonCodec.encode(&x)?;
+                writeln!(writer, "{}", std::str::from_utf8(&json)?)?;
+            }
+        }
+        Err(_) => {
+            let ipld = DagCborCodec.decode::<libipld::Ipld>(&bytes[..])?;
+            let json = DagJsonCodec.encode(&ipld)?;
+            writeln!(writer, "{}", std::str::from_utf8(&json)?)?;
+        }
     }
     Ok(())
 }
@@ -162,10 +171,18 @@ pub fn dump_cbor<Link: 'static>(
     mut writer: impl std::io::Write,
 ) -> anyhow::Result<()> {
     let bytes = store.get(&hash)?;
-    let (dag_cbor, _) = ZstdDagCborSeq::decrypt(&bytes, value_key, nonce)?;
-    let cs = dag_cbor.items::<CborOwned>()?;
-    for c in cs {
-        writeln!(writer, "{}", c)?;
+    match ZstdDagCborSeq::decrypt(&bytes, value_key, nonce) {
+        Ok((dag_cbor, _)) => {
+            let cs = dag_cbor.items::<CborOwned>()?;
+            writeln!(writer, "ZstdDagCborSeq")?;
+            for c in cs {
+                writeln!(writer, "{}", c)?;
+            }
+        }
+        Err(_) => {
+            let cbor = Cbor::checked(&bytes[..])?;
+            writeln!(writer, "{}", cbor)?;
+        }
     }
     Ok(())
 }
