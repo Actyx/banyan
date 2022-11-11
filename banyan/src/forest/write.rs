@@ -1,6 +1,7 @@
 #[cfg(feature = "metrics")]
 use super::prom;
 use crate::{
+    error::Error,
     forest::{BranchResult, Config, CreateMode, Forest, Transaction, TreeTypes},
     index::{zip_with_offset_ref, NodeInfo},
     store::{BlockWriter, ReadOnlyStore},
@@ -17,7 +18,6 @@ use crate::{
     store::ZstdDagCborSeq,
     util::{is_sorted, BoolSliceExt},
 };
-use anyhow::{ensure, Result};
 use cbor_data::codec::WriteCbor;
 use std::iter;
 
@@ -37,12 +37,12 @@ where
         &mut self,
         from: &mut iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
         stream: &mut StreamBuilderState,
-    ) -> Result<LeafIndex<T>> {
+    ) -> Result<LeafIndex<T>, Error> {
         assert!(from.peek().is_some());
         self.extend_leaf(&[], None, from, stream)
     }
 
-    fn put_block(&mut self, data: Vec<u8>) -> anyhow::Result<T::Link> {
+    fn put_block(&mut self, data: Vec<u8>) -> Result<T::Link, Error> {
         #[cfg(feature = "metrics")]
         let _timer = prom::BLOCK_PUT_HIST.start_timer();
         #[cfg(feature = "metrics")]
@@ -59,7 +59,7 @@ where
         keys: Option<T::KeySeq>,
         from: &mut iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
         stream: &mut StreamBuilderState,
-    ) -> Result<LeafIndex<T>> {
+    ) -> Result<LeafIndex<T>, Error> {
         #[cfg(feature = "metrics")]
         let _timer = prom::LEAF_STORE_HIST.start_timer();
         assert!(from.peek().is_some());
@@ -106,7 +106,7 @@ where
         from: &mut iter::Peekable<impl Iterator<Item = (T::Key, V)> + Send>,
         stream: &mut StreamBuilderState,
         mode: CreateMode,
-    ) -> Result<BranchIndex<T>> {
+    ) -> Result<BranchIndex<T>, Error> {
         assert!(level > 0);
         assert!(
             children.iter().all(|child| child.level() < level),
@@ -168,7 +168,7 @@ where
         level: u32,
         from: &mut iter::Peekable<impl Iterator<Item = (T::Key, V)> + Send>,
         stream: &mut StreamBuilderState,
-    ) -> Result<Index<T>> {
+    ) -> Result<Index<T>, Error> {
         assert!(from.peek().is_some());
         Ok(if level == 0 {
             self.leaf_from_iter(from, stream)?.into()
@@ -186,7 +186,7 @@ where
         children: &[Index<T>],
         stream: &mut StreamBuilderState,
         mode: CreateMode,
-    ) -> Result<BranchIndex<T>> {
+    ) -> Result<BranchIndex<T>, Error> {
         assert!(!children.is_empty());
         if mode == CreateMode::Packed {
             assert!(is_sorted(children.iter().map(|x| x.level()).rev()));
@@ -221,11 +221,10 @@ where
         level: u32,
         from: &mut iter::Peekable<impl Iterator<Item = (T::Key, V)> + Send>,
         stream: &mut StreamBuilderState,
-    ) -> Result<Index<T>> {
-        ensure!(
-            from.peek().is_some(),
-            "must have more than 1 element when extending"
-        );
+    ) -> Result<Index<T>, Error> {
+        if from.peek().is_none() {
+            return Err(Error::MustHaveMoreThanOneElement);
+        }
         assert!(node.map(|node| level >= node.level()).unwrap_or(true));
         let mut node = if let Some(node) = node {
             self.extend0(node, from, stream)?
@@ -252,7 +251,7 @@ where
         index: Option<&Index<T>>,
         from: I,
         stream: &mut StreamBuilderState,
-    ) -> Result<Option<Index<T>>>
+    ) -> Result<Option<Index<T>>, Error>
     where
         I: IntoIterator<Item = (T::Key, V)>,
         I::IntoIter: Send,
@@ -288,7 +287,7 @@ where
         index: &Index<T>,
         from: &mut iter::Peekable<impl Iterator<Item = (T::Key, V)> + Send>,
         stream: &mut StreamBuilderState,
-    ) -> Result<Index<T>> {
+    ) -> Result<Index<T>, Error> {
         tracing::trace!(
             "extend {} {} {} {}",
             index.level(),
@@ -332,7 +331,7 @@ where
         roots: &mut Vec<Index<T>>,
         from: usize,
         stream: &mut StreamBuilderState,
-    ) -> Result<()> {
+    ) -> Result<(), Error> {
         assert!(roots.len() > 1);
         assert!(is_sorted(roots.iter().map(|x| x.level()).rev()));
         match find_valid_branch(stream.config(), &roots[from..]) {
@@ -352,7 +351,7 @@ where
         &mut self,
         items: &[Index<T>],
         stream: &mut StreamBuilderState,
-    ) -> Result<(T::Link, u64)> {
+    ) -> Result<(T::Link, u64), Error> {
         #[cfg(feature = "metrics")]
         let _timer = prom::BRANCH_STORE_HIST.start_timer();
         let level = stream.config().zstd_level;
@@ -369,7 +368,7 @@ where
         index: &Index<T>,
         level: &mut i32,
         stream: &mut StreamBuilderState,
-    ) -> Result<Index<T>> {
+    ) -> Result<Index<T>, Error> {
         if index.sealed() && index.level() as i32 <= *level {
             // this node is sealed and below the level, so we can proceed.
             // but we must still set the level so we can not go "up" again.
@@ -435,7 +434,7 @@ where
         report: &mut Vec<String>,
         level: &mut i32,
         stream: &mut StreamBuilderState,
-    ) -> Result<Index<T>> {
+    ) -> Result<Index<T>, Error> {
         if !index.sealed() {
             *level = (*level).min((index.level() as i32) - 1);
         }

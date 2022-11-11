@@ -2,6 +2,7 @@
 use super::prom;
 use super::{BranchCache, Config, FilteredChunk, Forest, Secrets, TreeTypes};
 use crate::{
+    error::Error,
     index::{
         deserialize_compressed, Branch, BranchIndex, BranchLoader, CompactSeq, Index, Leaf,
         LeafIndex, LeafLoader, NodeInfo,
@@ -11,7 +12,6 @@ use crate::{
     store::{BanyanValue, ReadOnlyStore},
     util::{nonce, BoolSliceExt, IterExt},
 };
-use anyhow::{anyhow, Result};
 use cbor_data::codec::ReadCbor;
 use futures::{prelude::*, stream::BoxStream};
 use smallvec::{smallvec, SmallVec};
@@ -31,7 +31,7 @@ pub(crate) trait TreeVisitor<T: TreeTypes, R> {
         index: Arc<LeafIndex<T>>,
         leaf: LeafLoader<T, R>,
         mask: &[bool],
-    ) -> Result<Self::Item>;
+    ) -> Result<Self::Item, Error>;
 }
 
 /// A tree visitor that produces chunks, consisting of value triples and some
@@ -77,7 +77,7 @@ where
         index: Arc<LeafIndex<T>>,
         leaf: LeafLoader<T, R>,
         matching: &[bool],
-    ) -> Result<Self::Item> {
+    ) -> Result<Self::Item, Error> {
         // materialize the actual (offset, key, value) triples for the matching bits
         let data = if matching.any() {
             tracing::trace!("loading leaf {:?}", range);
@@ -219,7 +219,7 @@ where
     }
 
     #[allow(clippy::type_complexity)]
-    fn next_fallible(&mut self) -> Result<Option<V::Item>> {
+    fn next_fallible(&mut self) -> Result<Option<V::Item>, Error> {
         Ok(Some(loop {
             let head = match self.stack.last_mut() {
                 Some(i) => i,
@@ -332,7 +332,7 @@ where
     V: TreeVisitor<T, R>,
 {
     #[allow(clippy::type_complexity)]
-    type Item = Result<V::Item>;
+    type Item = Result<V::Item, Error>;
 
     fn next(&mut self) -> Option<<Self as Iterator>::Item> {
         match self.next_fallible() {
@@ -361,7 +361,11 @@ where
     }
 
     /// load a leaf given a leaf index
-    pub(crate) fn load_leaf(&self, stream: &Secrets, index: &LeafIndex<T>) -> Result<Option<Leaf>> {
+    pub(crate) fn load_leaf(
+        &self,
+        stream: &Secrets,
+        index: &LeafIndex<T>,
+    ) -> Result<Option<Leaf>, Error> {
         Ok(if let Some(link) = &index.link {
             Some(self.load_leaf_from_link(stream, link)?)
         } else {
@@ -370,7 +374,11 @@ where
     }
 
     /// load a leaf given a leaf index
-    pub(crate) fn load_leaf_from_link(&self, stream: &Secrets, link: &T::Link) -> Result<Leaf> {
+    pub(crate) fn load_leaf_from_link(
+        &self,
+        stream: &Secrets,
+        link: &T::Link,
+    ) -> Result<Leaf, Error> {
         #[cfg(feature = "metrics")]
         let _timer = prom::LEAF_LOAD_HIST.start_timer();
         let data = &self.get_block(link)?;
@@ -383,7 +391,7 @@ where
         secrets: &Secrets,
         sealed: impl Fn(&[Index<T>], u32) -> bool,
         link: T::Link,
-    ) -> Result<(Index<T>, Range<u64>)> {
+    ) -> Result<(Index<T>, Range<u64>), Error> {
         let index_key = secrets.index_key();
         let bytes = self.get_block(&link)?;
         let (children, byte_range) = deserialize_compressed::<T>(index_key, nonce::<T>(), &bytes)?;
@@ -410,7 +418,7 @@ where
         &self,
         secrets: &Secrets,
         link: &T::Link,
-    ) -> Result<Branch<T>> {
+    ) -> Result<Branch<T>, Error> {
         let res = self.branch_cache().get(link);
         match res {
             Some(branch) => Ok(branch),
@@ -422,7 +430,7 @@ where
         }
     }
 
-    fn get_block(&self, link: &T::Link) -> anyhow::Result<Box<[u8]>> {
+    fn get_block(&self, link: &T::Link) -> Result<Box<[u8]>, Error> {
         #[cfg(feature = "metrics")]
         let _timer = prom::BLOCK_GET_HIST.start_timer();
         let res = self.store.get(link);
@@ -438,15 +446,13 @@ where
         &self,
         secrets: &Secrets,
         link: &T::Link,
-    ) -> Result<Branch<T>> {
+    ) -> Result<Branch<T>, Error> {
         #[cfg(feature = "metrics")]
         let _timer = prom::BRANCH_LOAD_HIST.start_timer();
-        Ok({
-            let bytes = self.get_block(link)?;
-            let (children, byte_range) =
-                deserialize_compressed(secrets.index_key(), nonce::<T>(), &bytes)?;
-            Branch::<T>::new(children, byte_range)
-        })
+        let bytes = self.get_block(&link)?;
+        let (children, byte_range) =
+            deserialize_compressed(secrets.index_key(), nonce::<T>(), &bytes)?;
+        Ok(Branch::<T>::new(children, byte_range))
     }
 
     pub(crate) fn node_info(&self, secrets: &Secrets, index: &Index<T>) -> NodeInfo<T, R> {
@@ -469,18 +475,18 @@ where
         &self,
         secrets: &Secrets,
         index: &BranchIndex<T>,
-    ) -> Result<Option<Branch<T>>> {
+    ) -> Result<Option<Branch<T>>, Error> {
         let t0 = Instant::now();
-        let result = Ok(if let Some(link) = &index.link {
-            let bytes = self.get_block(link)?;
+        let result = if let Some(link) = &index.link {
+            let bytes = self.get_block(&link)?;
             let (children, byte_range) =
                 deserialize_compressed(secrets.index_key(), nonce::<T>(), &bytes)?;
             Some(Branch::<T>::new(children, byte_range))
         } else {
             None
-        });
+        };
         tracing::trace!("load_branch {}", t0.elapsed().as_secs_f64());
-        result
+        Ok(result)
     }
 
     pub(crate) fn get0<V: ReadCbor>(
@@ -488,7 +494,7 @@ where
         stream: &Secrets,
         index: &Index<T>,
         mut offset: u64,
-    ) -> Result<Option<(T::Key, V)>> {
+    ) -> Result<Option<(T::Key, V)>, Error> {
         if offset >= index.count() {
             return Ok(None);
         }
@@ -502,7 +508,7 @@ where
                         offset -= child.count();
                     }
                 }
-                Err(anyhow!("index out of bounds: {}", offset))
+                Err(Error::IndexOutOfBounds(offset))
             }
             NodeInfo::Leaf(index, leaf) => {
                 let k = index.keys.get(offset as usize).unwrap();
@@ -520,7 +526,7 @@ where
         index: &Index<T>,
         mut offset: u64,
         into: &mut Vec<Option<(T::Key, V)>>,
-    ) -> Result<()> {
+    ) -> Result<(), Error> {
         if offset >= index.count() {
             return Ok(());
         }
@@ -562,7 +568,7 @@ where
         secrets: Secrets,
         query: Q,
         index: Index<T>,
-    ) -> BoxStream<'static, Result<(u64, T::Key, V)>> {
+    ) -> BoxStream<'static, Result<(u64, T::Key, V), Error>> {
         self.stream_filtered_chunked0(secrets, query, index, &|_| {})
             .map_ok(|chunk| stream::iter(chunk.data).map(Ok))
             .try_flatten()
@@ -581,7 +587,7 @@ where
         query: Q,
         index: Index<T>,
         mk_extra: &'static F,
-    ) -> BoxStream<'static, Result<FilteredChunk<(u64, T::Key, V), E>>> {
+    ) -> BoxStream<'static, Result<FilteredChunk<(u64, T::Key, V), E>, Error>> {
         let iter = self.traverse0(secrets, query, index, mk_extra);
         stream::unfold(iter, |mut iter| async move {
             iter.next().map(|res| (res, iter))
@@ -595,7 +601,7 @@ where
         secrets: Secrets,
         query: Q,
         index: Index<T>,
-    ) -> impl Iterator<Item = Result<(u64, T::Key, V)>> {
+    ) -> impl Iterator<Item = Result<(u64, T::Key, V), Error>> {
         self.traverse0(secrets, query, index, &|_| {})
             .flat_map(|res| match res {
                 Ok(chunk) => chunk.data.into_iter().map(Ok).left_iter(),
@@ -607,7 +613,7 @@ where
         secrets: Secrets,
         query: Q,
         index: Index<T>,
-    ) -> impl Iterator<Item = Result<(u64, T::Key, V)>> {
+    ) -> impl Iterator<Item = Result<(u64, T::Key, V), Error>> {
         self.traverse_rev0(secrets, query, index, &|_| {})
             .flat_map(|res| match res {
                 Ok(chunk) => chunk.data.into_iter().map(Ok).left_iter(),
@@ -627,7 +633,7 @@ where
         query: Q,
         index: Index<T>,
         mk_extra: &'static F,
-    ) -> BoxStream<'static, Result<FilteredChunk<(u64, T::Key, V), E>>> {
+    ) -> BoxStream<'static, Result<FilteredChunk<(u64, T::Key, V), E>, Error>> {
         let iter = self.traverse_rev0(secrets.clone(), query, index, mk_extra);
         stream::unfold(iter, |mut iter| async move {
             iter.next().map(|res| (res, iter))
@@ -635,7 +641,12 @@ where
         .boxed()
     }
 
-    pub(crate) fn dump0(&self, secrets: &Secrets, index: &Index<T>, prefix: &str) -> Result<()> {
+    pub(crate) fn dump0(
+        &self,
+        secrets: &Secrets,
+        index: &Index<T>,
+        prefix: &str,
+    ) -> Result<(), Error> {
         match self.node_info(secrets, index) {
             NodeInfo::Branch(index, branch) => {
                 let branch = branch.load_cached()?;
@@ -662,7 +673,11 @@ where
         Ok(())
     }
 
-    pub(crate) fn roots_impl(&self, stream: &Secrets, index: &Index<T>) -> Result<Vec<Index<T>>> {
+    pub(crate) fn roots_impl(
+        &self,
+        stream: &Secrets,
+        index: &Index<T>,
+    ) -> Result<Vec<Index<T>>, Error> {
         let mut res = Vec::new();
         let mut level: i32 = i32::max_value();
         self.roots0(stream, index, &mut level, &mut res)?;
@@ -675,7 +690,7 @@ where
         index: &Index<T>,
         level: &mut i32,
         res: &mut Vec<Index<T>>,
-    ) -> Result<()> {
+    ) -> Result<(), Error> {
         if index.sealed() && index.level() as i32 <= *level {
             *level = index.level() as i32;
             res.push(index.clone());
@@ -700,7 +715,7 @@ where
         index: &Index<T>,
         level: &mut i32,
         msgs: &mut Vec<String>,
-    ) -> Result<()> {
+    ) -> Result<(), Error> {
         macro_rules! check {
             ($expression:expr) => {
                 if !$expression {
@@ -750,7 +765,7 @@ where
     }
 
     /// Checks if a node is packed to the left
-    pub(crate) fn is_packed0(&self, secrets: &Secrets, index: &Index<T>) -> Result<bool> {
+    pub(crate) fn is_packed0(&self, secrets: &Secrets, index: &Index<T>) -> Result<bool, Error> {
         Ok(
             if let NodeInfo::Branch(index, branch) = self.node_info(secrets, index) {
                 if index.sealed {

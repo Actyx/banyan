@@ -1,5 +1,6 @@
 //! helper methods to stream trees
 use crate::{
+    error::Error,
     index::NodeInfo,
     store::{BanyanValue, ReadOnlyStore},
     tree::Tree,
@@ -21,7 +22,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
         &self,
         query: Q,
         trees: S,
-    ) -> impl Stream<Item = anyhow::Result<(u64, T::Key, V)>> + Send
+    ) -> impl Stream<Item = Result<(u64, T::Key, V), Error>> + Send
     where
         Q: Query<T> + Clone,
         S: Stream<Item = Tree<T, V>> + Send + 'static,
@@ -44,7 +45,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
         trees: S,
         range: RangeInclusive<u64>,
         mk_extra: &'static F,
-    ) -> impl Stream<Item = anyhow::Result<FilteredChunk<(u64, T::Key, V), E>>> + Send + 'static
+    ) -> impl Stream<Item = Result<FilteredChunk<(u64, T::Key, V), E>, Error>> + Send + 'static
     where
         S: Stream<Item = Tree<T, V>> + Send + 'static,
         Q: Query<T> + Clone,
@@ -98,7 +99,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
         range: RangeInclusive<u64>,
         mk_extra: &'static F,
         thread_pool: ThreadPool,
-    ) -> impl Stream<Item = anyhow::Result<FilteredChunk<(u64, T::Key, V), E>>> + Send + 'static
+    ) -> impl Stream<Item = Result<FilteredChunk<(u64, T::Key, V), E>, Error>> + Send + 'static
     where
         S: Stream<Item = Tree<T, V>> + Send + 'static,
         Q: Query<T> + Clone,
@@ -145,7 +146,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
         trees: S,
         range: RangeInclusive<u64>,
         mk_extra: &'static F,
-    ) -> impl Stream<Item = anyhow::Result<FilteredChunk<(u64, T::Key, V), E>>> + Send + 'static
+    ) -> impl Stream<Item = Result<FilteredChunk<(u64, T::Key, V), E>, Error>> + Send + 'static
     where
         S: Stream<Item = Tree<T, V>> + Send + 'static,
         Q: Query<T> + Clone,

@@ -1,5 +1,5 @@
 use super::{BlockWriter, ReadOnlyStore};
-use anyhow::anyhow;
+use crate::error::Error;
 use fnv::FnvHashMap;
 use parking_lot::Mutex;
 use std::{hash::Hash, sync::Arc};
@@ -32,8 +32,8 @@ impl<L: Eq + Hash + Copy> MemStore<L> {
         }))
     }
 
-    pub fn into_inner(self) -> anyhow::Result<FnvHashMap<L, Box<[u8]>>> {
-        let inner = Arc::try_unwrap(self.0).map_err(|_| anyhow!("busy"))?;
+    pub fn into_inner(self) -> Result<FnvHashMap<L, Box<[u8]>>, Error> {
+        let inner = Arc::try_unwrap(self.0).map_err(|_| Error::Busy)?;
         let blocks = inner.blocks.into_inner();
         Ok(blocks.map)
     }
@@ -43,12 +43,12 @@ impl<L: Eq + Hash + Copy> MemStore<L> {
         blocks.map.get(link).cloned()
     }
 
-    fn put0(&self, data: Vec<u8>) -> anyhow::Result<L> {
+    fn put0(&self, data: Vec<u8>) -> Result<L, Error> {
         let digest = (self.0.digest)(&data);
         let len = data.len();
         let mut blocks = self.0.blocks.lock();
         if blocks.current_size + data.len() > self.0.max_size {
-            anyhow::bail!("full");
+            return Err(Error::Full);
         }
         let new = blocks.map.insert(digest, data.into()).is_none();
         if new {
@@ -60,17 +60,17 @@ impl<L: Eq + Hash + Copy> MemStore<L> {
 }
 
 impl<L: Eq + Hash + Copy + Send + Sync + 'static> ReadOnlyStore<L> for MemStore<L> {
-    fn get(&self, link: &L) -> anyhow::Result<Box<[u8]>> {
+    fn get(&self, link: &L) -> Result<Box<[u8]>, Error> {
         if let Some(value) = self.get0(link) {
             Ok(value)
         } else {
-            Err(anyhow!("not there"))
+            Err(Error::NotThere)
         }
     }
 }
 
 impl<L: Eq + Hash + Send + Sync + Copy + 'static> BlockWriter<L> for MemStore<L> {
-    fn put(&mut self, data: Vec<u8>) -> anyhow::Result<L> {
+    fn put(&mut self, data: Vec<u8>) -> Result<L, Error> {
         self.put0(data)
     }
 }

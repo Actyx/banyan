@@ -1,10 +1,10 @@
 use super::{Forest, Secrets, TreeTypes};
 use crate::{
+    error::Error,
     index::{CompactSeq, Index, NodeInfo},
     query::Query,
     store::ReadOnlyStore,
 };
-use anyhow::Result;
 use smallvec::{smallvec, SmallVec};
 
 #[derive(PartialEq)]
@@ -102,7 +102,7 @@ where
     R: ReadOnlyStore<T::Link>,
     Q: Query<T>,
 {
-    type Item = Result<Index<T>>;
+    type Item = Result<Index<T>, Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let res = loop {

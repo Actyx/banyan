@@ -1,5 +1,6 @@
 //! creation and traversal of banyan trees
 use super::index::*;
+use crate::error::Error;
 use crate::store::{BlockWriter, BranchCache, ReadOnlyStore};
 use core::{fmt::Debug, hash::Hash, iter::FromIterator, ops::Range};
 use libipld::cbor::DagCbor;
@@ -242,12 +243,22 @@ impl Config {
         }
     }
 
-    pub fn validate(&self) -> anyhow::Result<()> {
-        anyhow::ensure!(self.max_summary_branches > 1);
-        anyhow::ensure!(self.max_key_branches > 0);
-        anyhow::ensure!(self.target_leaf_size > 0 && self.target_leaf_size <= 1024 * 1024);
-        anyhow::ensure!(self.max_uncompressed_leaf_size <= 16 * 1024 * 1024);
-        anyhow::ensure!(self.zstd_level >= 1 && self.zstd_level <= 22);
+    pub fn validate(&self) -> Result<(), Error> {
+        if !self.max_summary_branches > 1 {
+            return Err(Error::Invalid);
+        }
+        if !self.max_key_branches > 0 {
+            return Err(Error::Invalid);
+        }
+        if !self.target_leaf_size > 0 && self.target_leaf_size <= 1024 * 1024 {
+            return Err(Error::Invalid);
+        }
+        if !self.max_uncompressed_leaf_size <= 16 * 1024 * 1024 {
+            return Err(Error::Invalid);
+        }
+        if !self.zstd_level >= 1 && self.zstd_level <= 22 {
+            return Err(Error::Invalid);
+        }
         Ok(())
     }
 }

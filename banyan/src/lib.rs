@@ -56,6 +56,7 @@
 //! [chacha20]: https://en.wikipedia.org/wiki/Salsa20#ChaCha_variant
 //! [ipfs]: https://ipfs.io/
 //! [B-Trees]: https://en.wikipedia.org/wiki/B-tree
+pub mod error;
 mod forest;
 pub mod index;
 pub mod query;
@@ -81,7 +82,7 @@ extern crate quickcheck_macros;
 
 /// Register all prometheus metrics
 #[cfg(feature = "metrics")]
-pub fn register_metrics(registry: &Registry) -> anyhow::Result<()> {
+pub fn register_metrics(registry: &Registry) -> Result<(), crate::error::Error> {
     forest::register_metrics(registry)?;
     Ok(())
 }
