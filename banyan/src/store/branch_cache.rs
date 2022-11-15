@@ -38,13 +38,11 @@ impl<T: TreeTypes> Default for BranchCache<T> {
 impl<T: TreeTypes> BranchCache<T> {
     /// Passing a capacity of 0 disables the cache.
     pub fn new(capacity: usize) -> Self {
-        let cache = if capacity == 0 {
-            None
-        } else {
-            Some(Arc::new(Mutex::new(WeightCache::new(
-                NonZeroUsize::new(capacity).expect("Cache capacity must be "),
-            ))))
-        };
+        let cache = NonZeroUsize::new(capacity)
+            .map(WeightCache::new)
+            .map(Mutex::new)
+            .map(Arc::new);
+
         Self(cache)
     }
 
