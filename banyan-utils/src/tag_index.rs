@@ -194,7 +194,7 @@ impl std::fmt::Display for Expression {
             f,
             "{}",
             match self {
-                Expression::Literal(text) => format!("'{}'", text.replace("'", "''")),
+                Expression::Literal(text) => format!("'{}'", text.replace('\'', "''")),
                 Expression::And(es) => es
                     .iter()
                     .map(child_to_string)

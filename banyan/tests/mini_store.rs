@@ -42,7 +42,7 @@ impl MiniStore {
 
     pub async fn push(&self, xs: Vec<(Key, u64)>) -> anyhow::Result<()> {
         let mut guard = self.builder.lock().await;
-        let txn = self.forest.transaction(|x| (x.clone(), x));
+        let mut txn = self.forest.transaction(|x| (x.clone(), x));
         txn.extend_unpacked(&mut guard, xs)?;
         self.current.set(guard.snapshot());
         Ok(())

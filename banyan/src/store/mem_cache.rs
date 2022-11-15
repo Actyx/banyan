@@ -109,7 +109,7 @@ impl<L, I> MemWriter<L, I> {
 impl<L: Eq + Hash + Send + Sync + Copy + 'static, I: BlockWriter<L> + Send + Sync + 'static>
     BlockWriter<L> for MemWriter<L, I>
 {
-    fn put(&self, data: Vec<u8>) -> anyhow::Result<L> {
+    fn put(&mut self, data: Vec<u8>) -> anyhow::Result<L> {
         if let Some(cache) = self.cache.as_ref() {
             if data.len() <= cache.max_size.into() {
                 let copy: Box<[u8]> = data.as_slice().into();

@@ -12,8 +12,8 @@ use crate::{
     util::{nonce, BoolSliceExt, IterExt},
 };
 use anyhow::{anyhow, Result};
+use cbor_data::codec::ReadCbor;
 use futures::{prelude::*, stream::BoxStream};
-use libipld::cbor::DagCbor;
 use smallvec::{smallvec, SmallVec};
 use std::{iter, marker::PhantomData, ops::Range, sync::Arc, time::Instant};
 
@@ -80,15 +80,15 @@ where
     ) -> Result<Self::Item> {
         // materialize the actual (offset, key, value) triples for the matching bits
         let data = if matching.any() {
-            tracing::debug!("loading leaf {:?}", range);
+            tracing::trace!("loading leaf {:?}", range);
             let leaf = leaf.load()?;
             let offsets = matching
                 .iter()
                 .enumerate()
                 .filter(|(_, m)| **m)
                 .map(|(i, _)| range.start + i as u64);
-            let keys = index.select_keys(&matching);
-            let elems: Vec<V> = leaf.as_ref().select(&matching)?;
+            let keys = index.select_keys(matching);
+            let elems: Vec<V> = leaf.as_ref().select(matching)?;
             offsets
                 .zip(keys)
                 .zip(elems)
@@ -442,7 +442,7 @@ where
         #[cfg(feature = "metrics")]
         let _timer = prom::BRANCH_LOAD_HIST.start_timer();
         Ok({
-            let bytes = self.get_block(&link)?;
+            let bytes = self.get_block(link)?;
             let (children, byte_range) =
                 deserialize_compressed(secrets.index_key(), nonce::<T>(), &bytes)?;
             Branch::<T>::new(children, byte_range)
@@ -472,18 +472,18 @@ where
     ) -> Result<Option<Branch<T>>> {
         let t0 = Instant::now();
         let result = Ok(if let Some(link) = &index.link {
-            let bytes = self.get_block(&link)?;
+            let bytes = self.get_block(link)?;
             let (children, byte_range) =
                 deserialize_compressed(secrets.index_key(), nonce::<T>(), &bytes)?;
             Some(Branch::<T>::new(children, byte_range))
         } else {
             None
         });
-        tracing::debug!("load_branch {}", t0.elapsed().as_secs_f64());
+        tracing::trace!("load_branch {}", t0.elapsed().as_secs_f64());
         result
     }
 
-    pub(crate) fn get0<V: DagCbor>(
+    pub(crate) fn get0<V: ReadCbor>(
         &self,
         stream: &Secrets,
         index: &Index<T>,
@@ -514,7 +514,7 @@ where
         }
     }
 
-    pub(crate) fn collect0<V: DagCbor>(
+    pub(crate) fn collect0<V: ReadCbor>(
         &self,
         stream: &Secrets,
         index: &Index<T>,
@@ -597,11 +597,10 @@ where
         index: Index<T>,
     ) -> impl Iterator<Item = Result<(u64, T::Key, V)>> {
         self.traverse0(secrets, query, index, &|_| {})
-            .map(|res| match res {
+            .flat_map(|res| match res {
                 Ok(chunk) => chunk.data.into_iter().map(Ok).left_iter(),
                 Err(cause) => iter::once(Err(cause)).right_iter(),
             })
-            .flatten()
     }
     pub(crate) fn iter_filtered_reverse0<Q: Query<T>, V: BanyanValue>(
         &self,
@@ -610,11 +609,10 @@ where
         index: Index<T>,
     ) -> impl Iterator<Item = Result<(u64, T::Key, V)>> {
         self.traverse_rev0(secrets, query, index, &|_| {})
-            .map(|res| match res {
+            .flat_map(|res| match res {
                 Ok(chunk) => chunk.data.into_iter().map(Ok).left_iter(),
                 Err(cause) => iter::once(Err(cause)).right_iter(),
             })
-            .flatten()
     }
 
     #[allow(clippy::type_complexity)]

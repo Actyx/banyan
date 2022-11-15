@@ -18,7 +18,7 @@ use crate::{
     util::{is_sorted, BoolSliceExt},
 };
 use anyhow::{ensure, Result};
-use libipld::cbor::DagCbor;
+use cbor_data::codec::WriteCbor;
 use std::iter;
 
 /// basic random access append only tree
@@ -33,8 +33,8 @@ where
     }
 
     /// create a leaf from scratch from an interator
-    fn leaf_from_iter<V: DagCbor>(
-        &self,
+    fn leaf_from_iter<V: WriteCbor>(
+        &mut self,
         from: &mut iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
         stream: &mut StreamBuilderState,
     ) -> Result<LeafIndex<T>> {
@@ -42,7 +42,7 @@ where
         self.extend_leaf(&[], None, from, stream)
     }
 
-    fn put_block(&self, data: Vec<u8>) -> anyhow::Result<T::Link> {
+    fn put_block(&mut self, data: Vec<u8>) -> anyhow::Result<T::Link> {
         #[cfg(feature = "metrics")]
         let _timer = prom::BLOCK_PUT_HIST.start_timer();
         #[cfg(feature = "metrics")]
@@ -53,8 +53,8 @@ where
     /// Creates a leaf from a sequence that either contains all items from the sequence, or is full
     ///
     /// The result is the index of the leaf. The iterator will contain the elements that did not fit.
-    fn extend_leaf<V: DagCbor>(
-        &self,
+    fn extend_leaf<V: WriteCbor>(
+        &mut self,
         compressed: &[u8],
         keys: Option<T::KeySeq>,
         from: &mut iter::Peekable<impl Iterator<Item = (T::Key, V)>>,
@@ -88,7 +88,7 @@ where
             sealed,
             keys,
         };
-        tracing::debug!(
+        tracing::trace!(
             "leaf created count={} bytes={} sealed={}",
             index.keys.count(),
             index.value_bytes,
@@ -99,8 +99,8 @@ where
 
     /// given some children and some additional elements, creates a node with the given
     /// children and new children from `from` until it is full
-    pub(crate) fn extend_branch<V: DagCbor>(
-        &self,
+    pub(crate) fn extend_branch<V: WriteCbor>(
+        &mut self,
         mut children: Vec<Index<T>>,
         level: u32,
         from: &mut iter::Peekable<impl Iterator<Item = (T::Key, V)> + Send>,
@@ -142,7 +142,7 @@ where
             children.push(child);
         }
         let index = self.new_branch(&children, stream, mode)?;
-        tracing::debug!(
+        tracing::trace!(
             "branch created count={} value_bytes={} key_bytes={} sealed={}",
             index.summaries.count(),
             index.value_bytes,
@@ -163,8 +163,8 @@ where
     /// Given an iterator of values and a level, consume from the iterator until either
     /// the iterator is consumed or the node is "filled". At the end of this call, the
     /// iterator will contain the remaining elements that did not "fit".
-    fn fill_node<V: DagCbor>(
-        &self,
+    fn fill_node<V: WriteCbor>(
+        &mut self,
         level: u32,
         from: &mut iter::Peekable<impl Iterator<Item = (T::Key, V)> + Send>,
         stream: &mut StreamBuilderState,
@@ -182,7 +182,7 @@ where
     ///
     /// The level will be the max level of the children + 1. We do not want to support branches that are artificially high.
     fn new_branch(
-        &self,
+        &mut self,
         children: &[Index<T>],
         stream: &mut StreamBuilderState,
         mode: CreateMode,
@@ -196,11 +196,10 @@ where
         let summaries = children
             .iter()
             .map(|child| child.summarize())
-            .collect::<Vec<_>>();
+            .collect::<T::SummarySeq>();
         let value_bytes = children.iter().map(|x| x.value_bytes()).sum();
-        let sealed = stream.config().branch_sealed(&children, level);
-        let summaries: T::SummarySeq = summaries.into_iter().collect();
-        let (link, encoded_children_len) = self.persist_branch(&children, stream)?;
+        let sealed = stream.config().branch_sealed(children, level);
+        let (link, encoded_children_len) = self.persist_branch(children, stream)?;
         let key_bytes = children.iter().map(|x| x.key_bytes()).sum::<u64>() + encoded_children_len;
         Ok(BranchIndex {
             level,
@@ -216,8 +215,8 @@ where
     /// extends an existing node with some values
     ///
     /// The result will have the max level `level`. `from` will contain all elements that did not fit.
-    pub(crate) fn extend_above<V: DagCbor>(
-        &self,
+    pub(crate) fn extend_above<V: WriteCbor>(
+        &mut self,
         node: Option<&Index<T>>,
         level: u32,
         from: &mut iter::Peekable<impl Iterator<Item = (T::Key, V)> + Send>,
@@ -249,7 +248,7 @@ where
     }
 
     pub(crate) fn extend_unpacked0<I, V>(
-        &self,
+        &mut self,
         index: Option<&Index<T>>,
         from: I,
         stream: &mut StreamBuilderState,
@@ -257,7 +256,7 @@ where
     where
         I: IntoIterator<Item = (T::Key, V)>,
         I::IntoIter: Send,
-        V: DagCbor,
+        V: WriteCbor,
     {
         let mut from = from.into_iter().peekable();
         if from.peek().is_none() {
@@ -284,13 +283,13 @@ where
     /// extends an existing node with some values
     ///
     /// The result will have the same level as the input. `from` will contain all elements that did not fit.
-    fn extend0<V: DagCbor>(
-        &self,
+    fn extend0<V: WriteCbor>(
+        &mut self,
         index: &Index<T>,
         from: &mut iter::Peekable<impl Iterator<Item = (T::Key, V)> + Send>,
         stream: &mut StreamBuilderState,
     ) -> Result<Index<T>> {
-        tracing::debug!(
+        tracing::trace!(
             "extend {} {} {} {}",
             index.level(),
             index.key_bytes(),
@@ -303,14 +302,14 @@ where
         let secrets = stream.secrets().clone();
         Ok(match self.node_info(&secrets, index) {
             NodeInfo::Leaf(index, leaf) => {
-                tracing::debug!("extending existing leaf");
+                tracing::trace!("extending existing leaf");
                 let leaf = leaf.load()?;
                 let keys = index.keys.clone();
                 self.extend_leaf(leaf.as_ref().compressed(), Some(keys), from, stream)?
                     .into()
             }
             NodeInfo::Branch(index, branch) => {
-                tracing::debug!("extending existing branch");
+                tracing::trace!("extending existing branch");
                 let branch = branch.load_cached()?;
                 let mut children = branch.children.to_vec();
                 if let Some(last_child) = children.last_mut() {
@@ -329,7 +328,7 @@ where
 
     /// Performs a single step of simplification on a sequence of sealed roots of descending level
     pub(crate) fn simplify_roots(
-        &self,
+        &mut self,
         roots: &mut Vec<Index<T>>,
         from: usize,
         stream: &mut StreamBuilderState,
@@ -350,7 +349,7 @@ where
     }
 
     fn persist_branch(
-        &self,
+        &mut self,
         items: &[Index<T>],
         stream: &mut StreamBuilderState,
     ) -> Result<(T::Link, u64)> {
@@ -358,13 +357,13 @@ where
         let _timer = prom::BRANCH_STORE_HIST.start_timer();
         let level = stream.config().zstd_level;
         let key = *stream.index_key();
-        let cbor = serialize_compressed(&key, nonce::<T>(), &mut stream.offset, &items, level)?;
+        let cbor = serialize_compressed(&key, nonce::<T>(), &mut stream.offset, items, level)?;
         let len = cbor.len() as u64;
         Ok((self.put_block(cbor)?, len))
     }
 
     pub(crate) fn retain0<Q: Query<T> + Send + Sync>(
-        &self,
+        &mut self,
         offset: u64,
         query: &Q,
         index: &Index<T>,
@@ -431,7 +430,7 @@ where
     }
 
     pub(crate) fn repair0(
-        &self,
+        &mut self,
         index: &Index<T>,
         report: &mut Vec<String>,
         level: &mut i32,

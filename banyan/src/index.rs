@@ -44,6 +44,7 @@ use crate::{
     CipherOffset, Forest, Secrets,
 };
 use anyhow::{anyhow, Result};
+use cbor_data::codec::ReadCbor;
 use libipld::{
     cbor::{DagCbor, DagCborCodec},
     codec::{Decode, Encode},
@@ -307,7 +308,7 @@ impl Leaf {
         Self { items, byte_range }
     }
 
-    pub fn child_at<T: DagCbor>(&self, offset: u64) -> Result<T> {
+    pub fn child_at<T: ReadCbor>(&self, offset: u64) -> Result<T> {
         self.as_ref()
             .get(offset)?
             .ok_or_else(|| anyhow!("index out of bounds {}", offset))
@@ -434,7 +435,7 @@ pub(crate) fn serialize_compressed<T: TreeTypes>(
     items: &[Index<T>],
     level: i32,
 ) -> Result<Vec<u8>> {
-    let zs = ZstdDagCborSeq::from_iter(items, level)?;
+    let zs = ZstdDagCborSeq::from_iter_ipld(items, level)?;
     zs.into_encrypted(key, nonce, state)
 }
 
@@ -444,7 +445,7 @@ pub(crate) fn deserialize_compressed<T: TreeTypes>(
     ipld: &[u8],
 ) -> Result<(Vec<Index<T>>, Range<u64>)> {
     let (seq, byte_range) = ZstdDagCborSeq::decrypt(ipld, key, nonce)?;
-    let seq = seq.items::<Index<T>>()?;
+    let seq = seq.items_ipld::<Index<T>>()?;
     Ok((seq, byte_range))
 }
 

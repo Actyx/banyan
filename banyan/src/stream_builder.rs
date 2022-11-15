@@ -227,7 +227,7 @@ impl<'a, T: TreeTypes, V> Deref for StreamTransaction<'a, T, V> {
     type Target = StreamBuilder<T, V>;
 
     fn deref(&self) -> &Self::Target {
-        &self.builder
+        self.builder
     }
 }
 

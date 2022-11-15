@@ -70,7 +70,7 @@ impl<L: Eq + Hash + Copy + Send + Sync + 'static> ReadOnlyStore<L> for MemStore<
 }
 
 impl<L: Eq + Hash + Send + Sync + Copy + 'static> BlockWriter<L> for MemStore<L> {
-    fn put(&self, data: Vec<u8>) -> anyhow::Result<L> {
+    fn put(&mut self, data: Vec<u8>) -> anyhow::Result<L> {
         self.put0(data)
     }
 }

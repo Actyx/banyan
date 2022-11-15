@@ -50,11 +50,10 @@ fn compare_filtered_chunked(t: TestTree, filter: TestFilter) -> anyhow::Result<b
     let (tree, txn, xs) = t.tree()?;
     let actual = txn
         .iter_filtered_chunked(&tree, filter.query(), &|_| ())
-        .map(|chunk_result| match chunk_result {
+        .flat_map(|chunk_result| match chunk_result {
             Ok(chunk) => chunk.data.into_iter().map(Ok).boxed(),
             Err(cause) => iter::once(Err(cause)).boxed(),
         })
-        .flatten()
         .collect::<anyhow::Result<Vec<_>>>()?;
     let expected = xs
         .iter()
@@ -70,21 +69,19 @@ fn compare_filtered_chunked_with_reverse(t: TestTree, filter: TestFilter) -> any
     let (tree, txn, xs) = t.tree()?;
     let mut reverse = txn
         .iter_filtered_chunked_reverse(&tree, filter.query(), &|_| ())
-        .map(|chunk_result| match chunk_result {
+        .flat_map(|chunk_result| match chunk_result {
             Ok(chunk) => chunk.data.into_iter().rev().map(Ok).boxed(),
             Err(cause) => iter::once(Err(cause)).boxed(),
         })
-        .flatten()
         .collect::<anyhow::Result<Vec<_>>>()?;
     reverse.reverse();
 
     let forward = txn
         .iter_filtered_chunked(&tree, filter.query(), &|_| ())
-        .map(|chunk_result| match chunk_result {
+        .flat_map(|chunk_result| match chunk_result {
             Ok(chunk) => chunk.data.into_iter().map(Ok).boxed(),
             Err(cause) => iter::once(Err(cause)).boxed(),
         })
-        .flatten()
         .collect::<anyhow::Result<Vec<_>>>()?;
     let expected = xs
         .iter()
@@ -101,11 +98,10 @@ fn compare_filtered_chunked_reverse(t: TestTree, filter: TestFilter) -> anyhow::
     let (tree, txn, xs) = t.tree()?;
     let actual = txn
         .iter_filtered_chunked_reverse(&tree, filter.query(), &|_| ())
-        .map(|chunk_result| match chunk_result {
+        .flat_map(|chunk_result| match chunk_result {
             Ok(chunk) => chunk.data.into_iter().rev().map(Ok).boxed(),
             Err(cause) => iter::once(Err(cause)).boxed(),
         })
-        .flatten()
         .collect::<anyhow::Result<Vec<_>>>()?;
     let expected = xs
         .iter()
@@ -224,11 +220,11 @@ fn build_get(t: TestTree) -> anyhow::Result<bool> {
 
 fn do_build_pack(xss: Vec<Vec<(Key, u64)>>) -> anyhow::Result<bool> {
     let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
-    let forest = txn(store, 1000);
+    let mut forest = txn(store, 1000);
     let mut builder = StreamBuilder::<TT, u64>::debug();
 
     // flattened xss for reference
-    let xs = xss.iter().cloned().flatten().collect::<Vec<_>>();
+    let xs = xss.iter().flatten().cloned().collect::<Vec<_>>();
     // build complex unbalanced tree
     for xs in xss.iter() {
         forest.extend_unpacked(&mut builder, xs.clone()).unwrap();
@@ -276,7 +272,7 @@ fn build_pack_2() {
 }
 
 fn do_retain(t: TestTree) -> anyhow::Result<bool> {
-    let (mut builder, txn, xs) = t.builder()?;
+    let (mut builder, mut txn, xs) = t.builder()?;
     let tree0 = builder.snapshot();
     txn.retain(&mut builder, &OffsetRangeQuery::from(xs.len() as u64..))?;
     let tree1 = builder.snapshot();
@@ -338,7 +334,7 @@ fn filter_test_simple_2() -> anyhow::Result<()> {
 #[test]
 fn transaction_1() -> anyhow::Result<()> {
     let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
-    let forest = txn(store, 1000);
+    let mut forest = txn(store, 1000);
     let mut builder = StreamBuilder::<TT, u64>::debug();
     forest.extend(&mut builder, vec![(Key(1), 1)])?;
     // transaction that is dropped without committing
@@ -360,7 +356,7 @@ fn transaction_1() -> anyhow::Result<()> {
 #[tokio::test]
 async fn stream_test_simple() -> anyhow::Result<()> {
     let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
-    let forest = txn(store, 1000);
+    let mut forest = txn(store, 1000);
     let mut trees = Vec::new();
     for n in 1..=10u64 {
         let mut builder = StreamBuilder::<TT, u64>::debug();
@@ -463,7 +459,7 @@ async fn do_stream_trees_chunked_reverse_should_honour_an_inclusive_upper_bound(
 #[tokio::test]
 async fn stream_trees_chunked_reverse_should_complete() {
     let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
-    let forest = txn(store, 1000);
+    let mut forest = txn(store, 1000);
     let secrets = Secrets::default();
     let config = Config::debug();
     let mut builder = StreamBuilder::<TT, u64>::new(config, secrets);
@@ -484,7 +480,7 @@ async fn stream_trees_chunked_reverse_should_complete() {
 #[tokio::test]
 async fn stream_trees_chunked_should_complete() {
     let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
-    let forest = txn(store, 1000);
+    let mut forest = txn(store, 1000);
     let secrets = Secrets::default();
     let config = Config::debug();
     let mut builder = StreamBuilder::<TT, u64>::new(config, secrets);
@@ -521,7 +517,7 @@ fn deep_tree_traversal_no_stack_overflow() -> anyhow::Result<()> {
         .stack_size(65536)
         .spawn(|| {
             let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
-            let forest = txn(store, 1000);
+            let mut forest = txn(store, 1000);
             let mut builder = StreamBuilder::<TT, u64>::debug();
             let elems = (0u64..100).map(|i| (i, Key(i), i)).collect::<Vec<_>>();
             for (_offset, k, v) in &elems {
@@ -608,24 +604,24 @@ fn branch_index_wire_format() -> anyhow::Result<()> {
     let expected = from_cbor_me(
         r#"
 
-A7                                      # map(7)
-65                                   # text(5)
-   636F756E74                        # "count"
-19 8FB0                              # unsigned(36784)
-69                                   # text(9)
-   6B65795F6279746573                # "key_bytes"
-1A 000108FA                          # unsigned(67834)
-65                                   # text(5)
-   6C6576656C                        # "level"
-03                                   # unsigned(3)
+A7                                   # map(7)
 64                                   # text(4)
    6C696E6B                          # "link"
 D8 2A                                # tag(42)
    58 25                             # bytes(37)
       0001711220F3BFFBA2B0BBC80A1C4BA39C789BB8E1EEF08DC2792E4BEB0FBAFF1369B7A035 # "\x00\x01q\x12 \xF3\xBF\xFB\xA2\xB0\xBB\xC8\n\x1CK\xA3\x9Cx\x9B\xB8\xE1\xEE\xF0\x8D\xC2y.K\xEB\x0F\xBA\xFF\x13i\xB7\xA05"
+65                                   # text(5)
+   636F756E74                        # "count"
+19 8FB0                              # unsigned(36784)
+65                                   # text(5)
+   6C6576656C                        # "level"
+03                                   # unsigned(3)
 66                                   # text(6)
    7365616C6564                      # "sealed"
 F5                                   # primitive(21)
+69                                   # text(9)
+   6B65795F6279746573                # "key_bytes"
+1A 000108FA                          # unsigned(67834)
 69                                   # text(9)
    73756D6D6172696573                # "summaries"
 81                                   # array(1)
@@ -643,6 +639,45 @@ F5                                   # primitive(21)
     )?;
     println!("{}", hex::encode(&serialized));
     assert_eq!(serialized, expected);
+
+    // check that the old format (which didn’t sort by map key length) is still accepted
+    let decoded = DagCborCodec.decode::<Index<TT>>(&*from_cbor_me(r#"
+
+    A7                                      # map(7)
+    65                                   # text(5)
+       636F756E74                        # "count"
+    19 8FB0                              # unsigned(36784)
+    69                                   # text(9)
+       6B65795F6279746573                # "key_bytes"
+    1A 000108FA                          # unsigned(67834)
+    65                                   # text(5)
+       6C6576656C                        # "level"
+    03                                   # unsigned(3)
+    64                                   # text(4)
+       6C696E6B                          # "link"
+    D8 2A                                # tag(42)
+       58 25                             # bytes(37)
+          0001711220F3BFFBA2B0BBC80A1C4BA39C789BB8E1EEF08DC2792E4BEB0FBAFF1369B7A035 # "\x00\x01q\x12 \xF3\xBF\xFB\xA2\xB0\xBB\xC8\n\x1CK\xA3\x9Cx\x9B\xB8\xE1\xEE\xF0\x8D\xC2y.K\xEB\x0F\xBA\xFF\x13i\xB7\xA05"
+    66                                   # text(6)
+       7365616C6564                      # "sealed"
+    F5                                   # primitive(21)
+    69                                   # text(9)
+       73756D6D6172696573                # "summaries"
+    81                                   # array(1)
+       82                                # array(2)
+          82                             # array(2)
+             00                          # unsigned(0)
+             01                          # unsigned(1)
+          82                             # array(2)
+             01                          # unsigned(1)
+             02                          # unsigned(2)
+    6B                                   # text(11)
+       76616C75655F6279746573            # "value_bytes"
+    1A 075C2380                          # unsigned(123478912
+    "#)?
+    )?;
+    assert_eq!(DagCborCodec.encode(&decoded)?, expected);
+
     Ok(())
 }
 
@@ -666,7 +701,7 @@ fn create_interesting_tree(n: usize) -> anyhow::Result<TreeFixture> {
     };
     let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
     let forest = Forest::new(store.clone(), BranchCache::new(1 << 20));
-    let txn = txn(store, 1 << 20);
+    let mut txn = txn(store, 1 << 20);
     let secrets = Secrets::default();
     let events: Vec<_> = (0..n)
         .into_iter()
@@ -725,7 +760,7 @@ fn offset_range_test_simple() -> anyhow::Result<()> {
         let range = start as u64..=end as u64;
         let res = forest
             .iter_filtered_chunked(&tree, OffsetRangeQuery::from(range), &|_| ())
-            .map(move |item| {
+            .flat_map(move |item| {
                 item.map(|chunk| {
                     chunk
                         .data
@@ -734,7 +769,6 @@ fn offset_range_test_simple() -> anyhow::Result<()> {
                         .collect::<Vec<_>>()
                 })
             })
-            .flatten()
             .flatten()
             .collect::<Vec<_>>();
         assert_eq!(res, payloads[start..=end]);
@@ -810,7 +844,7 @@ fn retain2() -> anyhow::Result<()> {
 fn build1() -> anyhow::Result<()> {
     let xs = (0..10).map(|i| (Key(i), i)).collect::<Vec<_>>();
     let store = MemStore::new(usize::max_value(), Sha256Digest::digest);
-    let forest = txn(store, 1000);
+    let mut forest = txn(store, 1000);
     let mut tree = StreamBuilder::debug();
     forest.extend(&mut tree, xs)?;
     forest.dump(&tree.snapshot())?;
