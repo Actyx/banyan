@@ -57,7 +57,7 @@ struct Payload(Ipld);
 impl WriteCbor for Payload {
     fn write_cbor<W: cbor_data::Writer>(&self, w: W) -> W::Output {
         let bytes = DagCborCodec.encode(&self.0).unwrap();
-        w.write_trusting(&*bytes)
+        w.write_trusting(&bytes)
     }
 }
 

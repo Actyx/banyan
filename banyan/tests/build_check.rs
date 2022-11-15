@@ -641,7 +641,7 @@ F5                                   # primitive(21)
     assert_eq!(serialized, expected);
 
     // check that the old format (which didn’t sort by map key length) is still accepted
-    let decoded = DagCborCodec.decode::<Index<TT>>(&*from_cbor_me(r#"
+    let decoded = DagCborCodec.decode::<Index<TT>>(&from_cbor_me(r#"
 
     A7                                      # map(7)
     65                                   # text(5)

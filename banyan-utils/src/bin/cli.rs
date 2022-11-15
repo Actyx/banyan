@@ -502,7 +502,7 @@ async fn main() -> Result<()> {
         }
         Command::RecvStream { topic } => {
             let secrets = Secrets::default();
-            let links = pubsub_sub(&*topic)?
+            let links = pubsub_sub(&topic)?
                 .map_err(anyhow::Error::new)
                 .and_then(|data| future::ready(String::from_utf8(data).map_err(anyhow::Error::new)))
                 .and_then(|data| future::ready(Sha256Digest::from_str(&data)));
@@ -541,7 +541,7 @@ async fn main() -> Result<()> {
                 offset += 1;
                 if let Some(cid) = tree.link() {
                     println!("publishing {} to {}", cid, topic);
-                    pubsub_pub(&*topic, cid.to_string().as_bytes()).await?;
+                    pubsub_pub(&topic, cid.to_string().as_bytes()).await?;
                 }
             }
         }

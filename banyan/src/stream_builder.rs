@@ -233,7 +233,7 @@ impl<'a, T: TreeTypes, V> Deref for StreamTransaction<'a, T, V> {
 
 impl<'a, T: TreeTypes, V> DerefMut for StreamTransaction<'a, T, V> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.builder
+        self.builder
     }
 }
 

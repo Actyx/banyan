@@ -26,7 +26,7 @@ pub trait QueryExt<TT> {
     fn boxed(self) -> Arc<dyn Query<TT>>;
 }
 
-impl<'a, TT: TreeTypes, Q: Query<TT> + 'static> QueryExt<TT> for Q {
+impl<TT: TreeTypes, Q: Query<TT> + 'static> QueryExt<TT> for Q {
     fn boxed(self) -> Arc<dyn Query<TT>> {
         Arc::new(self)
     }
