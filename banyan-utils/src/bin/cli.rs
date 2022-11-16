@@ -60,11 +60,11 @@ impl FromStr for Storage {
     fn from_str(s: &str) -> Result<Self> {
         let s = match s {
             "memory" => Self::Memory(MemStore::new(usize::max_value(), Sha256Digest::new)),
-            "ipfs" => Self::Ipfs(IpfsStore::new()?),
+            "ipfs" => Self::Ipfs(IpfsStore::new()),
             x => Self::Sqlite(SqliteStore::new(BlockStore::open(
                 x,
                 ipfs_sqlite_block_store::Config::default(),
-            )?)?),
+            )?)),
         };
         Ok(s)
     }
