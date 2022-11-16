@@ -18,8 +18,8 @@ pub enum Error {
     #[error("Found purged data")]
     FoundPurgedData,
 
-    #[error("Full")]
-    Full,
+    #[error("Max size exceeded")]
+    MaxSizeExceeded,
 
     #[error("Not there")]
     NotThere,

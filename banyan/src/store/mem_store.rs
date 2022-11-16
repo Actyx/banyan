@@ -48,7 +48,7 @@ impl<L: Eq + Hash + Copy> MemStore<L> {
         let len = data.len();
         let mut blocks = self.0.blocks.lock();
         if blocks.current_size + data.len() > self.0.max_size {
-            return Err(Error::Full);
+            return Err(Error::MaxSizeExceeded);
         }
         let new = blocks.map.insert(digest, data.into()).is_none();
         if new {
