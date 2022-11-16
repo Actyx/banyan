@@ -33,7 +33,7 @@ impl<L: Eq + Hash + Copy> MemStore<L> {
     }
 
     pub fn into_inner(self) -> Result<FnvHashMap<L, Box<[u8]>>, Error> {
-        let inner = Arc::try_unwrap(self.0).map_err(|_| Error::Busy)?;
+        let inner = Arc::try_unwrap(self.0).map_err(|_| Error::MultipleStrongRef)?;
         let blocks = inner.blocks.into_inner();
         Ok(blocks.map)
     }

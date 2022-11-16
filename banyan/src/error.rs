@@ -24,8 +24,8 @@ pub enum Error {
     #[error("Not there")]
     NotThere,
 
-    #[error("Busy")]
-    Busy,
+    #[error("Multiple strong references")]
+    MultipleStrongRef,
 
     #[error("seek offset wraparound")]
     SeekOffsetWraparound,
