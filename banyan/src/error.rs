@@ -9,8 +9,8 @@ pub enum Error {
     #[error("must have more than 1 element when extending")]
     MustHaveMoreThanOneElement,
 
-    #[error("Invalid")]
-    Invalid, // TODO: This error kind sucks
+    #[error("Invalid: {}", .0)]
+    Invalid(&'static str),
 
     #[error("Single item too large")]
     ItemTooLarge,
