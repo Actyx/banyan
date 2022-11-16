@@ -27,7 +27,7 @@ pub enum Error {
     #[error("Multiple strong references")]
     MultipleStrongRef,
 
-    #[error("seek offset wraparound")]
+    #[error("cypher stream seek offset wraparound")]
     SeekOffsetWraparound,
 
     #[error("expected ipld bytes")]
