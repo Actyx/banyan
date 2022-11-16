@@ -64,7 +64,7 @@ impl FromStr for Storage {
             x => Self::Sqlite(SqliteStore::new(BlockStore::open(
                 x,
                 ipfs_sqlite_block_store::Config::default(),
-            )?)?),
+            )?)),
         };
         Ok(s)
     }

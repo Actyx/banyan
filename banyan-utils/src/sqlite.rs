@@ -12,8 +12,8 @@ use crate::tags::Sha256Digest;
 pub struct SqliteStore<S: StoreParams>(Arc<Mutex<BlockStore<S>>>);
 
 impl<S: StoreParams> SqliteStore<S> {
-    pub fn new(store: BlockStore<S>) -> anyhow::Result<Self> {
-        Ok(SqliteStore(Arc::new(Mutex::new(store))))
+    pub fn new(store: BlockStore<S>) -> Self {
+        Self(Arc::new(Mutex::new(store)))
     }
 }
 
