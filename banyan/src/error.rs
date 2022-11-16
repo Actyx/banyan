@@ -16,7 +16,7 @@ pub enum Error {
     ItemTooLarge,
 
     #[error("Found purged data")]
-    FoundPurgedData,
+    PurgedDataFound,
 
     #[error("Max size exceeded")]
     MaxSizeExceeded,

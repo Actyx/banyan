@@ -540,7 +540,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>, W: BlockWriter<T::Link>> Transacti
             .collect_from(&initial, tree.count())?
             .into_iter()
             .collect::<Option<Vec<_>>>()
-            .ok_or_else(|| Error::FoundPurgedData)?;
+            .ok_or(Error::PurgedDataFound)?;
         self.extend(tree, remainder)?;
         Ok(())
     }
