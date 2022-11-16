@@ -135,8 +135,8 @@ pub fn block_put(data: &[u8], codec: u64, pin: bool) -> Result<Cid> {
 pub struct IpfsStore;
 
 impl IpfsStore {
-    pub fn new() -> anyhow::Result<Self> {
-        Ok(Self)
+    pub fn new() -> Self {
+        Self
     }
 }
 
