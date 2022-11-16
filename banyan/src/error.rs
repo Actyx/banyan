@@ -3,8 +3,8 @@ pub enum Error {
     #[error("Tree must not be empty")]
     TreeMustNotBeEmpty,
 
-    #[error("Index out of bounds: {}", .0)]
-    IndexOutOfBounds(u64),
+    #[error("Index out of bounds: {}, length: {}", .tried, .length)]
+    IndexOutOfBounds { length: usize, tried: u64 },
 
     #[error("must have more than 1 element when extending")]
     MustHaveMoreThanOneElement,

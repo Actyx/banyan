@@ -501,6 +501,7 @@ where
         match self.node_info(stream, index) {
             NodeInfo::Branch(_, info) => {
                 let node = info.load_cached()?;
+                let initial_offset = offset;
                 for child in node.children.iter() {
                     if offset < child.count() {
                         return self.get0(stream, child, offset);
@@ -508,7 +509,10 @@ where
                         offset -= child.count();
                     }
                 }
-                Err(Error::IndexOutOfBounds(offset))
+                Err(Error::IndexOutOfBounds {
+                    length: node.children.len(),
+                    tried: initial_offset,
+                })
             }
             NodeInfo::Leaf(index, leaf) => {
                 let k = index.keys.get(offset as usize).unwrap();

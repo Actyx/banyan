@@ -311,7 +311,10 @@ impl Leaf {
     pub fn child_at<T: ReadCbor>(&self, offset: u64) -> Result<T, Error> {
         self.as_ref()
             .get(offset)?
-            .ok_or_else(|| Error::IndexOutOfBounds(offset))
+            .ok_or_else(|| Error::IndexOutOfBounds {
+                length: self.as_ref().len(),
+                tried: offset,
+            })
     }
 }
 

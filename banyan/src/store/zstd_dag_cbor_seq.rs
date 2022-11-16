@@ -347,6 +347,10 @@ impl ZstdDagCborSeq {
         data
     }
 
+    pub(crate) fn len(&self) -> usize {
+        self.data.len()
+    }
+
     /// Decompress and decode a single item
     pub fn get<T: ReadCbor>(&self, index: u64) -> Result<Option<T>, Error> {
         let (_, data) = decompress_and_transform(self.compressed(), &mut |uncompressed| {
