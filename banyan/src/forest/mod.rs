@@ -244,23 +244,23 @@ impl Config {
     }
 
     pub fn validate(&self) -> Result<(), Error> {
-        if !self.max_summary_branches > 1 {
+        if self.max_summary_branches <= 1 {
             return Err(Error::Invalid("need at least 2 for max_summary_branches"));
         }
-        if !self.max_key_branches > 0 {
+        if self.max_key_branches <= 0 {
             return Err(Error::Invalid("need at least 2 for max_key_branches"));
         }
-        if !self.target_leaf_size > 0 && self.target_leaf_size <= 1024 * 1024 {
+        if self.target_leaf_size == 0 || self.target_leaf_size > 1024 * 1024 {
             return Err(Error::Invalid(
                 "need at least one for target_leaf_size, but not more than 1048576",
             ));
         }
-        if !self.max_uncompressed_leaf_size <= 16 * 1024 * 1024 {
+        if self.max_uncompressed_leaf_size > 16 * 1024 * 1024 {
             return Err(Error::Invalid(
                 "Cannot have more than 16777216 for max_uncompressed_leaf_size",
             ));
         }
-        if !self.zstd_level >= 1 && self.zstd_level <= 22 {
+        if self.zstd_level < 1 || self.zstd_level > 22 {
             return Err(Error::Invalid(
                 "need at least 1 for zstd_level, but not more than 22",
             ));
