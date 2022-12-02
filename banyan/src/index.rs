@@ -507,7 +507,7 @@ impl CompactSeq for UnitSeq {
         }
     }
     fn len(&self) -> usize {
-        self.0 as usize
+        self.0
     }
 }
 
