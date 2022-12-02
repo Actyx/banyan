@@ -269,7 +269,7 @@ impl ZstdDagCborSeq {
             }
             let bytes = DagCborCodec.encode(value)?;
             // if a single item is too big, bail out
-            if !(bytes.len() <= uncompressed_size) {
+            if bytes.len() > uncompressed_size {
                 return Err(Error::ItemTooLarge);
             }
             // check that we don't exceed the uncompressed_size goal before adding
