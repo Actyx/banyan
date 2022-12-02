@@ -247,7 +247,7 @@ impl Config {
         if self.max_summary_branches <= 1 {
             return Err(Error::Invalid("need at least 2 for max_summary_branches"));
         }
-        if self.max_key_branches <= 0 {
+        if self.max_key_branches < 2 {
             return Err(Error::Invalid("need at least 2 for max_key_branches"));
         }
         if self.target_leaf_size == 0 || self.target_leaf_size > 1024 * 1024 {
