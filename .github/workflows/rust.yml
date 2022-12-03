@@ -16,9 +16,13 @@ jobs:
 
     steps:
     - uses: actions/checkout@v2
-    - name: fmt 
+    - uses: dtolnay/rust-toolchain@master
+      with:
+        toolchain: 1.65.0
+        components: "clippy, rustfmt"
+    - name: fmt
       run: cargo fmt --all -- --check
-    - name: clippy 
+    - name: clippy
       run: cargo --locked clippy --all-targets -- -D warnings
     - name: Build
       run: cargo build --locked --verbose
