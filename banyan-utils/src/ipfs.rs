@@ -131,14 +131,8 @@ pub fn block_put(data: &[u8], codec: u64, pin: bool) -> Result<Cid> {
     Ok(cid)
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct IpfsStore;
-
-impl IpfsStore {
-    pub fn new() -> Self {
-        Self
-    }
-}
 
 impl ReadOnlyStore<Sha256Digest> for IpfsStore {
     fn get(&self, link: &Sha256Digest) -> Result<Box<[u8]>> {
