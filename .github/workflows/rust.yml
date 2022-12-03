@@ -20,6 +20,7 @@ jobs:
       with:
         toolchain: 1.65.0
         components: "clippy, rustfmt"
+    - uses: swatinem/rust-cache@v1
     - name: fmt
       run: cargo fmt --all -- --check
     - name: clippy
