@@ -11,21 +11,54 @@ env:
 
 jobs:
   build:
-
+    name: Build
     runs-on: ubuntu-latest
-
     steps:
     - uses: actions/checkout@v2
     - uses: dtolnay/rust-toolchain@master
       with:
         toolchain: 1.65.0
-        components: "clippy, rustfmt"
+    - uses: swatinem/rust-cache@v1
+    - name: Build
+      run: cargo build --locked --verbose
+
+  format:
+    needs: [build]
+    name: format
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - uses: dtolnay/rust-toolchain@master
+      with:
+        toolchain: 1.65.0
+        components: "rustfmt"
     - uses: swatinem/rust-cache@v1
     - name: fmt
       run: cargo fmt --all -- --check
+
+  clippy:
+    needs: [build]
+    name: clippy
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - uses: dtolnay/rust-toolchain@master
+      with:
+        toolchain: 1.65.0
+        components: "clippy"
+    - uses: swatinem/rust-cache@v1
     - name: clippy
       run: cargo --locked clippy --all-targets -- -D warnings
-    - name: Build
-      run: cargo build --locked --verbose
+
+  test:
+    needs: [build]
+    name: test
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - uses: dtolnay/rust-toolchain@master
+      with:
+        toolchain: 1.65.0
+    - uses: swatinem/rust-cache@v1
     - name: Run tests
       run: cargo test --all-features --locked --verbose
