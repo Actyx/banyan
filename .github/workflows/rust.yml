@@ -15,9 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v3
-    - uses: dtolnay/rust-toolchain@master
-      with:
-        toolchain: 1.65.0
+    - uses: dtolnay/rust-toolchain@1.65.0
     - uses: swatinem/rust-cache@v2
     - name: Build
       run: cargo build --locked --verbose
@@ -28,9 +26,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v3
-    - uses: dtolnay/rust-toolchain@master
+    - uses: dtolnay/rust-toolchain@1.65.0
       with:
-        toolchain: 1.65.0
         components: "rustfmt"
     - uses: swatinem/rust-cache@v2
     - name: fmt
@@ -42,9 +39,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v3
-    - uses: dtolnay/rust-toolchain@master
+    - uses: dtolnay/rust-toolchain@1.65.0
       with:
-        toolchain: 1.65.0
         components: "clippy"
     - uses: swatinem/rust-cache@v2
     - name: clippy
@@ -56,9 +52,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v3
-    - uses: dtolnay/rust-toolchain@master
-      with:
-        toolchain: 1.65.0
+    - uses: dtolnay/rust-toolchain@1.65.0
     - uses: swatinem/rust-cache@v2
     - name: Run tests
       run: cargo test --all-features --locked --verbose
