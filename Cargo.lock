@@ -143,6 +143,7 @@ dependencies = [
  "serde_json",
  "smol_str",
  "structopt",
+ "thiserror",
  "tokio",
  "tracing",
  "tracing-subscriber",

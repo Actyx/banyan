@@ -37,7 +37,9 @@ enum Storage {
     Sqlite(SqliteStore<DefaultParams>),
 }
 impl ReadOnlyStore<Sha256Digest> for Storage {
-    fn get(&self, link: &Sha256Digest) -> Result<Box<[u8]>> {
+    type Error = Error;
+
+    fn get(&self, link: &Sha256Digest) -> Result<Box<[u8]>, Self::Error> {
         match self {
             Self::Memory(m) => m.get(link),
             Storage::Ipfs(i) => i.get(link),
@@ -47,7 +49,9 @@ impl ReadOnlyStore<Sha256Digest> for Storage {
 }
 
 impl BlockWriter<Sha256Digest> for Storage {
-    fn put(&mut self, data: Vec<u8>) -> Result<Sha256Digest> {
+    type Error = Error;
+
+    fn put(&mut self, data: Vec<u8>) -> Result<Sha256Digest, Self::Error> {
         match self {
             Self::Memory(m) => m.put(data),
             Storage::Ipfs(i) => i.put(data),

@@ -1,5 +1,6 @@
 #![allow(clippy::upper_case_acronyms)]
 pub mod dump;
+pub mod error;
 pub mod ipfs;
 pub mod sqlite;
 pub mod tag_index;

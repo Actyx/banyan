@@ -38,6 +38,8 @@ impl<S> OpsCountingStore<S> {
 }
 
 impl<L, S: ReadOnlyStore<L>> ReadOnlyStore<L> for OpsCountingStore<S> {
+    type Error = anyhow::Error;
+
     fn get(&self, link: &L) -> anyhow::Result<Box<[u8]>> {
         self.reads.fetch_add(1, Ordering::SeqCst);
         self.inner.get(link)
@@ -45,6 +47,8 @@ impl<L, S: ReadOnlyStore<L>> ReadOnlyStore<L> for OpsCountingStore<S> {
 }
 
 impl<L, S: BlockWriter<L> + Send + Sync> BlockWriter<L> for OpsCountingStore<S> {
+    type Error = anyhow::Error;
+
     fn put(&mut self, data: Vec<u8>) -> anyhow::Result<L> {
         self.writes.fetch_add(1, Ordering::SeqCst);
         self.inner.put(data)

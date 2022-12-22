@@ -56,7 +56,7 @@ impl<F, X> ChunkVisitor<F, X> {
 impl<T, R, F, V, E> TreeVisitor<T, R> for ChunkVisitor<F, (V, E)>
 where
     T: TreeTypes,
-    R: ReadOnlyStore<T::Link>,
+    R: ReadOnlyStore<T::Link, Error = Error>,
     V: BanyanValue,
     F: Fn(&NodeInfo<T, R>) -> E + Send + Sync + 'static,
 {
@@ -350,7 +350,7 @@ where
 impl<T, R> Forest<T, R>
 where
     T: TreeTypes,
-    R: ReadOnlyStore<T::Link>,
+    R: ReadOnlyStore<T::Link, Error = Error>,
 {
     pub fn store(&self) -> &R {
         &self.0.store
@@ -438,7 +438,7 @@ where
         if let Ok(x) = &res {
             prom::BLOCK_GET_SIZE_HIST.observe(x.len() as f64);
         }
-        res
+        res.map_err(Error::from)
     }
 
     /// load a branch given a branch index

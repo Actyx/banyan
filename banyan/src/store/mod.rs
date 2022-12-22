@@ -6,7 +6,6 @@ mod mem_store;
 mod thread_local_zstd;
 mod zstd_dag_cbor_seq;
 
-use crate::error::Error;
 pub use branch_cache::BranchCache;
 pub use mem_cache::{MemCache, MemWriter};
 pub use mem_store::MemStore;
@@ -21,12 +20,16 @@ pub trait BanyanValue: ReadCbor + WriteCbor + Send + 'static {}
 impl<T: ReadCbor + WriteCbor + Send + Sync + 'static> BanyanValue for T {}
 
 pub trait BlockWriter<L>: Send + Sync + 'static {
+    type Error;
+
     /// adds a block to a temporary staging area
     ///
     /// We might have to do this async at some point, but let's keep it sync for now.
-    fn put(&mut self, data: Vec<u8>) -> Result<L, Error>;
+    fn put(&mut self, data: Vec<u8>) -> Result<L, Self::Error>;
 }
 
 pub trait ReadOnlyStore<L>: Clone + Send + Sync + 'static {
-    fn get(&self, link: &L) -> Result<Box<[u8]>, Error>;
+    type Error;
+
+    fn get(&self, link: &L) -> Result<Box<[u8]>, Self::Error>;
 }
