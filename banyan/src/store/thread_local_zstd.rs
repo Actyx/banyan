@@ -73,7 +73,7 @@ mod tests {
 
     /// basic test to ensure that the decompress works and properly clears the thread local buffer
     #[quickcheck]
-    fn thread_local_compression_decompression(data: Vec<u8>) -> anyhow::Result<bool> {
+    fn thread_local_compression_decompression(data: Vec<u8>) -> Result<bool, Error> {
         let cursor = Cursor::new(&data);
         let compressed = zstd::encode_all(cursor, 0)?;
         let (size, decompressed) = decompress_and_transform(&compressed, &mut |x| x.to_vec())?;

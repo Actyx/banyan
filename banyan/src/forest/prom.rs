@@ -1,3 +1,4 @@
+use crate::error::Error;
 use lazy_static::lazy_static;
 use prometheus::{exponential_buckets, Histogram, HistogramOpts, Registry};
 
@@ -52,7 +53,7 @@ lazy_static! {
     .unwrap();
 }
 
-pub(crate) fn register_metrics(registry: &Registry) -> anyhow::Result<()> {
+pub(crate) fn register_metrics(registry: &Registry) -> Result<(), Error> {
     registry.register(Box::new(LEAF_LOAD_HIST.clone()))?;
     registry.register(Box::new(BRANCH_LOAD_HIST.clone()))?;
     registry.register(Box::new(LEAF_STORE_HIST.clone()))?;

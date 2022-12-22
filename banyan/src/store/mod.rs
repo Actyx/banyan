@@ -20,12 +20,16 @@ pub trait BanyanValue: ReadCbor + WriteCbor + Send + 'static {}
 impl<T: ReadCbor + WriteCbor + Send + Sync + 'static> BanyanValue for T {}
 
 pub trait BlockWriter<L>: Send + Sync + 'static {
+    type Error;
+
     /// adds a block to a temporary staging area
     ///
     /// We might have to do this async at some point, but let's keep it sync for now.
-    fn put(&mut self, data: Vec<u8>) -> anyhow::Result<L>;
+    fn put(&mut self, data: Vec<u8>) -> Result<L, Self::Error>;
 }
 
 pub trait ReadOnlyStore<L>: Clone + Send + Sync + 'static {
-    fn get(&self, link: &L) -> anyhow::Result<Box<[u8]>>;
+    type Error;
+
+    fn get(&self, link: &L) -> Result<Box<[u8]>, Self::Error>;
 }

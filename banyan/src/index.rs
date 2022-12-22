@@ -39,11 +39,11 @@
 //! [Semigroup]: trait.Semigroup.html
 //! [SimpleCompactSeq]: struct.SimpleCompactSeq.html
 use crate::{
+    error::Error,
     forest::TreeTypes,
     store::{ReadOnlyStore, ZstdDagCborSeq},
     CipherOffset, Forest, Secrets,
 };
-use anyhow::{anyhow, Result};
 use cbor_data::codec::ReadCbor;
 use libipld::{
     cbor::{DagCbor, DagCborCodec},
@@ -308,10 +308,13 @@ impl Leaf {
         Self { items, byte_range }
     }
 
-    pub fn child_at<T: ReadCbor>(&self, offset: u64) -> Result<T> {
+    pub fn child_at<T: ReadCbor>(&self, offset: u64) -> Result<T, Error> {
         self.as_ref()
             .get(offset)?
-            .ok_or_else(|| anyhow!("index out of bounds {}", offset))
+            .ok_or_else(|| Error::IndexOutOfBounds {
+                length: self.as_ref().len(),
+                tried: offset,
+            })
     }
 }
 
@@ -337,12 +340,12 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> BranchLoader<T, R> {
         }
     }
 
-    pub fn load_cached(&self) -> anyhow::Result<Branch<T>> {
+    pub fn load_cached(&self) -> Result<Branch<T>, Error> {
         self.forest
             .load_branch_cached_from_link(&self.secrets, &self.link)
     }
 
-    pub fn load(&self) -> anyhow::Result<Branch<T>> {
+    pub fn load(&self) -> Result<Branch<T>, Error> {
         self.forest.load_branch_from_link(&self.secrets, &self.link)
     }
 }
@@ -363,7 +366,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> LeafLoader<T, R> {
         }
     }
 
-    pub fn load(&self) -> anyhow::Result<Leaf> {
+    pub fn load(&self) -> Result<Leaf, Error> {
         self.forest.load_leaf_from_link(&self.secrets, &self.link)
     }
 }
@@ -434,7 +437,7 @@ pub(crate) fn serialize_compressed<T: TreeTypes>(
     state: &mut CipherOffset,
     items: &[Index<T>],
     level: i32,
-) -> Result<Vec<u8>> {
+) -> Result<Vec<u8>, Error> {
     let zs = ZstdDagCborSeq::from_iter_ipld(items, level)?;
     zs.into_encrypted(key, nonce, state)
 }
@@ -443,7 +446,7 @@ pub(crate) fn deserialize_compressed<T: TreeTypes>(
     key: &chacha20::Key,
     nonce: &chacha20::XNonce,
     ipld: &[u8],
-) -> Result<(Vec<Index<T>>, Range<u64>)> {
+) -> Result<(Vec<Index<T>>, Range<u64>), Error> {
     let (seq, byte_range) = ZstdDagCborSeq::decrypt(ipld, key, nonce)?;
     let seq = seq.items_ipld::<Index<T>>()?;
     Ok((seq, byte_range))
@@ -475,13 +478,20 @@ impl<T: CompactSeq> Summarizable<()> for T {
 pub struct UnitSeq(usize);
 
 impl Encode<DagCborCodec> for UnitSeq {
-    fn encode<W: io::Write>(&self, c: DagCborCodec, w: &mut W) -> anyhow::Result<()> {
+    fn encode<W: io::Write>(
+        &self,
+        c: DagCborCodec,
+        w: &mut W,
+    ) -> Result<(), libipld::error::Error> {
         (self.0 as u64).encode(c, w)
     }
 }
 
 impl Decode<DagCborCodec> for UnitSeq {
-    fn decode<R: io::Read + io::Seek>(c: DagCborCodec, r: &mut R) -> anyhow::Result<Self> {
+    fn decode<R: io::Read + io::Seek>(
+        c: DagCborCodec,
+        r: &mut R,
+    ) -> Result<Self, libipld::error::Error> {
         let t = u64::decode(c, r)?;
         Ok(Self(usize::try_from(t)?))
     }
@@ -497,7 +507,7 @@ impl CompactSeq for UnitSeq {
         }
     }
     fn len(&self) -> usize {
-        self.0 as usize
+        self.0
     }
 }
 

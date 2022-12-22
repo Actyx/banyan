@@ -1,6 +1,7 @@
 //! creation and traversal of banyan trees
 use super::index::*;
 use crate::{
+    error::Error,
     forest::{
         ChunkVisitor, Config, FilteredChunk, Forest, IndexIter, Secrets, Transaction, TreeIter,
         TreeTypes,
@@ -8,7 +9,6 @@ use crate::{
     store::{BanyanValue, BlockWriter},
 };
 use crate::{query::Query, store::ReadOnlyStore, util::IterExt, StreamBuilder, StreamBuilderState};
-use anyhow::Result;
 use core::fmt;
 use futures::prelude::*;
 use std::{collections::BTreeMap, iter, marker::PhantomData, usize};
@@ -104,13 +104,13 @@ impl<T: TreeTypes, V> fmt::Display for Tree<T, V> {
 pub type GraphEdges = Vec<(usize, usize)>;
 pub type GraphNodes<S> = BTreeMap<usize, S>;
 
-impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
+impl<T: TreeTypes, R: ReadOnlyStore<T::Link, Error = Error>> Forest<T, R> {
     pub fn load_stream_builder<V>(
         &self,
         secrets: Secrets,
         config: Config,
         link: T::Link,
-    ) -> Result<StreamBuilder<T, V>> {
+    ) -> Result<StreamBuilder<T, V>, Error> {
         let (index, byte_range) = self.create_index_from_link(
             &secrets,
             |items, level| config.branch_sealed(items, level),
@@ -120,7 +120,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
         Ok(StreamBuilder::new_from_index(Some(index), state))
     }
 
-    pub fn load_tree<V>(&self, secrets: Secrets, link: T::Link) -> Result<Tree<T, V>> {
+    pub fn load_tree<V>(&self, secrets: Secrets, link: T::Link) -> Result<Tree<T, V>, Error> {
         // we pass in a predicate that makes the nodes sealed, since we don't care
         let (index, byte_range) = self.create_index_from_link(&secrets, |_, _| true, link)?;
         // store the offset with the snapshot. Snapshots are immutable, so this won't change.
@@ -128,7 +128,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
     }
 
     /// dumps the tree structure
-    pub fn dump<V>(&self, tree: &Tree<T, V>) -> Result<()> {
+    pub fn dump<V>(&self, tree: &Tree<T, V>) -> Result<(), Error> {
         match &tree.0 {
             Some((index, secrets, _)) => self.dump0(secrets, index, ""),
             None => Ok(()),
@@ -140,10 +140,10 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
         &self,
         tree: &Tree<T, V>,
         f: impl Fn((usize, &NodeInfo<T, R>)) -> S + Clone,
-    ) -> Result<(GraphEdges, GraphNodes<S>)> {
+    ) -> Result<(GraphEdges, GraphNodes<S>), Error> {
         match &tree.0 {
             Some((index, secrets, _)) => self.dump_graph0(secrets, None, 0, index, f),
-            None => anyhow::bail!("Tree must not be empty"),
+            None => Err(Error::TreeMustNotBeEmpty),
         }
     }
 
@@ -158,7 +158,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
         query: Q,
         index: Index<T>,
         mk_extra: &'static F,
-    ) -> impl Iterator<Item = Result<FilteredChunk<(u64, T::Key, V), E>>> {
+    ) -> impl Iterator<Item = Result<FilteredChunk<(u64, T::Key, V), E>, Error>> {
         TreeIter::new(
             self.clone(),
             secrets,
@@ -179,7 +179,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
         query: Q,
         index: Index<T>,
         mk_extra: &'static F,
-    ) -> impl Iterator<Item = Result<FilteredChunk<(u64, T::Key, V), E>>> {
+    ) -> impl Iterator<Item = Result<FilteredChunk<(u64, T::Key, V), E>, Error>> {
         TreeIter::new_rev(
             self.clone(),
             secrets,
@@ -194,7 +194,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
         secrets: Secrets,
         query: Q,
         index: Index<T>,
-    ) -> impl Iterator<Item = Result<Index<T>>> {
+    ) -> impl Iterator<Item = Result<Index<T>, Error>> {
         IndexIter::new(self.clone(), secrets, query, index)
     }
 
@@ -203,7 +203,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
         secrets: Secrets,
         query: Q,
         index: Index<T>,
-    ) -> impl Iterator<Item = Result<Index<T>>> {
+    ) -> impl Iterator<Item = Result<Index<T>, Error>> {
         IndexIter::new_rev(self.clone(), secrets, query, index)
     }
 
@@ -214,7 +214,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
         next_id: usize,
         index: &Index<T>,
         f: impl Fn((usize, &NodeInfo<T, R>)) -> S + Clone,
-    ) -> Result<(GraphEdges, GraphNodes<S>)> {
+    ) -> Result<(GraphEdges, GraphNodes<S>), Error> {
         let mut edges = vec![];
         let mut nodes: BTreeMap<usize, S> = Default::default();
 
@@ -239,7 +239,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
     }
 
     /// sealed roots of the tree
-    pub fn roots<V>(&self, tree: &StreamBuilder<T, V>) -> Result<Vec<Index<T>>> {
+    pub fn roots<V>(&self, tree: &StreamBuilder<T, V>) -> Result<Vec<Index<T>>, Error> {
         match tree.index() {
             Some(index) => self.roots_impl(tree.state().secrets(), index),
             None => Ok(Vec::new()),
@@ -247,7 +247,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
     }
 
     /// leftmost branches of the tree as separate trees
-    pub fn left_roots<V>(&self, tree: &Tree<T, V>) -> Result<Vec<Tree<T, V>>> {
+    pub fn left_roots<V>(&self, tree: &Tree<T, V>) -> Result<Vec<Tree<T, V>>, Error> {
         Ok(if let Some((index, secrets, _)) = &tree.0 {
             self.left_roots0(secrets, index)?
                 .into_iter()
@@ -259,7 +259,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
     }
 
     /// leftmost branches of the tree as separate trees
-    fn left_roots0(&self, secrets: &Secrets, index: &Index<T>) -> Result<Vec<Index<T>>> {
+    fn left_roots0(&self, secrets: &Secrets, index: &Index<T>) -> Result<Vec<Index<T>>, Error> {
         let mut result = if let Index::Branch(branch) = index {
             if let Some(link) = branch.link {
                 let branch = self.load_branch_cached_from_link(secrets, &link)?;
@@ -274,7 +274,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
         Ok(result)
     }
 
-    pub fn check_invariants<V>(&self, tree: &StreamBuilder<T, V>) -> Result<Vec<String>> {
+    pub fn check_invariants<V>(&self, tree: &StreamBuilder<T, V>) -> Result<Vec<String>, Error> {
         let mut msgs = Vec::new();
         if let Some(root) = tree.index() {
             let mut level = i32::max_value();
@@ -289,7 +289,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
         Ok(msgs)
     }
 
-    pub fn is_packed<V>(&self, tree: &Tree<T, V>) -> Result<bool> {
+    pub fn is_packed<V>(&self, tree: &Tree<T, V>) -> Result<bool, Error> {
         if let Some((root, secrets, _)) = &tree.0 {
             self.is_packed0(secrets, root)
         } else {
@@ -297,7 +297,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
         }
     }
 
-    pub fn assert_invariants<V>(&self, tree: &StreamBuilder<T, V>) -> Result<()> {
+    pub fn assert_invariants<V>(&self, tree: &StreamBuilder<T, V>) -> Result<(), Error> {
         let msgs = self.check_invariants(tree)?;
         if !msgs.is_empty() {
             let invariants = msgs.join(",");
@@ -313,7 +313,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
         &self,
         tree: &Tree<T, V>,
         query: impl Query<T> + Clone + 'static,
-    ) -> impl Stream<Item = Result<(u64, T::Key, V)>> + 'static {
+    ) -> impl Stream<Item = Result<(u64, T::Key, V), Error>> + 'static {
         match &tree.0 {
             Some((index, secrets, _)) => self
                 .stream_filtered0(secrets.clone(), query, index.clone())
@@ -328,7 +328,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
         &self,
         tree: &Tree<T, V>,
         query: impl Query<T> + Clone + 'static,
-    ) -> impl Iterator<Item = Result<Index<T>>> + 'static {
+    ) -> impl Iterator<Item = Result<Index<T>, Error>> + 'static {
         match &tree.0 {
             Some((index, secrets, _)) => self
                 .index_iter0(secrets.clone(), query, index.clone())
@@ -343,7 +343,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
         &self,
         tree: &Tree<T, V>,
         query: impl Query<T> + Clone + 'static,
-    ) -> impl Iterator<Item = Result<Index<T>>> + 'static {
+    ) -> impl Iterator<Item = Result<Index<T>, Error>> + 'static {
         match &tree.0 {
             Some((index, secrets, _)) => self
                 .index_iter_rev0(secrets.clone(), query, index.clone())
@@ -356,7 +356,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
         &self,
         tree: &Tree<T, V>,
         query: impl Query<T> + Clone + 'static,
-    ) -> impl Iterator<Item = Result<(u64, T::Key, V)>> + 'static {
+    ) -> impl Iterator<Item = Result<(u64, T::Key, V), Error>> + 'static {
         match &tree.0 {
             Some((index, secrets, _)) => self
                 .iter_filtered0(secrets.clone(), query, index.clone())
@@ -369,7 +369,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
         &self,
         tree: &Tree<T, V>,
         query: impl Query<T> + Clone + 'static,
-    ) -> impl Iterator<Item = Result<(u64, T::Key, V)>> + 'static {
+    ) -> impl Iterator<Item = Result<(u64, T::Key, V), Error>> + 'static {
         match &tree.0 {
             Some((index, secrets, _)) => self
                 .iter_filtered_reverse0(secrets.clone(), query, index.clone())
@@ -381,7 +381,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
     pub fn iter_from<V: BanyanValue>(
         &self,
         tree: &Tree<T, V>,
-    ) -> impl Iterator<Item = Result<(u64, T::Key, V)>> + 'static {
+    ) -> impl Iterator<Item = Result<(u64, T::Key, V), Error>> + 'static {
         match &tree.0 {
             Some((index, secrets, _)) => self
                 .iter_filtered0(secrets.clone(), crate::query::AllQuery, index.clone())
@@ -395,7 +395,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
         tree: &Tree<T, V>,
         query: Q,
         mk_extra: &'static F,
-    ) -> impl Iterator<Item = Result<FilteredChunk<(u64, T::Key, V), E>>> + 'static
+    ) -> impl Iterator<Item = Result<FilteredChunk<(u64, T::Key, V), E>, Error>> + 'static
     where
         Q: Query<T>,
         V: BanyanValue,
@@ -415,7 +415,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
         tree: &Tree<T, V>,
         query: Q,
         mk_extra: &'static F,
-    ) -> impl Iterator<Item = Result<FilteredChunk<(u64, T::Key, V), E>>> + 'static
+    ) -> impl Iterator<Item = Result<FilteredChunk<(u64, T::Key, V), E>, Error>> + 'static
     where
         Q: Query<T>,
         V: BanyanValue,
@@ -435,7 +435,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
         tree: &Tree<T, V>,
         query: Q,
         mk_extra: &'static F,
-    ) -> impl Stream<Item = Result<FilteredChunk<(u64, T::Key, V), E>>> + 'static
+    ) -> impl Stream<Item = Result<FilteredChunk<(u64, T::Key, V), E>, Error>> + 'static
     where
         Q: Query<T>,
         V: BanyanValue,
@@ -455,7 +455,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
         tree: &Tree<T, V>,
         query: Q,
         mk_extra: &'static F,
-    ) -> impl Stream<Item = Result<FilteredChunk<(u64, T::Key, V), E>>> + 'static
+    ) -> impl Stream<Item = Result<FilteredChunk<(u64, T::Key, V), E>, Error>> + 'static
     where
         Q: Query<T>,
         V: BanyanValue,
@@ -479,7 +479,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
         &self,
         tree: &Tree<T, V>,
         offset: u64,
-    ) -> Result<Option<(T::Key, V)>> {
+    ) -> Result<Option<(T::Key, V)>, Error> {
         Ok(match &tree.0 {
             Some((index, secrets, _)) => self.get0(secrets, index, offset)?,
             None => None,
@@ -488,7 +488,10 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
 
     /// Collects all elements from a stream. Might produce an OOM for large streams.
     #[allow(clippy::type_complexity)]
-    pub fn collect<V: BanyanValue>(&self, tree: &Tree<T, V>) -> Result<Vec<Option<(T::Key, V)>>> {
+    pub fn collect<V: BanyanValue>(
+        &self,
+        tree: &Tree<T, V>,
+    ) -> Result<Vec<Option<(T::Key, V)>>, Error> {
         self.collect_from(tree, 0)
     }
 
@@ -498,7 +501,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
         &self,
         tree: &Tree<T, V>,
         offset: u64,
-    ) -> Result<Vec<Option<(T::Key, V)>>> {
+    ) -> Result<Vec<Option<(T::Key, V)>>, Error> {
         let mut res = Vec::new();
         if let Some((index, secrets, _)) = &tree.0 {
             self.collect0(secrets, index, offset, &mut res)?;
@@ -507,12 +510,12 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>> Forest<T, R> {
     }
 }
 
-impl<T: TreeTypes, R: ReadOnlyStore<T::Link>, W: BlockWriter<T::Link>> Transaction<T, R, W> {
+impl<T: TreeTypes, R: ReadOnlyStore<T::Link, Error = Error>, W: BlockWriter<T::Link>> Transaction<T, R, W> {
     pub(crate) fn tree_from_roots<V>(
         &mut self,
         mut roots: Vec<Index<T>>,
         stream: &mut StreamBuilder<T, V>,
-    ) -> Result<()> {
+    ) -> Result<(), Error> {
         assert!(roots.iter().all(|x| x.sealed()));
         assert!(is_sorted(roots.iter().map(|x| x.level()).rev()));
         while roots.len() > 1 {
@@ -529,7 +532,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>, W: BlockWriter<T::Link>> Transacti
     /// Likewise, sealed subtrees or leafs will be reused if possible.
     ///
     /// ![packing illustration](https://ipfs.io/ipfs/QmaEDTjHSdCKyGQ3cFMCf73kE67NvffLA5agquLW5qSEVn/packing.jpg)
-    pub fn pack<V: BanyanValue>(&mut self, tree: &mut StreamBuilder<T, V>) -> Result<()> {
+    pub fn pack<V: BanyanValue>(&mut self, tree: &mut StreamBuilder<T, V>) -> Result<(), Error> {
         let initial = tree.snapshot();
         let roots = self.roots(tree)?;
         self.tree_from_roots(roots, tree)?;
@@ -537,7 +540,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>, W: BlockWriter<T::Link>> Transacti
             .collect_from(&initial, tree.count())?
             .into_iter()
             .collect::<Option<Vec<_>>>()
-            .ok_or_else(|| anyhow::anyhow!("found purged data"))?;
+            .ok_or(Error::PurgedDataFound)?;
         self.extend(tree, remainder)?;
         Ok(())
     }
@@ -548,14 +551,14 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>, W: BlockWriter<T::Link>> Transacti
         tree: &mut StreamBuilder<T, V>,
         key: T::Key,
         value: V,
-    ) -> Result<()> {
+    ) -> Result<(), Error> {
         self.extend(tree, Some((key, value)))
     }
 
     /// extend the node with the given iterator of key/value pairs
     ///
     /// ![extend illustration](https://ipfs.io/ipfs/QmaEDTjHSdCKyGQ3cFMCf73kE67NvffLA5agquLW5qSEVn/extend.jpg)
-    pub fn extend<I, V>(&mut self, tree: &mut StreamBuilder<T, V>, from: I) -> Result<()>
+    pub fn extend<I, V>(&mut self, tree: &mut StreamBuilder<T, V>, from: I) -> Result<(), Error>
     where
         I: IntoIterator<Item = (T::Key, V)>,
         I::IntoIter: Send,
@@ -586,7 +589,11 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>, W: BlockWriter<T::Link>> Transacti
     /// To pack a tree, use the pack method.
     ///
     /// ![extend_unpacked illustration](https://ipfs.io/ipfs/QmaEDTjHSdCKyGQ3cFMCf73kE67NvffLA5agquLW5qSEVn/extend_unpacked.jpg)
-    pub fn extend_unpacked<I, V>(&mut self, tree: &mut StreamBuilder<T, V>, from: I) -> Result<()>
+    pub fn extend_unpacked<I, V>(
+        &mut self,
+        tree: &mut StreamBuilder<T, V>,
+        from: I,
+    ) -> Result<(), Error>
     where
         I: IntoIterator<Item = (T::Key, V)>,
         I::IntoIter: Send,
@@ -612,7 +619,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>, W: BlockWriter<T::Link>> Transacti
         &'a mut self,
         tree: &mut StreamBuilder<T, V>,
         query: &'a Q,
-    ) -> Result<()> {
+    ) -> Result<(), Error> {
         let index = tree.index().cloned();
         if let Some(index) = index {
             let mut level: i32 = i32::max_value();
@@ -629,7 +636,7 @@ impl<T: TreeTypes, R: ReadOnlyStore<T::Link>, W: BlockWriter<T::Link>> Transacti
     /// Note that this is an emergency measure to recover data if the tree is not completely
     /// available. It might result in a degenerate tree that can no longer be safely added to,
     /// especially if there are repaired blocks in the non-packed part.
-    pub fn repair<V>(&mut self, tree: &mut StreamBuilder<T, V>) -> Result<Vec<String>> {
+    pub fn repair<V>(&mut self, tree: &mut StreamBuilder<T, V>) -> Result<Vec<String>, Error> {
         let mut report = Vec::new();
         let index = tree.index().cloned();
         if let Some(index) = index {

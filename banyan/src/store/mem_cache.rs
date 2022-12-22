@@ -1,3 +1,4 @@
+use crate::error::Error;
 use parking_lot::Mutex;
 use std::{convert::TryInto, hash::Hash, num::NonZeroUsize, sync::Arc, usize};
 use weight_cache::{Weighable, WeightCache};
@@ -68,7 +69,7 @@ impl<L: Eq + Hash + Copy, I: ReadOnlyStore<L>> MemCache<L, I> {
         }
     }
 
-    pub fn write<W>(&self, f: impl Fn(&I) -> anyhow::Result<W>) -> anyhow::Result<MemWriter<L, W>> {
+    pub fn write<W>(&self, f: impl Fn(&I) -> Result<W, Error>) -> Result<MemWriter<L, W>, Error> {
         Ok(MemWriter::new(f(&self.inner)?, self.cache.clone()))
     }
 
@@ -80,13 +81,16 @@ impl<L: Eq + Hash + Copy, I: ReadOnlyStore<L>> MemCache<L, I> {
     }
 }
 
-impl<L: Eq + Hash + Send + Sync + Copy + 'static, I: ReadOnlyStore<L> + Send + Sync + 'static>
-    ReadOnlyStore<L> for MemCache<L, I>
+impl<L, I> ReadOnlyStore<L> for MemCache<L, I>
+    where L: Eq + Hash + Send + Sync + Copy + 'static,
+          I: ReadOnlyStore<L, Error = Error> + Send + Sync + 'static
 {
-    fn get(&self, link: &L) -> anyhow::Result<Box<[u8]>> {
+    type Error = Error;
+
+    fn get(&self, link: &L) -> Result<Box<[u8]>, Self::Error> {
         match self.get0(link) {
             Some(data) => Ok(data),
-            None => self.inner.get(link),
+            None => self.inner.get(link).map_err(Error::from),
         }
     }
 }
@@ -106,10 +110,13 @@ impl<L, I> MemWriter<L, I> {
     }
 }
 
-impl<L: Eq + Hash + Send + Sync + Copy + 'static, I: BlockWriter<L> + Send + Sync + 'static>
-    BlockWriter<L> for MemWriter<L, I>
+impl<L, I> BlockWriter<L> for MemWriter<L, I>
+    where L: Eq + Hash + Send + Sync + Copy + 'static,
+          I: BlockWriter<L, Error = Error> + Send + Sync + 'static
 {
-    fn put(&mut self, data: Vec<u8>) -> anyhow::Result<L> {
+    type Error = Error;
+
+    fn put(&mut self, data: Vec<u8>) -> Result<L, Self::Error> {
         if let Some(cache) = self.cache.as_ref() {
             if data.len() <= cache.max_size.into() {
                 let copy: Box<[u8]> = data.as_slice().into();

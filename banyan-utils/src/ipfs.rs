@@ -1,5 +1,4 @@
 //! helper methods to work with ipfs/ipld
-use anyhow::{anyhow, Result};
 use banyan::store::{BlockWriter, ReadOnlyStore};
 use futures::prelude::*;
 use libipld::Cid;
@@ -7,8 +6,9 @@ use serde::{de::IgnoredAny, de::Visitor, Deserialize, Deserializer, Serialize, S
 use std::{convert::TryInto, fmt, str::FromStr};
 
 use crate::tags::Sha256Digest;
+use crate::error::Error;
 
-pub fn block_get(key: &Cid) -> Result<Box<[u8]>> {
+pub fn block_get(key: &Cid) -> Result<Box<[u8]>, Error> {
     let url = reqwest::Url::parse_with_params(
         "http://localhost:5001/api/v0/block/get",
         &[("arg", format!("{}", key))],
@@ -71,7 +71,7 @@ struct IpfsPubsubEventIo {
     _topic_ids: IgnoredAny,
 }
 
-pub fn pubsub_sub(topic: &str) -> Result<impl Stream<Item = reqwest::Result<Vec<u8>>>> {
+pub fn pubsub_sub(topic: &str) -> Result<impl Stream<Item = reqwest::Result<Vec<u8>>>, Error> {
     let url = reqwest::Url::parse_with_params(
         "http://localhost:5001/api/v0/pubsub/sub",
         &[("arg", topic)],
@@ -94,7 +94,7 @@ pub fn pubsub_sub(topic: &str) -> Result<impl Stream<Item = reqwest::Result<Vec<
     Ok(data)
 }
 
-pub async fn pubsub_pub(topic: &str, data: &[u8]) -> Result<()> {
+pub async fn pubsub_pub(topic: &str, data: &[u8]) -> Result<(), Error> {
     use percent_encoding::{percent_encode, NON_ALPHANUMERIC};
     let topic = percent_encode(topic.as_bytes(), NON_ALPHANUMERIC).to_string();
     let data = percent_encode(data, NON_ALPHANUMERIC).to_string();
@@ -107,16 +107,16 @@ pub async fn pubsub_pub(topic: &str, data: &[u8]) -> Result<()> {
     Ok(())
 }
 
-fn format_codec(codec: u64) -> Result<&'static str> {
+fn format_codec(codec: u64) -> Result<&'static str, Error> {
     match codec {
         0x71 => Ok("cbor"),
         0x70 => Ok("protobuf"),
         0x55 => Ok("raw"),
-        _ => Err(anyhow!("unsupported codec {}", codec)),
+        _ => Err(Error::UnsupportedCodec(codec)),
     }
 }
 
-pub fn block_put(data: &[u8], codec: u64, pin: bool) -> Result<Cid> {
+pub fn block_put(data: &[u8], codec: u64, pin: bool) -> Result<Cid, Error> {
     let url = reqwest::Url::parse_with_params(
         "http://localhost:5001/api/v0/block/put",
         &[("format", format_codec(codec)?), ("pin", &pin.to_string())],
@@ -135,19 +135,23 @@ pub fn block_put(data: &[u8], codec: u64, pin: bool) -> Result<Cid> {
 pub struct IpfsStore;
 
 impl ReadOnlyStore<Sha256Digest> for IpfsStore {
-    fn get(&self, link: &Sha256Digest) -> Result<Box<[u8]>> {
+    type Error = Error;
+
+    fn get(&self, link: &Sha256Digest) -> Result<Box<[u8]>, Error> {
         let cid: Cid = (*link).into();
         std::thread::spawn(move || crate::ipfs::block_get(&cid))
             .join()
-            .map_err(|_| anyhow!("join error!"))?
+            .map_err(|_| Error::JoinError)?
     }
 }
 
 impl BlockWriter<Sha256Digest> for IpfsStore {
-    fn put(&mut self, data: Vec<u8>) -> Result<Sha256Digest> {
+    type Error = Error;
+
+    fn put(&mut self, data: Vec<u8>) -> Result<Sha256Digest, Self::Error> {
         let cid = std::thread::spawn(move || crate::ipfs::block_put(&data, 0x71, false))
             .join()
-            .map_err(|_| anyhow!("join error!"))??;
+            .map_err(|_| Error::JoinError)??;
         assert!(cid.hash().code() == 0x12);
         assert!(cid.hash().digest().len() == 32);
         cid.try_into()
